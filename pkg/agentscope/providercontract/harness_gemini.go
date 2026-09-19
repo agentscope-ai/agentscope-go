@@ -87,5 +87,6 @@ func GeminiHarness() Harness {
 		ExpectStreamText:  "hello contract",
 		ExpectStreamUsage: &model.ChatUsage{InputTokens: 8, OutputTokens: 4},
 		MaxTokensKey:      "maxOutputTokens",
+		MaxTokensPath:     "generation_config.maxOutputTokens",
 	}
 }

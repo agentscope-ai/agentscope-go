@@ -8,6 +8,7 @@ package providercontract
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -51,12 +52,16 @@ type Harness struct {
 
 	// MaxTokensKey is the provider wire key for the output-token limit
 	// ("max_tokens", "max_completion_tokens", "maxOutputTokens"). When set,
-	// the wall asserts that model.WithMaxTokens reaches the server under
-	// exactly this key on both Chat and ChatStream, and that an omitted limit
-	// sends neither the key nor the Go field name (agentscope-go#8: the
-	// shared OpenAI-compatible struct serialized the field as "MaxTokens").
-	// Empty = check skipped.
+	// the wall decodes the captured request on both Chat and ChatStream and
+	// asserts that model.WithMaxTokens arrives as exactly that number at
+	// MaxTokensPath, and that an omitted limit sends neither the key nor the
+	// Go field name (agentscope-go#8: the shared OpenAI-compatible struct
+	// serialized the field as "MaxTokens"). Empty = check skipped.
 	MaxTokensKey string
+	// MaxTokensPath is the dot-separated JSON path of the limit in the request
+	// body ("generation_config.maxOutputTokens" for Gemini). Empty means the
+	// key sits at the top level.
+	MaxTokensPath string
 }
 
 func newServer(h *Harness, scn Scenario, captured *[]byte) *httptest.Server {
@@ -298,8 +303,26 @@ func Run(t *testing.T, h *Harness) {
 						}
 					}
 
+					path := h.MaxTokensPath
+					if path == "" {
+						path = h.MaxTokensKey
+					}
+
 					call(model.WithMaxTokens(77))
-					requireContains(t, captured, `"`+h.MaxTokensKey+`":77`, "max tokens supplied")
+					// Decode and compare numerically: a substring check for
+					// `"max_tokens":77` would also accept 770 or a misplaced
+					// field (review of agentscope-go#9).
+					got, found, err := jsonPathValue(captured, path)
+					switch {
+					case err != nil:
+						t.Fatalf("request body is not a JSON object: %v; body: %.300s", err, captured)
+					case !found:
+						t.Errorf("max tokens supplied: %s missing from request; body: %.300s", path, captured)
+					default:
+						if n, isNum := got.(float64); !isNum || n != 77 {
+							t.Errorf("max tokens supplied: %s = %v (%T), want 77", path, got, got)
+						}
+					}
 					requireNotContains(t, captured, `"MaxTokens"`, "max tokens supplied (Go field name must not leak)")
 
 					captured = nil
@@ -318,6 +341,28 @@ func requireContains(t *testing.T, body []byte, marker, what string) {
 	if !strings.Contains(string(body), marker) {
 		t.Errorf("%s: request body missing %s; body: %.300s", what, marker, body)
 	}
+}
+
+// jsonPathValue decodes body as a JSON object and walks the dot-separated
+// path through nested objects. found is false when a segment is missing or
+// an intermediate value is not an object; err is non-nil when body is not a
+// JSON object at all.
+func jsonPathValue(body []byte, path string) (value any, found bool, err error) {
+	var root map[string]any
+	if err := json.Unmarshal(body, &root); err != nil {
+		return nil, false, err
+	}
+	var cur any = root
+	for seg := range strings.SplitSeq(path, ".") {
+		obj, ok := cur.(map[string]any)
+		if !ok {
+			return nil, false, nil
+		}
+		if cur, ok = obj[seg]; !ok {
+			return nil, false, nil
+		}
+	}
+	return cur, true, nil
 }
 
 // requireNotContains fails the test when body contains the wire marker.
