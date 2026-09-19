@@ -104,6 +104,74 @@ fmt.Println(cam.ActiveModel()) // "cloud" or "local"
 | Open | All calls go to local (no cloud attempts) |
 | Half-Open | Single probe to cloud; if success, close circuit |
 
+## Context Window and Timeouts for Local Models
+
+Two settings that cloud deployments never touch matter on the edge. Neither is
+discovered automatically today (see
+[agentscope-go#8](https://github.com/agentscope-ai/agentscope-go/issues/8)), so
+set both explicitly.
+
+### Match the agent's context size to the server's window
+
+Ollama's context window (`num_ctx`) is configured on the server, per model,
+and defaults to a small value. The framework cannot read it back. With
+`WithContextConfig` set but no `ContextSize` override, the framework uses a
+128000-token window for the Ollama adapter, so with the default `TriggerRatio`
+compression starts near 102400
+estimated tokens and may trigger only after the server's configured context
+limit has already been exceeded; by then Ollama has silently dropped the oldest
+messages. Raise `num_ctx` in a Modelfile and tell the agent the same number:
+
+```
+# Modelfile
+FROM qwen2.5:0.5b
+PARAMETER num_ctx 8192
+```
+
+```bash
+ollama create qwen-edge -f Modelfile
+```
+
+```go
+import (
+    "time"
+
+    "github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/agent"
+    "github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/model"
+)
+
+local, err := model.NewOllamaChatModel(model.OllamaConfig{
+    Model: "qwen-edge",
+    // UnifiedAgent calls the non-streaming Chat path, so the HTTP client's
+    // timeout (60s by default) bounds each HTTP request. Even a 0.5B–3B
+    // model on a Raspberry Pi can need minutes for one long answer.
+    ClientOptions: &model.ClientOptions{Timeout: 10 * time.Minute},
+})
+if err != nil {
+    return err
+}
+
+ag := agent.NewUnifiedAgent("edge", "You are a helpful assistant.", local,
+    agent.WithContextConfig(&agent.ContextConfig{
+        ContextSize: 8192, // same as num_ctx above
+    }),
+)
+```
+
+`ClientOptions.Timeout` is a per-request timeout: one `UnifiedAgent.Reply` can
+issue several model requests, retries and tool calls. Put the overall reply
+deadline on the context passed to `ag.Reply`. A zero `ClientOptions.Timeout`
+keeps the 60s default. To remove the client timeout entirely, pass your own
+`HTTPClient` with `Timeout: 0` and rely on that context deadline.
+
+### Cap the output length
+
+`model.WithMaxTokens(n)` reaches Ollama as `max_tokens` (it was dropped on the
+wire before the fix for agentscope-go#8). Small models tend to run on; a cap
+of a few hundred tokens bounds the generated length of each response. It does
+not bound elapsed time: a slow device can still take minutes to produce a
+capped reply, so keep the request timeout and context deadline above as well.
+
 ## Network Considerations
 
 ### Offline-First Design

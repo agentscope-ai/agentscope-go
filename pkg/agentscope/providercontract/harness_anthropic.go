@@ -52,6 +52,13 @@ func anthropicServe(w http.ResponseWriter, r *http.Request, scn Scenario, captur
 		}
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, anthropicSuccessBody)
+	case ScnCaptureBodyStream:
+		if captured != nil {
+			buf, _ := io.ReadAll(r.Body)
+			*captured = buf
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, anthropicStreamBody)
 	case ScnStreamSuccess:
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, anthropicStreamBody)
@@ -95,6 +102,10 @@ func AnthropicHarness() Harness {
 		ExpectUsage:       &model.ChatUsage{InputTokens: 10, OutputTokens: 5, CacheCreationInputTokens: 2, CacheInputTokens: 3},
 		ExpectStreamText:  "hello contract",
 		ExpectStreamUsage: &model.ChatUsage{InputTokens: 8, OutputTokens: 4},
+		// MaxTokensKey intentionally unset: the Anthropic adapter always sends
+		// its configured default max_tokens and does not yet apply
+		// model.WithMaxTokens per call (a separate gap from agentscope-go#8,
+		// which covers the shared OpenAI-compatible request struct).
 		DisableThinkingCheck: func(t *testing.T, body []byte) {
 			requireContains(t, body, `"thinking":{"type":"disabled"}`, "anthropic disable-thinking wire format")
 		},

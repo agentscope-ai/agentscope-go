@@ -39,6 +39,13 @@ func geminiServe(w http.ResponseWriter, r *http.Request, scn Scenario, captured 
 		}
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, geminiSuccessBody)
+	case ScnCaptureBodyStream:
+		if captured != nil {
+			buf, _ := io.ReadAll(r.Body)
+			*captured = buf
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, geminiStreamBody)
 	case ScnStreamSuccess:
 		_ = streaming
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -79,5 +86,7 @@ func GeminiHarness() Harness {
 		ExpectUsage:       geminiExpectUsage,
 		ExpectStreamText:  "hello contract",
 		ExpectStreamUsage: &model.ChatUsage{InputTokens: 8, OutputTokens: 4},
+		MaxTokensKey:      "maxOutputTokens",
+		MaxTokensPath:     "generation_config.maxOutputTokens",
 	}
 }
