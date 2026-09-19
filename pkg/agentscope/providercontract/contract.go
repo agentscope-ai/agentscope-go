@@ -22,13 +22,14 @@ import (
 type Scenario int
 
 const (
-	ScnChatSuccess     Scenario = iota // non-stream success with usage
-	ScnStreamSuccess                   // full SSE stream with usage
-	ScnStreamTruncated                 // SSE stream cut mid-flight
-	ScnStreamSlow                      // slow stream (for ctx-cancel)
-	ScnErr429                          // rate-limit HTTP error
-	ScnErr401                          // auth HTTP error
-	ScnCaptureBody                     // record the request body, return success
+	ScnChatSuccess       Scenario = iota // non-stream success with usage
+	ScnStreamSuccess                     // full SSE stream with usage
+	ScnStreamTruncated                   // SSE stream cut mid-flight
+	ScnStreamSlow                        // slow stream (for ctx-cancel)
+	ScnErr429                            // rate-limit HTTP error
+	ScnErr401                            // auth HTTP error
+	ScnCaptureBody                       // record the request body, return success
+	ScnCaptureBodyStream                 // record the request body, then play the SSE stream
 )
 
 // Harness describes one provider under test: how to construct a model
@@ -47,6 +48,15 @@ type Harness struct {
 
 	DisableThinkingCheck func(t *testing.T, body []byte) // wire assertion (nil = unsupported)
 	EnableThinkingCheck  func(t *testing.T, body []byte)
+
+	// MaxTokensKey is the provider wire key for the output-token limit
+	// ("max_tokens", "max_completion_tokens", "maxOutputTokens"). When set,
+	// the wall asserts that model.WithMaxTokens reaches the server under
+	// exactly this key on both Chat and ChatStream, and that an omitted limit
+	// sends neither the key nor the Go field name (agentscope-go#8: the
+	// shared OpenAI-compatible struct serialized the field as "MaxTokens").
+	// Empty = check skipped.
+	MaxTokensKey string
 }
 
 func newServer(h *Harness, scn Scenario, captured *[]byte) *httptest.Server {
@@ -253,6 +263,53 @@ func Run(t *testing.T, h *Harness) {
 			}
 		})
 	}
+
+	if h.MaxTokensKey != "" {
+		t.Run("MaxTokensWireFormat", func(t *testing.T) {
+			for _, mode := range []struct {
+				name   string
+				stream bool
+			}{{"chat", false}, {"stream", true}} {
+				t.Run(mode.name, func(t *testing.T) {
+					scn := ScnCaptureBody
+					if mode.stream {
+						scn = ScnCaptureBodyStream
+					}
+					var captured []byte
+					srv := newServer(h, scn, &captured)
+					defer srv.Close()
+					m, err := h.NewModel(srv.URL)
+					if err != nil {
+						t.Fatal(err)
+					}
+					call := func(opts ...model.CallOption) {
+						t.Helper()
+						if !mode.stream {
+							if _, err := m.Chat(context.Background(), testMsgs(), opts...); err != nil {
+								t.Fatalf("Chat: %v", err)
+							}
+							return
+						}
+						ch, err := m.ChatStream(context.Background(), testMsgs(), opts...)
+						if err != nil {
+							t.Fatalf("ChatStream: %v", err)
+						}
+						for range ch { // drain: only the captured request matters
+						}
+					}
+
+					call(model.WithMaxTokens(77))
+					requireContains(t, captured, `"`+h.MaxTokensKey+`":77`, "max tokens supplied")
+					requireNotContains(t, captured, `"MaxTokens"`, "max tokens supplied (Go field name must not leak)")
+
+					captured = nil
+					call()
+					requireNotContains(t, captured, `"`+h.MaxTokensKey+`"`, "max tokens omitted")
+					requireNotContains(t, captured, `"MaxTokens"`, "max tokens omitted (Go field name must not leak)")
+				})
+			}
+		})
+	}
 }
 
 // requireContains fails the test when body does not contain the wire marker.
@@ -260,5 +317,13 @@ func requireContains(t *testing.T, body []byte, marker, what string) {
 	t.Helper()
 	if !strings.Contains(string(body), marker) {
 		t.Errorf("%s: request body missing %s; body: %.300s", what, marker, body)
+	}
+}
+
+// requireNotContains fails the test when body contains the wire marker.
+func requireNotContains(t *testing.T, body []byte, marker, what string) {
+	t.Helper()
+	if strings.Contains(string(body), marker) {
+		t.Errorf("%s: request body must not contain %s; body: %.300s", what, marker, body)
 	}
 }

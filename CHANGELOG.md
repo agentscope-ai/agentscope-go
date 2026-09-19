@@ -617,6 +617,13 @@ so a truncated stream is reported but not retried.
 - Reprompted confirmations force the ALLOWED call state regardless of the
   state echoed back by the confirmer (previously an echoed asking-state
   block could loop the re-prompt forever)
+- `model.WithMaxTokens` now reaches Ollama, DashScope, DeepSeek, Moonshot and
+  xAI as `max_tokens` (#8). The shared OpenAI-compatible request struct had no
+  JSON tag on the field, so those five adapters sent it as `MaxTokens`, a key
+  no server reads, and every request from the family (OpenAI included) carried
+  a stray `"MaxTokens":null`. The `providercontract` wall now asserts the
+  max-tokens wire key on both `Chat` and `ChatStream` for every registered
+  provider, and registers Ollama and xAI, which were missing from the wall.
 
 ## [v2.0.9] - 2026-08-26
 
