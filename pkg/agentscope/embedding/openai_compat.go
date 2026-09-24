@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/inference"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/internal/httpx"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/model"
 )
@@ -19,6 +20,7 @@ const (
 // OpenAICompatConfig holds configuration for OpenAI-compatible embedding models.
 // Works with OpenAI, DashScope, Ollama, and other compatible providers.
 type OpenAICompatConfig struct {
+	MaxConcurrency int // Positive bounds batch workers; zero preserves the legacy unbounded default.
 	APIKey         string
 	SecretAPIKey   model.SecretStr // Preferred over APIKey. Use model.NewSecretStr(key).
 	BaseURL        string
@@ -33,6 +35,8 @@ type OpenAICompatConfig struct {
 // OpenAICompatEmbeddingModel implements EmbeddingModel using the OpenAI-compatible
 // embedding API (/embeddings endpoint).
 type OpenAICompatEmbeddingModel struct {
+	maxConcurrency int
+	managed        *inference.Deployment
 	apiKey         string
 	baseURL        string
 	model          string
@@ -44,6 +48,9 @@ type OpenAICompatEmbeddingModel struct {
 }
 
 func newOpenAICompat(cfg *OpenAICompatConfig) (*OpenAICompatEmbeddingModel, error) {
+	if cfg.MaxConcurrency < 0 {
+		return nil, fmt.Errorf("embedding: negative concurrency")
+	}
 	if cfg.Model == "" {
 		return nil, fmt.Errorf("embedding: model is required")
 	}
@@ -60,6 +67,7 @@ func newOpenAICompat(cfg *OpenAICompatConfig) (*OpenAICompatEmbeddingModel, erro
 	}
 	apiKey := model.ResolveAPIKey(cfg.APIKey, cfg.SecretAPIKey)
 	return &OpenAICompatEmbeddingModel{
+		maxConcurrency: cfg.MaxConcurrency,
 		apiKey:         apiKey,
 		baseURL:        cfg.BaseURL,
 		model:          cfg.Model,
@@ -122,7 +130,7 @@ func (m *OpenAICompatEmbeddingModel) Embed(ctx context.Context, texts []string) 
 	}
 
 	if m.cache != nil {
-		key := CacheKey(m.model, m.dimensions, texts)
+		key := embeddingKey(ctx, m.managed, m.model, m.dimensions, texts)
 		if embeddings, ok := m.cache.Retrieve(key); ok {
 			return &EmbeddingResponse{
 				Embeddings: embeddings,
@@ -134,20 +142,25 @@ func (m *OpenAICompatEmbeddingModel) Embed(ctx context.Context, texts []string) 
 		}
 	}
 
-	resp, err := batchEmbed(ctx, texts, m.batchSize, m.callAPI)
+	resp, err := batchEmbedWithWorkers(ctx, texts, m.batchSize, m.maxConcurrency, m.callAPI)
 	if err != nil {
 		return nil, err
 	}
 
 	if m.cache != nil {
-		key := CacheKey(m.model, m.dimensions, texts)
+		key := embeddingKey(ctx, m.managed, m.model, m.dimensions, texts)
 		_ = m.cache.Store(key, resp.Embeddings)
 	}
 
 	return resp, nil
 }
 
-func (m *OpenAICompatEmbeddingModel) callAPI(ctx context.Context, texts []string) (*EmbeddingResponse, error) {
+func (m *OpenAICompatEmbeddingModel) callAPI(ctx context.Context, texts []string) (result *EmbeddingResponse, resultErr error) {
+	if m.managed != nil {
+		var finish func(error)
+		ctx, finish = m.managed.StartIndependent(ctx, "embedding")
+		defer func() { finish(resultErr) }()
+	}
 	url := m.baseURL + "/embeddings"
 
 	req := openAIEmbeddingRequest{
@@ -175,6 +188,16 @@ func (m *OpenAICompatEmbeddingModel) callAPI(ctx context.Context, texts []string
 		return resp.Data[i].Index < resp.Data[j].Index
 	})
 
+	if m.managed != nil {
+		if len(resp.Data) != len(texts) {
+			return nil, fmt.Errorf("embedding: response count differs from input")
+		}
+		for i, item := range resp.Data {
+			if item.Index != i {
+				return nil, fmt.Errorf("embedding: missing or duplicate response index")
+			}
+		}
+	}
 	embeddings := make([][]float32, len(resp.Data))
 	for i, d := range resp.Data {
 		if d.Embedding != nil {

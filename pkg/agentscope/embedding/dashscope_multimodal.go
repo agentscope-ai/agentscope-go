@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/inference"
+	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/internal/httpx"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/message"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/model"
 )
@@ -71,11 +73,13 @@ type DashScopeMultimodalConfig struct {
 // DashScopeMultimodalEmbeddingModel embeds text and DataBlock (images/video)
 // via the DashScope native multimodal embedding API.
 type DashScopeMultimodalEmbeddingModel struct {
-	apiKey  string
-	baseURL string
-	model   string
-	client  *http.Client
-	limits  multimodalLimits
+	maxConcurrency int
+	managed        *inference.Deployment
+	apiKey         string
+	baseURL        string
+	model          string
+	client         *http.Client
+	limits         multimodalLimits
 }
 
 // NewDashScopeMultimodalEmbeddingModel creates a multimodal embedding model.
@@ -114,6 +118,9 @@ func (m *DashScopeMultimodalEmbeddingModel) EmbedMultimodal(ctx context.Context,
 		return &EmbeddingResponse{}, nil
 	}
 
+	if m.managed != nil {
+		return m.embedManagedMultimodal(ctx, inputs)
+	}
 	limits := getLimits(m.model)
 	if len(inputs) <= limits.maxElements {
 		return m.embedMultimodalBatch(ctx, inputs)
@@ -150,7 +157,7 @@ func (m *DashScopeMultimodalEmbeddingModel) EmbedMultimodal(ctx context.Context,
 }
 
 // embedMultimodalBatch sends a single batch of inputs to the API.
-func (m *DashScopeMultimodalEmbeddingModel) embedMultimodalBatch(ctx context.Context, inputs []MultimodalInput) (*EmbeddingResponse, error) {
+func (m *DashScopeMultimodalEmbeddingModel) embedMultimodalBatch(ctx context.Context, inputs []MultimodalInput) (response *EmbeddingResponse, resultErr error) {
 	contents := make([]map[string]any, 0, len(inputs))
 	for _, inp := range inputs {
 		if inp.Text != "" {
@@ -175,21 +182,6 @@ func (m *DashScopeMultimodalEmbeddingModel) embedMultimodalBatch(ctx context.Con
 		},
 	}
 
-	body, _ := json.Marshal(reqBody)
-	url := m.baseURL + "/services/embeddings/multimodal-embedding/multimodal-embedding"
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+m.apiKey)
-
-	resp, err := m.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("multimodal embed: %w", err)
-	}
-	defer resp.Body.Close()
-
 	var result struct {
 		Output struct {
 			Embeddings []struct {
@@ -201,14 +193,48 @@ func (m *DashScopeMultimodalEmbeddingModel) embedMultimodalBatch(ctx context.Con
 			TotalTokens int `json:"total_tokens"`
 		} `json:"usage"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode multimodal response: %w", err)
+	if m.managed != nil {
+		var finish func(error)
+		ctx, finish = m.managed.StartIndependent(ctx, "embedding")
+		defer func() { finish(resultErr) }()
+		err := httpx.DoJSONRequest(ctx, m.client, http.MethodPost, m.baseURL+"/services/embeddings/multimodal-embedding/multimodal-embedding", reqBody, &result, map[string]string{"Content-Type": "application/json", "Authorization": "Bearer " + m.apiKey})
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		body, _ := json.Marshal(reqBody)
+		url := m.baseURL + "/services/embeddings/multimodal-embedding/multimodal-embedding"
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+m.apiKey)
+
+		resp, err := m.client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("multimodal embed: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return nil, fmt.Errorf("decode multimodal response: %w", err)
+		}
+
 	}
 
+	if m.managed != nil && len(result.Output.Embeddings) != len(inputs) {
+		return nil, fmt.Errorf("embedding: response count differs from input")
+	}
+	seen := make(map[int]bool)
 	embeddings := make([][]float32, len(inputs))
 	for _, emb := range result.Output.Embeddings {
+		if m.managed != nil && (emb.Index < 0 || emb.Index >= len(embeddings) || seen[emb.Index]) {
+			return nil, fmt.Errorf("embedding: invalid response index")
+		}
 		if emb.Index < len(embeddings) {
 			embeddings[emb.Index] = emb.Embedding
+			seen[emb.Index] = true
 		}
 	}
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/inference"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/message"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/middleware"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/model"
@@ -200,7 +201,7 @@ func (a *UnifiedAgent) compressContextForTool(ctx context.Context) (tool.Compres
 	return tool.CompressionResult{Compressed: compressed}, nil
 }
 
-func (a *UnifiedAgent) compressContextImpl(ctx context.Context, cfg *ContextConfig) error {
+func (a *UnifiedAgent) compressContextImpl(ctx context.Context, cfg *ContextConfig) (resultErr error) {
 	ctxSize := cfg.ContextSize
 	if ctxSize == 0 {
 		ctxSize = model.ResolveContextSize(a.model, defaultContextSize)
@@ -268,6 +269,12 @@ func (a *UnifiedAgent) compressContextImpl(ctx context.Context, cfg *ContextConf
 
 	// Upstream #2433: compression calls burn tokens; accumulate their usage
 	// so the reply loop can account it (budgets, cost tracking, reply msg).
+	ctx = inference.WithPurpose(a.inferenceContext(ctx), "summary")
+	if managed, ok := a.model.(model.ManagedChatModel); ok {
+		var finish func(error)
+		ctx, finish = managed.ManagedDeployment().Start(ctx, "summary")
+		defer func() { finish(resultErr) }()
+	}
 	result, compUsage, err := model.GenerateStructuredOutputWithUsage(ctx, a.model, compressionMsgs, cfg.SummarySchema)
 	a.recordCompressionUsage(compUsage)
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/inference"
 	"github.com/sirupsen/logrus"
 )
 
@@ -32,6 +33,15 @@ func DoSSERequest(
 	reqBody any,
 	headers map[string]string,
 ) (<-chan SSEEvent, error) {
+	if op := inference.CurrentOperation(ctx); op != nil {
+		resp, err := op.OpenStream(ctx, client, method, url, reqBody, headers)
+		if err != nil {
+			return nil, err
+		}
+		ch := make(chan SSEEvent, 16)
+		go parseSSEStream(ctx, resp.Body, ch)
+		return ch, nil
+	}
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -80,6 +90,9 @@ func DoSSERequest(
 }
 
 func parseSSEStream(ctx context.Context, body io.ReadCloser, ch chan<- SSEEvent) {
+	if op := inference.CurrentOperation(ctx); op != nil {
+		defer op.StreamTransportDone()
+	}
 	defer close(ch)
 	defer body.Close()
 
@@ -105,6 +118,9 @@ func parseSSEStream(ctx context.Context, body io.ReadCloser, ch chan<- SSEEvent)
 				event.Data = dataBuf.String()
 				// Trim trailing newline added by multi-line data
 				event.Data = strings.TrimSuffix(event.Data, "\n")
+				if op := inference.CurrentOperation(ctx); op != nil {
+					op.ObserveStreamData(event.Data)
+				}
 				select {
 				case ch <- event:
 				case <-ctx.Done():
@@ -138,6 +154,9 @@ func parseSSEStream(ctx context.Context, body io.ReadCloser, ch chan<- SSEEvent)
 	// Flush any remaining buffered event
 	if dataBuf.Len() > 0 {
 		event.Data = strings.TrimSuffix(dataBuf.String(), "\n")
+		if op := inference.CurrentOperation(ctx); op != nil {
+			op.ObserveStreamData(event.Data)
+		}
 		select {
 		case ch <- event:
 		case <-ctx.Done():

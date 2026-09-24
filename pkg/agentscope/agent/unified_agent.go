@@ -53,6 +53,9 @@ type UnifiedAgent struct {
 	mu             sync.Mutex
 	offloader      Offloader
 	stateSaver     StateSaver
+	replyRecovery  bool
+	activeRecovery *replyRecoveryRun
+	checkpointMu   sync.Mutex
 	confirmStash   map[string]event.ConfirmResult
 	externalStash  map[string]message.ToolResultBlock
 	hookRunner     *loop.HookRunner
@@ -84,10 +87,11 @@ type ModelConfig struct {
 // AgentState holds conversation state for a session.
 // StateSchemaVersion is bumped when AgentState's serialized shape changes
 // incompatibly; loaders dispatch on it (HARNESS_DESIGN F1).
-const StateSchemaVersion = 1
+const StateSchemaVersion = 2
 
 type AgentState struct {
-	SchemaVersion int `json:"schema_version,omitempty"`
+	ReplyRecovery *ReplyRecoveryState `json:"reply_recovery,omitempty"`
+	SchemaVersion int                 `json:"schema_version,omitempty"`
 
 	SessionID string
 	Context   []*message.Msg
@@ -292,7 +296,13 @@ func (a *UnifiedAgent) Reply(ctx context.Context, input string) (*message.Msg, e
 	}
 
 	var replyID string
+	var terminalErr error
 	for evt := range ch {
+		if a.replyRecovery {
+			if end, ok := evt.(event.ReplyEndEvent); ok && end.Error != nil {
+				terminalErr = fmt.Errorf("agent: %s", end.Error.Message)
+			}
+		}
 		if start, ok := evt.(event.ReplyStartEvent); ok {
 			replyID = start.ReplyID
 		}
@@ -301,6 +311,9 @@ func (a *UnifiedAgent) Reply(ctx context.Context, input string) (*message.Msg, e
 		return nil, err
 	}
 
+	if terminalErr != nil {
+		return nil, terminalErr
+	}
 	// Match this invocation, never a reply already present in history.
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -318,13 +331,26 @@ func (a *UnifiedAgent) Reply(ctx context.Context, input string) (*message.Msg, e
 
 // ReplyStream processes input and returns a channel of events (streaming).
 func (a *UnifiedAgent) ReplyStream(ctx context.Context, input string) (<-chan event.Event, error) {
-	if input == "" {
+	return a.replyStream(ctx, input, false)
+}
+
+func (a *UnifiedAgent) replyStream(ctx context.Context, input string, resume bool) (<-chan event.Event, error) {
+	if input == "" && !resume {
 		return nil, fmt.Errorf("agent %s: empty input", a.name)
 	}
 
 	// Attach MiddleContext to the Go context for middleware state storage.
 	mc := middleware.MiddleContext{}
 	ctx = middleware.WithMiddleContext(ctx, mc)
+	var run *replyRecoveryRun
+	if a.replyRecovery {
+		var err error
+		ctx, run, err = a.beginRecovery(ctx, resume)
+		if err != nil {
+			return nil, err
+		}
+	}
+	ctx = a.inferenceContext(ctx)
 
 	if a.readCache != nil {
 		ctx = tool.WithReadCache(ctx, a.readCache)
@@ -338,6 +364,11 @@ func (a *UnifiedAgent) ReplyStream(ctx context.Context, input string) (<-chan ev
 	verdict := make(chan bool, 8)
 	core := func(ctx context.Context, ri middleware.ReplyInput) <-chan event.Event {
 		ch := make(chan event.Event, 32)
+		if run != nil && (recoveryRun(ctx) != run || !run.startCore()) {
+			ch <- event.NewReplyEndEventWithError("", "", types.ErrorInternal, "recovery middleware must preserve its context and invoke an active reply at most once")
+			close(ch)
+			return ch
+		}
 		go a.replyLoop(ctx, ri.UserInput, ch, verdict)
 		return ch
 	}
@@ -350,7 +381,9 @@ func (a *UnifiedAgent) ReplyStream(ctx context.Context, input string) (<-chan ev
 	out := make(chan event.Event, 32)
 	go func() {
 		defer close(out)
+		defer a.sealRecovery(run)
 		var curReplyID string
+		failurePublished := false
 		sawEnd := false
 		for evt := range chainOut {
 			switch e := evt.(type) {
@@ -358,6 +391,11 @@ func (a *UnifiedAgent) ReplyStream(ctx context.Context, input string) (<-chan ev
 				curReplyID = e.ReplyID
 				sawEnd = false
 			case event.ReplyEndEvent:
+				e = a.acceptRecoveryEnd(ctx, &e)
+				evt = e
+				if run != nil && run.err() != nil {
+					failurePublished = true
+				}
 				if e.ReplyID == curReplyID {
 					sawEnd = true
 				}
@@ -376,6 +414,9 @@ func (a *UnifiedAgent) ReplyStream(ctx context.Context, input string) (<-chan ev
 			case <-ctx.Done():
 				return
 			}
+		}
+		if run != nil && run.err() != nil && !failurePublished {
+			emit(ctx, out, event.NewReplyEndEventWithError(a.state.SessionID, curReplyID, types.ErrorInternal, checkpointError(run.err()).Message))
 		}
 	}()
 	return out, nil
@@ -461,12 +502,25 @@ func (a *UnifiedAgent) replyLoop(ctx context.Context, input string, ch chan<- ev
 	}
 
 	replyID := agentscope.GenerateID()
+	run := recoveryRun(ctx)
+	if run != nil {
+		defer a.recoveryCoreDone(run)
+		run.mu.Lock()
+		if run.resume {
+			replyID = run.id
+		} else {
+			run.id = replyID
+		}
+		run.mu.Unlock()
+	}
 	a.clearConfirmStash()
 	a.clearExternalStash()
 
 	a.mu.Lock()
 	a.state.ReplyID = replyID
-	a.state.CurIter = 0
+	if run == nil || !run.resume {
+		a.state.CurIter = 0
+	}
 	a.mu.Unlock()
 
 	// HARNESS_DESIGN A2: make the reply ID visible to middleware hooks
@@ -483,9 +537,17 @@ func (a *UnifiedAgent) replyLoop(ctx context.Context, input string, ch chan<- ev
 
 	userMsg := message.UserMsg(a.name, input)
 	a.mu.Lock()
-	a.state.Context = append(a.state.Context, userMsg)
+	if run == nil || !run.resume {
+		a.state.Context = append(a.state.Context, userMsg)
+	}
 	a.mu.Unlock()
 
+	if run != nil {
+		if err := a.checkpointBoundary(ctx); err != nil {
+			emit(ctx, ch, event.NewReplyEndEventWithError(a.state.SessionID, replyID, types.ErrorInternal, checkpointError(err).Message))
+			return
+		}
+	}
 	modelCallHandler := a.buildModelCallHandler()
 	actingHandler := a.buildActingHandler()
 
@@ -499,6 +561,10 @@ func (a *UnifiedAgent) replyLoop(ctx context.Context, input string, ch chan<- ev
 	madeProgress := true
 	for {
 		reason, progress, errInfo := a.reactRound(ctx, ch, replyID, hooks, modelCallHandler, actingHandler)
+		if run != nil && run.err() != nil {
+			emit(ctx, ch, event.NewReplyEndEventWithError(a.state.SessionID, replyID, types.ErrorInternal, checkpointError(run.err()).Message))
+			return
+		}
 		if progress {
 			madeProgress = true
 		}
@@ -558,8 +624,15 @@ func (a *UnifiedAgent) reactRound(
 	curState := protocol.StateReason
 	finishedNormally := false
 
+	startIteration := 0
+	if run := recoveryRun(ctx); run != nil {
+		startIteration = run.iteration()
+	}
 reactLoop:
-	for iter := 0; iter < a.reactCfg.MaxIters; iter++ {
+	for iter := startIteration; iter < a.reactCfg.MaxIters; iter++ {
+		if run := recoveryRun(ctx); run != nil {
+			run.setIteration(iter)
+		}
 		if ctx.Err() != nil {
 			return types.ReplyInterrupted, madeProgress, nil
 		}
@@ -581,14 +654,21 @@ reactLoop:
 			// via WithState, asking/submitted calls have no blocked waiter —
 			// re-drive their handshakes. When nothing is awaiting (e.g. an
 			// external system parked us), fall through to the wait exit.
-			a.Checkpoint(ctx)
+			if err := a.checkpointBoundary(ctx); err != nil {
+				return types.ReplyError, madeProgress, checkpointError(err)
+			}
 			if a.repromptAwaitingCalls(ctx, ch, replyID, actingHandler) {
 				// Checkpoint again after the inline execution of resumed
 				// calls: the pre-reprompt snapshot still holds the
 				// ASKING/SUBMITTED call, and a crash before the next
 				// batch-boundary checkpoint would re-execute an
 				// already-executed tool on resume (HARNESS review M-2).
-				a.Checkpoint(ctx)
+				if run := recoveryRun(ctx); run != nil {
+					run.setIteration(iter + 1)
+				}
+				if err := a.checkpointBoundary(ctx); err != nil {
+					return types.ReplyError, madeProgress, checkpointError(err)
+				}
 				madeProgress = true
 				continue
 			}
@@ -623,7 +703,12 @@ reactLoop:
 			// Checkpoint at the batch boundary (HARNESS_DESIGN F1): a crash
 			// after this point resumes from the recorded results, never
 			// mid-batch.
-			a.Checkpoint(ctx)
+			if run := recoveryRun(ctx); run != nil {
+				run.setIteration(iter + 1)
+			}
+			if err := a.checkpointBoundary(ctx); err != nil {
+				return types.ReplyError, madeProgress, checkpointError(err)
+			}
 			// Transition back to Reason after acting
 			hooks.OnStateTransition(curState, protocol.StateReason, iter)
 			curState = protocol.StateReason
@@ -710,6 +795,16 @@ reactLoop:
 
 			// Save response to context (merges into last assistant msg)
 			a.saveToContext(resp.Content, resp.Usage)
+			if a.replyRecovery {
+				// A pending tool still belongs to this iteration. Persisting the
+				// next iteration here could skip it at MaxIters after a crash.
+				if len(extractToolCalls(resp.Content)) == 0 {
+					recoveryRun(ctx).setIteration(iter + 1)
+				}
+				if err := a.checkpointBoundary(ctx); err != nil {
+					return types.ReplyError, madeProgress, checkpointError(err)
+				}
+			}
 
 			// Emit streaming events for consumers
 			emitContentEvents(ctx, ch, replyID, resp.Content)
@@ -748,7 +843,12 @@ reactLoop:
 			}
 
 			// Checkpoint at the batch boundary (HARNESS_DESIGN F1).
-			a.Checkpoint(ctx)
+			if run := recoveryRun(ctx); run != nil {
+				run.setIteration(iter + 1)
+			}
+			if err := a.checkpointBoundary(ctx); err != nil {
+				return types.ReplyError, madeProgress, checkpointError(err)
+			}
 			// After acting, transition back to Reason
 			hooks.OnStateTransition(curState, protocol.StateReason, iter)
 			curState = protocol.StateReason
@@ -830,7 +930,14 @@ func (a *UnifiedAgent) buildModelCallHandler() middleware.ModelCallHandler {
 	if len(a.middlewares) == 0 {
 		return core
 	}
-	return middleware.BuildModelCallChain(a.middlewares, core)
+	chain := middleware.BuildModelCallChain(a.middlewares, core)
+	if managed, ok := a.model.(model.ManagedChatModel); ok {
+		return func(ctx context.Context, input *middleware.ModelCallInput) (*model.ChatResponse, error) {
+			input.ModelName = managed.ManagedDeployment().Descriptor().Model
+			return chain(ctx, input)
+		}
+	}
+	return chain
 }
 
 // buildActingHandler returns an ActingHandler wrapped with middleware.
@@ -1353,6 +1460,13 @@ func (a *UnifiedAgent) prepareModelInput(ctx context.Context) []*message.Msg {
 }
 
 func (a *UnifiedAgent) callModel(ctx context.Context, msgs []*message.Msg, opts []model.CallOption) (*model.ChatResponse, error) {
+	ctx = a.inferenceContext(ctx)
+	if _, managed := a.model.(model.ManagedChatModel); managed {
+		if a.modelCfg.FallbackModel != nil {
+			return nil, fmt.Errorf("agent: managed inference requires a single target; FallbackModel is unsupported")
+		}
+		return a.model.Chat(ctx, msgs, opts...)
+	}
 	retries := a.modelCfg.MaxRetries
 	if retries <= 0 {
 		retries = 1

@@ -1,0 +1,13 @@
+name: glm-5.3
+label: GLM 5.3
+status: active
+
+input_types:
+  - text/plain
+
+output_types:
+  - text/plain
+  - application/x-thinking
+
+context_size: 1048576
+output_size: 131072

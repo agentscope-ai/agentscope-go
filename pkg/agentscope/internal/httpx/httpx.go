@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/inference"
 	"github.com/sirupsen/logrus"
 )
 
@@ -34,6 +35,9 @@ func DoJSONRequest(
 	respBody any,
 	headers map[string]string,
 ) error {
+	if op := inference.CurrentOperation(ctx); op != nil {
+		return op.DoJSON(ctx, client, method, url, reqBody, respBody, headers)
+	}
 	if client == nil {
 		client = http.DefaultClient
 	}

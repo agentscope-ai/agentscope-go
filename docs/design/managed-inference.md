@@ -1,9 +1,8 @@
 # Managed inference: delivery contracts
 
 Status: staged implementation of [RFC #11](https://github.com/agentscope-ai/agentscope-go/issues/11).
-The execution, retrieval and quality-measurement foundations described below are
-implemented in this change. Shared inference governance and routing are proposed
-subsequent changes. Availability on `main` does not imply a published release.
+The execution, retrieval and quality-measurement foundations and opt-in managed
+inference path are implemented. Routing remains a proposed subsequent change. Availability on `main` does not imply a published release.
 
 ## Objective and sequence
 
@@ -18,16 +17,16 @@ The implementation sequence is three contributions:
 1. **Execution and retrieval foundations:** reliable cancellation and terminal
    classification, complete tool text, safe cache writes, filtered retrieval and
    an arrival-to-quality report. These features are independently usable.
-2. **Managed inference and resource governance (proposed):** explicit deployment
+2. **Managed inference and resource governance:** explicit deployment
    capabilities, a shared model-operation path, physical-attempt accounting,
    bounded admission, embedding request concurrency and restored budget state.
-   This stage must work with one fixed model.
+   This stage works with one fixed model; see the [managed inference guide](../managed-inference.md).
 3. **Routing and comparative evaluation (proposed):** rule-based and bounded
    classifier routing, persisted/revalidated decisions and repeatable quality,
    cost and load comparisons.
 
 Keep the required `Agent`, `ChatModel` and `Tool` interfaces source-compatible.
-New governance and routing policies will be opt-in. Each contribution includes
+Managed inference is opt-in; subsequent routing policies will also be opt-in. Each contribution includes
 its executable examples, validation and behavior documentation.
 
 ## Current execution paths
@@ -100,42 +99,41 @@ future supplemental accounting must use a separately versioned report.
 
 The [load guide](../benchmarks.md#joining-task-quality-with-scheduled-arrivals)
 defines configuration, statuses and the goodput denominator. Completed-latency
-percentiles exclude unfinished zero values and include their sample count. This
-stage does not establish a complete token/cost ledger: existing evalkit fields
-cannot distinguish every unknown usage value or hidden physical attempt.
+percentiles exclude unfinished zero values and include their sample count. The optional `LoadConfig.AttemptLedger` joins managed physical attempts, including
+scoring calls made with the supplied context. Unknown usage, retention loss and
+unmanaged task models remain explicit. Custom uninstrumented calls are outside
+this observation; existing task-level cost fields retain their logical semantics.
 
-## Proposed managed execution contracts
+## Managed execution contracts
 
-A deployment descriptor should distinguish provider, API family, model identity,
-actual endpoint/deployment, configured context window, adapter capabilities and
-host policy. Model cards are metadata, not evidence of actual server limits.
-Keep legacy model-card lookup behavior; qualified lookup belongs to the new path.
+The [managed inference guide](../managed-inference.md) documents registration,
+adapter support, retry ownership, streaming cleanup, bounded embedding workers,
+physical accounting and explicit reply recovery. The
+[example](../../examples/managed_inference/) runs multiple agents and a direct
+provider stream against a local protocol fixture.
 
-Bind the actual target before token sizing and compression. `ModelCallInput.ModelName`
-is observability metadata, not a target selector. Final validation must include
-prompt hooks, tool schemas, response format and media transformations. A token
-estimate cannot provide a strict context guarantee without a trustworthy bound.
+Deployment identity, adapter capabilities and host policy are separate values.
+Model cards remain descriptive metadata. Admission pools are separate from
+actual targets, allowing chat and embedding deployments to share one bound.
+Physical attempts are the canonical cost source; logical operations never add a
+second copy of their cost. Missing usage or prices are not free work.
 
-Record both logical operations and physical attempts at the actual send boundary.
-Define one retry owner, revalidate each fallback target and expose unsupported
-wrappers. Attribute reasoning, summary, repair and later routing work without
-counting an attempt and its enclosing aggregate twice. Missing usage/prices and
-failed attempts must remain visible; they cannot be represented as free work.
+Managed execution is single-target and single-process. It rejects hidden
+fallback/connectivity wrappers and opaque transports, holds stream permits until
+local producers finish, and uses one retry owner. Existing interfaces and
+unmanaged defaults remain compatible. Local cancellation cannot prove that
+remote compute stopped. Reply recovery preserves observed built-in budgets and
+remaining iterations, but does not provide exactly-once tools or spending
+reservations. Recovery state uses schema 2; legacy writes retain schema 1.
 
-Bound active requests and queued demand per deployment across agents. Hold a
-permit through a managed stream's local lifetime, release it on every terminal
-path, and keep retry backoff/tool waiting/cache hits outside active inference
-occupancy. Embedding admission must cover **each actual batch/attempt request**,
-not merely the outer `Embed` invocation. Local cancellation does not prove remote
-compute has stopped. Initial single-process admission will not be distributed
-quota enforcement.
+## Subsequent routing work
 
-Restore reply budget/middleware state explicitly, with a versioned schema,
-ownership rules and observable persistence errors. Existing checkpoint logging
-alone does not establish durable acceptance. Restore and revalidate target IDs
-and policy versions instead of serializing model objects or credentials. Never
-mutate a shared agent model to implement routing; immutable configuration does
-not make arbitrary model clients concurrency-safe.
+Routing must bind the actual target before sizing/compression and revalidate
+capabilities, host policy and admission at every fallback. Never mutate a shared
+agent model to implement routing. Persist target IDs and policy versions rather
+than clients or credentials. Compare quality, cost and load under explicit
+fixed-deployment and multi-deployment scenarios before claiming a throughput
+gain. Token estimates alone cannot enforce a strict serving-window guarantee.
 
 ## Upstream references and deliberate differences
 
@@ -152,6 +150,7 @@ Upstream AgentScope was inspected through
 | [Tool media #2751](https://github.com/agentscope-ai/agentscope/pull/2751) | Cover actual Go adapter requests and corresponding token estimates |
 | [Tool metadata #2754](https://github.com/agentscope-ai/agentscope/pull/2754) | Preserve existing Go state/event metadata contracts; do not add Python-specific timestamps mechanically |
 | [Qdrant floats #2783](https://github.com/agentscope-ai/agentscope/pull/2783) | Typed conditions on Go's top-level payload, finite float equality as a closed range |
+| [Model cards #2727](https://github.com/agentscope-ai/agentscope/pull/2727) | Provider-qualified lookup and supported metadata fields; no automatic server-limit or pricing inference |
 | [Routing #2758](https://github.com/agentscope-ai/agentscope/pull/2758) | Proposed after managed execution/accounting; no Jev dependency in these foundations |
 
 Shared cache namespaces/versioned keys must precede cross-tenant cache sharing or

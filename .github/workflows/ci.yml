@@ -39,7 +39,7 @@ jobs:
           # Statement-coverage floor for the library (./pkg/...). Ratchet only:
           # raise it in the same PR that raises coverage, never lower it.
           # Keep in sync with `make cover-check` and AGENTS.md.
-          COVERAGE_MIN: '68.6'
+          COVERAGE_MIN: '70.0'
         run: |
           # Two runs on purpose: coverage is attributed per tested package, so
           # the ./pkg/... gate needs its own run; reusing the ./... profile or

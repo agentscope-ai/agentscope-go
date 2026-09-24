@@ -77,8 +77,8 @@ func TestCheckpoint_SavedWithSchemaVersionAndResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("no checkpoint saved: %v", err)
 	}
-	if st.SchemaVersion != StateSchemaVersion {
-		t.Errorf("SchemaVersion = %d, want %d", st.SchemaVersion, StateSchemaVersion)
+	if st.SchemaVersion != 1 {
+		t.Errorf("legacy SchemaVersion = %d, want 1", st.SchemaVersion)
 	}
 	// The checkpoint after the batch must include the tool result.
 	found := false

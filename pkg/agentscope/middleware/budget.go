@@ -41,7 +41,7 @@ func NewReplyBudgetControl(tokenBudget float64) *ReplyBudgetControlMiddleware {
 // per-reply isolation. Without this, budget from a previous reply (with a
 // different MiddleContext) could leak if the same context were reused.
 func (m *ReplyBudgetControlMiddleware) OnReply(ctx context.Context, input ReplyInput, next ReplyHandler) <-chan event.Event {
-	if mc := GetMiddleContext(ctx); mc != nil {
+	if mc := GetMiddleContext(ctx); mc != nil && budgetState(ctx) == nil {
 		mc.Set(m.Key(), "used", float64(0))
 	}
 	return next(ctx, input)
@@ -56,7 +56,7 @@ func (m *ReplyBudgetControlMiddleware) OnModelCall(
 ) (*model.ChatResponse, error) {
 	mc := GetMiddleContext(ctx)
 
-	if mc != nil && m.getUsed(mc) >= m.TokenBudget {
+	if mc != nil && m.usedInContext(ctx, mc) >= m.TokenBudget {
 		input.ToolChoice = &model.ToolChoice{Mode: "none"}
 	}
 
@@ -68,7 +68,7 @@ func (m *ReplyBudgetControlMiddleware) OnModelCall(
 	if mc != nil && resp != nil && resp.Usage != nil {
 		cost := m.InputTokenWeight*float64(resp.Usage.InputTokens) +
 			m.OutputTokenWeight*float64(resp.Usage.OutputTokens)
-		m.addUsed(mc, cost)
+		m.addInContext(ctx, mc, cost)
 	}
 
 	return resp, nil
@@ -82,7 +82,7 @@ func (m *ReplyBudgetControlMiddleware) OnSystemPrompt(
 	currentPrompt string,
 ) string {
 	mc := GetMiddleContext(ctx)
-	if mc != nil && m.getUsed(mc) >= m.TokenBudget {
+	if mc != nil && m.usedInContext(ctx, mc) >= m.TokenBudget {
 		return currentPrompt + "\n\n" + m.HintMessage
 	}
 	return currentPrompt

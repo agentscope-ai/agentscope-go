@@ -188,6 +188,7 @@ necesarios.
 | [hotreload](examples/hotreload/) | Recarga de configuración con tipos |
 | [bench](examples/bench/) | Pruebas de carga e informes de latencia |
 | [quality_load](examples/quality_load/) | Calidad de tareas con llegadas programadas y respuestas simuladas |
+| [managed_inference](examples/managed_inference/) | Admisión compartida y registro de solicitudes con un servidor HTTP simulado |
 | [qdrant_filter](examples/qdrant_filter/) | Filtros de metadatos con un servidor Qdrant local |
 | [wasm_sandbox](examples/wasm_sandbox/) | Detección de runtimes WASM y configuración del sandbox |
 | [hub_install](examples/hub_install/) | Registros de componentes y API de instalación |

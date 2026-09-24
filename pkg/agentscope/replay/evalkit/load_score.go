@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/inference"
 )
 
 type loadScoreState struct {
@@ -45,6 +47,9 @@ func scoreLoad(ctx context.Context, cfg *LoadConfig, report *LoadReport, pending
 				// A worker owns its actual Score invocation, error inspection and cleanup.
 				// A timeout never releases its slot to another still-running scorer.
 				scoreCtx, scoreCancel := context.WithTimeout(phase, cfg.ScoreTimeout)
+				arrival := report.Manifest.Arrivals[j]
+				scoreCtx = inference.WithAttribution(scoreCtx, inference.Attribution{RunID: report.Manifest.RunID, Scenario: report.Manifest.Scenario, Iteration: j + 1, TaskID: arrival.TaskID, Repeat: arrival.Repeat})
+				scoreCtx = inference.WithPurpose(scoreCtx, "scoring")
 				scorer := cfg.Scorer
 				var err error
 				if scorer == nil {

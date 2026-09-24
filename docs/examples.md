@@ -64,6 +64,7 @@ see the [AskUser contract](tools.md#askuser).
 | [hotreload](../examples/hotreload/) | Typed configuration reloads |
 | [bench](../examples/bench/) | Load testing and latency reports |
 | [quality_load](../examples/quality_load/) | Task quality under scheduled arrivals, with offline fixtures |
+| [managed_inference](../examples/managed_inference/) | Shared inference admission and physical attempts with a local HTTP fixture |
 | [qdrant_filter](../examples/qdrant_filter/) | Metadata filtering against a local Qdrant server |
 | [wasm_sandbox](../examples/wasm_sandbox/) | WASM runtime discovery and sandbox configuration |
 | [hub_install](../examples/hub_install/) | Component registries and installation APIs |

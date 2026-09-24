@@ -9,6 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/errors"
+	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/inference"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/internal/jsonx"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/message"
 )
@@ -61,7 +62,12 @@ func GenerateStructuredOutput(ctx context.Context, model ChatModel, msgs []*mess
 // token usage accumulated across EVERY strategy attempt (upstream #2433:
 // compression calls burn tokens and must be accounted even when an early
 // strategy is rejected and a later one succeeds).
-func GenerateStructuredOutputWithUsage(ctx context.Context, model ChatModel, msgs []*message.Msg, schema json.RawMessage) (json.RawMessage, *ChatUsage, error) {
+func GenerateStructuredOutputWithUsage(ctx context.Context, model ChatModel, msgs []*message.Msg, schema json.RawMessage) (result json.RawMessage, usage *ChatUsage, resultErr error) {
+	if managed, ok := model.(ManagedChatModel); ok {
+		var finish func(error)
+		ctx, finish = managed.ManagedDeployment().Start(ctx, "structured_output")
+		defer func() { finish(resultErr) }()
+	}
 	var totalUsage *ChatUsage
 	addUsage := func(u *ChatUsage) {
 		if u == nil {
@@ -97,7 +103,11 @@ func GenerateStructuredOutputWithUsage(ctx context.Context, model ChatModel, msg
 	strategies = append(strategies, soStrategy{"none", nil, false})
 
 	var firstErr error
-	for _, st := range strategies {
+	for index, st := range strategies {
+		callCtx := ctx
+		if _, managed := model.(ManagedChatModel); managed && index > 0 {
+			callCtx = inference.WithPurpose(ctx, "repair")
+		}
 		opts := []CallOption{WithTools([]ToolSchema{tool})}
 		if st.choice != nil {
 			opts = append(opts, WithToolChoice(st.choice))
@@ -106,7 +116,7 @@ func GenerateStructuredOutputWithUsage(ctx context.Context, model ChatModel, msg
 			opts = append(opts, disabler.DisableThinkingOptions()...)
 		}
 
-		resp, err := model.Chat(ctx, msgs, opts...)
+		resp, err := model.Chat(callCtx, msgs, opts...)
 		if resp != nil {
 			addUsage(resp.Usage)
 		}

@@ -13,6 +13,20 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ### Added
 
+- Opt-in managed inference with immutable deployment bindings, adapter capability
+  and host policy metadata, shared FIFO admission, one physical retry owner and
+  bounded attempt/operation snapshots. Direct streams hold permits through local
+  cleanup; summaries and structured repairs retain operation attribution.
+- Bounded embedding workers and per-batch shared admission for supported text
+  and DashScope multimodal adapters, with tenant/deployment cache namespaces.
+- Explicit UnifiedAgent reply recovery with owned, versioned built-in budget
+  counters, remaining iterations and observable checkpoint failures. Legacy
+  checkpoint writes remain schema 1; opt-in recovery writes use schema 2.
+- Physical-attempt projections in the cost ledger and task-quality/load reports,
+  including separate scoring attribution and explicit incomplete accounting.
+- Provider-qualified model-card lookup and twelve metadata cards from Python
+  AgentScope #2727. Includes a runnable managed-inference example and guide.
+
 - Typed Qdrant metadata equality/range filters, applied before topK through
   `QueryVector` and `QueryWithFilter`, with copied host-required conditions.
 - Experimental `evalkit.Runner.RunLoad`: versioned task/arrival manifests,

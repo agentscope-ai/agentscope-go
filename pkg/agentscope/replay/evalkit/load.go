@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/bench"
+	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/inference"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/model"
 )
 
@@ -51,6 +52,7 @@ type WorkloadManifest struct {
 // Tools must stop accessing their workspace before Execute returns (or their
 // stream closes). Detached work is the host's responsibility.
 type LoadConfig struct {
+	AttemptLedger     *inference.Ledger // Optional physical facts; use the same source as managed deployments.
 	MaxInFlight       int
 	TaskTimeout       time.Duration // Scheduled-arrival deadline, including dispatch lag.
 	DrainTimeout      time.Duration
@@ -79,6 +81,8 @@ const (
 // CallbackEnteredAt is actual observed callback entry; Arrival.StartedAt remains
 // generator authorization. A successful callback alone does not establish quality.
 type TaskQualityResult struct {
+	InferenceAttemptIDs []uint64             `json:"inference_attempt_ids,omitempty"`
+	InferenceUnmanaged  bool                 `json:"inference_unmanaged,omitempty"`
 	Iteration           int                  `json:"iteration"`
 	Arrival             bench.OpenLoopResult `json:"arrival"`
 	CallbackEnteredAt   time.Time            `json:"callback_entered_at,omitempty"`
@@ -105,22 +109,25 @@ type LoadLimits struct {
 // every planned arrival. Goodput counts quality-passing tasks completed before
 // their scheduled deadline per observed execution second; nil means no interval.
 // Latencies uses accepted completions only; CompletionSamples states its size.
-// This report does not provide backend-attempt or complete cost accounting.
+// Optional Inference records managed physical attempts at a separate final cutoff.
+// Its IDs join to rows; logical TaskResult cost estimates must not be added to it.
 type LoadReport struct {
-	Limits            LoadLimits            `json:"limits"`
-	Version           int                   `json:"version"`
-	Manifest          WorkloadManifest      `json:"manifest"`
-	Execution         *bench.OpenLoopReport `json:"execution"`
-	ScoringStartedAt  time.Time             `json:"scoring_started_at"`
-	ScoringFinishedAt time.Time             `json:"scoring_finished_at"`
-	Planned           int                   `json:"planned"`
-	Offered           int                   `json:"offered"`
-	Authorized        int                   `json:"authorized"`
-	CallbackEntered   int                   `json:"callback_entered"`
-	CompletionSamples int                   `json:"completion_samples"`
-	Latencies         *bench.LatencyStats   `json:"completion_latencies,omitempty"`
-	Goodput           *float64              `json:"quality_goodput,omitempty"`
-	Results           []TaskQualityResult   `json:"results"`
+	Inference          *inference.Snapshot   `json:"inference,omitempty"`
+	InferenceUnmatched int                   `json:"inference_unmatched,omitempty"`
+	Limits             LoadLimits            `json:"limits"`
+	Version            int                   `json:"version"`
+	Manifest           WorkloadManifest      `json:"manifest"`
+	Execution          *bench.OpenLoopReport `json:"execution"`
+	ScoringStartedAt   time.Time             `json:"scoring_started_at"`
+	ScoringFinishedAt  time.Time             `json:"scoring_finished_at"`
+	Planned            int                   `json:"planned"`
+	Offered            int                   `json:"offered"`
+	Authorized         int                   `json:"authorized"`
+	CallbackEntered    int                   `json:"callback_entered"`
+	CompletionSamples  int                   `json:"completion_samples"`
+	Latencies          *bench.LatencyStats   `json:"completion_latencies,omitempty"`
+	Goodput            *float64              `json:"quality_goodput,omitempty"`
+	Results            []TaskQualityResult   `json:"results"`
 }
 
 // RunLoad executes scheduled tasks, freezes their observed outcomes, then scores
@@ -139,7 +146,7 @@ func (r *Runner) RunLoad(execCtx, scoreCtx context.Context, manifest *WorkloadMa
 	rr := r.withDefaults()
 	// The outer scheduled deadline already bounds execution; retain the runner's
 	// independent task bound as well.
-	state := &loadExecutionState{open: true, candidates: make([]*taskExecution, len(m.Arrivals)), entered: make([]time.Time, len(m.Arrivals))}
+	state := &loadExecutionState{unmanaged: make([]bool, len(m.Arrivals)), open: true, candidates: make([]*taskExecution, len(m.Arrivals)), entered: make([]time.Time, len(m.Arrivals))}
 	offsets := make([]time.Duration, len(m.Arrivals))
 	for j, a := range m.Arrivals {
 		offsets[j] = a.Offset
@@ -159,8 +166,10 @@ func (r *Runner) RunLoad(execCtx, scoreCtx context.Context, manifest *WorkloadMa
 			return context.Canceled
 		}
 		state.entered[index] = time.Now()
+		state.unmanaged[index] = cfg.AttemptLedger != nil
 		state.mu.Unlock()
 		arrival := m.Arrivals[index]
+		ctx = inference.WithAttribution(ctx, inference.Attribution{RunID: m.RunID, Scenario: m.Scenario, Iteration: iteration, TaskID: arrival.TaskID, Repeat: arrival.Repeat})
 		task := tasks[arrival.TaskID]
 		task = cloneTask(&task)
 		var e *taskExecution
@@ -170,6 +179,8 @@ func (r *Runner) RunLoad(execCtx, scoreCtx context.Context, manifest *WorkloadMa
 			err = errors.New("model factory returned nil")
 		}
 		if err != nil {
+			// A failing factory may already have performed opaque warmup calls.
+			// Without a bound model, its accounting remains unverified.
 			kind := "model_setup"
 			if errors.Is(err, context.DeadlineExceeded) {
 				factoryContextError = context.DeadlineExceeded
@@ -181,6 +192,15 @@ func (r *Runner) RunLoad(execCtx, scoreCtx context.Context, manifest *WorkloadMa
 			}
 			e = &taskExecution{task: task, result: TaskResult{TaskID: task.ID, Error: errorDetail(err, "model factory failed without a message"), ErrorType: kind}, completedAt: time.Now()}
 		} else {
+			if cfg.AttemptLedger != nil {
+				managed, ok := cm.(model.ManagedChatModel)
+				covered := ok && managed.ManagedDeployment() != nil && managed.ManagedDeployment().Ledger() == cfg.AttemptLedger
+				state.mu.Lock()
+				if state.open {
+					state.unmanaged[index] = !covered
+				}
+				state.mu.Unlock()
+			}
 			e = rr.executeTask(ctx, &task, cm)
 		}
 		e.result.Repeat = arrival.Repeat
@@ -210,6 +230,7 @@ func (r *Runner) RunLoad(execCtx, scoreCtx context.Context, manifest *WorkloadMa
 	state.mu.Lock()
 	state.open = false
 	candidates, entered := state.candidates, state.entered
+	unmanaged := append([]bool(nil), state.unmanaged...)
 	state.candidates, state.entered = nil, nil
 	state.mu.Unlock()
 	report := &LoadReport{
@@ -233,10 +254,12 @@ func (r *Runner) RunLoad(execCtx, scoreCtx context.Context, manifest *WorkloadMa
 	pending := joinLoadExecution(report, candidates, entered)
 	scoreLoad(scoreCtx, cfg, report, pending)
 	summarizeLoad(report, cfg.TaskTimeout)
+	joinInference(report, cfg.AttemptLedger, unmanaged)
 	return report, runErr
 }
 
 type loadExecutionState struct {
+	unmanaged  []bool
 	mu         sync.Mutex
 	open       bool
 	candidates []*taskExecution

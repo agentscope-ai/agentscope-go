@@ -21,6 +21,7 @@ feature is wired into every execution path.
 | Context and recovery | [compress.go](pkg/agentscope/agent/compress.go), [checkpoint.go](pkg/agentscope/agent/checkpoint.go) | Context compression, summaries and checkpoint loading |
 | Loop integration | [loop_bridge.go](pkg/agentscope/agent/loop_bridge.go), [loop/](pkg/agentscope/loop/), [runtime/](pkg/agentscope/runtime/) | Agent-to-loop adapters and session execution |
 | Model interface and providers | [model.go](pkg/agentscope/model/model.go), [model/](pkg/agentscope/model/) | Chat calls, responses, usage, provider configuration and model cards |
+| Managed inference | [inference/](pkg/agentscope/inference/), [model/managed.go](pkg/agentscope/model/managed.go) | Deployment bindings, shared admission, physical attempts and stream ownership |
 | Message formatting | [formatter/](pkg/agentscope/formatter/) | Provider-specific message and multimodal formats |
 | Middleware | [middleware.go](pkg/agentscope/middleware/middleware.go), [middleware/](pkg/agentscope/middleware/) | Lifecycle hooks, budgets, tracing, guardrails and memory integration |
 | Tools and permissions | [tool.go](pkg/agentscope/tool/tool.go), [orchestrator.go](pkg/agentscope/tool/orchestrator.go), [permission/](pkg/agentscope/permission/) | Tool contracts, execution and permission decisions |
@@ -83,6 +84,14 @@ of supported text/data events; event data-size limits still apply.
 `console.Launch` returns the caller's context error at prompts, confirmations and
 active replies. SIGINT during a reply cancels only that reply. The caller owns
 input readers; Launch cannot unblock an arbitrary reader without its owner's help.
+
+`WithReplyRecovery` adds explicit `ResumeReplyStream` and typed built-in budget
+state. Legacy checkpoint writes remain schema 1; recovery writes use schema 2.
+`SaveCheckpoint` returns errors; automatic recovery boundaries fail-stop on save
+failure. A swallowed terminal is not durable completion. Recovery owns agent
+state until both middleware output is sealed and the actual core has exited;
+public channel closure alone is insufficient. A recovery middleware must call
+`next` at most once; delayed calls after sealing cannot start another core.
 
 ### Messages, formatting and model calls
 
@@ -158,6 +167,23 @@ as well as successful completion.
 Keep keys out of logs, errors and test fixtures committed to the repository.
 `GenerateStructuredOutput` uses tool calling; its fallback and retry behavior
 must be considered when accounting for model calls and usage.
+
+### Managed inference
+
+`model.NewManagedChatModel` copies a supported concrete adapter and binds it to
+an immutable `inference.Deployment`. Pools and deployment IDs are separate.
+The managed branch in `callModel` bypasses outer retries and rejects agent
+fallback models. Managed model identity reaches model middleware before budget
+checks. Summary/structured helper attempts share an operation cap. Ordinary
+unmanaged paths preserve their existing behavior.
+
+Managed HTTP is observed in `internal/httpx` at each physical send. The standard
+transport clone disables request body replay and redirects; opaque wrappers and
+custom transports are unsupported. Direct streams retain permits through body,
+parser, adapter and forwarding completion. Embedding workers use independent
+per-batch operations against the same shared pool. Every completion path must
+release ownership exactly once. See [managed inference](docs/managed-inference.md)
+for supported APIs, cache namespaces, unknown usage and shutdown behavior.
 
 ### Context and model capabilities
 
@@ -242,7 +268,10 @@ the public ReplyStream forwarder may close earlier on cancellation. Scoring has
 its own contexts and worker limits. Never inspect an old callback context during
 later scoring to revise accepted execution, or let late workers write a returned
 report. See [managed inference contracts](docs/design/managed-inference.md) for
-the implemented/proposed path matrix.
+the implemented/proposed path matrix. `LoadConfig.AttemptLedger` optionally
+joins physical attempts from the same canonical source. Independent scoring
+contexts carry task attribution and a scoring purpose; host identity must be
+supplied separately. Attempts and logical aggregates must not both add cost.
 
 ## Go conventions
 

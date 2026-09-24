@@ -148,7 +148,7 @@ establish that the other jobs pass.
 
 ### Coverage and regression policy
 
-- The library statement-coverage floor is **68.6%**. Keep `COVERAGE_MIN` in CI
+- The library statement-coverage floor is **70.0%**. Keep `COVERAGE_MIN` in CI
   and the default in `make cover-check` synchronized. The floor is a ratchet:
   raise it when a change establishes a higher baseline. Lowering it requires an
   explicit justification and is a blocking review finding, not a way to pass CI.

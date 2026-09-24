@@ -35,28 +35,60 @@ func (a *UnifiedAgent) Checkpoint(ctx context.Context) {
 	if a.stateSaver == nil {
 		return
 	}
-	// Serialize under the lock so async StateSavers and concurrent Observe /
-	// tool-state mutations cannot produce a torn snapshot; hand the saver a
-	// fully detached copy (HARNESS review M3).
+	if err := a.SaveCheckpoint(ctx); err != nil {
+		logging.Warn("checkpoint failed", "err", err)
+	}
+}
+
+// SaveCheckpoint persists an owned state snapshot and returns every failure.
+// Unlike legacy Checkpoint, a missing StateSaver is an error. For opt-in active
+// recovery it includes synchronized counters; automatic safe points stop the
+// reply if persistence fails. Successful saving does not make tools exactly-once.
+func (a *UnifiedAgent) SaveCheckpoint(ctx context.Context) error {
+	a.checkpointMu.Lock()
+	defer a.checkpointMu.Unlock()
+	if a.stateSaver == nil {
+		return fmt.Errorf("agent: no StateSaver configured")
+	}
 	a.mu.Lock()
 	st := *a.state
-	st.SchemaVersion = StateSchemaVersion
-	sessionID := st.SessionID
+	// Preserve legacy writes for readers that support only schema 1. Recovery
+	// counters require schema 2 and must never silently disappear on downgrade.
+	st.SchemaVersion = 1
+	run := a.activeRecovery
+	if run != nil {
+		st.ReplyRecovery = run.snapshot()
+	}
+	if st.ReplyRecovery != nil {
+		st.SchemaVersion = StateSchemaVersion
+		if _, err := middleware.WithReplyBudgetSnapshot(ctx, &st.ReplyRecovery.Budgets); err != nil {
+			a.mu.Unlock()
+			return fmt.Errorf("agent: checkpoint budgets: %w", err)
+		}
+	}
 	raw, err := json.Marshal(&st)
 	a.mu.Unlock()
 	if err != nil {
-		logging.Warn("checkpoint marshal failed", "session", sessionID, "err", err)
-		return
+		return fmt.Errorf("agent: checkpoint marshal: %w", err)
 	}
 	var detached AgentState
-	if err := json.Unmarshal(raw, &detached); err != nil {
-		logging.Warn("checkpoint snapshot failed", "session", sessionID, "err", err)
-		return
+	if err = json.Unmarshal(raw, &detached); err != nil {
+		return fmt.Errorf("agent: checkpoint snapshot: %w", err)
 	}
-
-	if err := a.stateSaver.SaveState(ctx, sessionID, &detached); err != nil {
-		logging.Warn("checkpoint failed", "session", sessionID, "err", err)
+	// Keep a separate copy for the agent: a saver owns and may mutate its input.
+	var own AgentState
+	if err = json.Unmarshal(raw, &own); err != nil {
+		return fmt.Errorf("agent: checkpoint snapshot: %w", err)
 	}
+	if err = a.stateSaver.SaveState(ctx, detached.SessionID, &detached); err != nil {
+		return fmt.Errorf("agent: save checkpoint: %w", err)
+	}
+	a.mu.Lock()
+	if a.activeRecovery == run {
+		a.state.ReplyRecovery = own.ReplyRecovery
+	}
+	a.mu.Unlock()
+	return nil
 }
 
 // LoadCheckpoint retrieves a persisted state for a session, ready to pass to

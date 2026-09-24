@@ -32,8 +32,8 @@ cover:
 cover-check:
 	go test -coverprofile=/tmp/agentscope-cover-pkg.out ./pkg/... >/dev/null
 	@total=$$(go tool cover -func=/tmp/agentscope-cover-pkg.out | tail -1 | awk '{print $$NF}' | tr -d '%'); \
-	echo "pkg coverage: $${total}% (floor $${COVERAGE_MIN:-68.6}%)"; \
-	awk -v t="$$total" -v min="$${COVERAGE_MIN:-68.6}" 'BEGIN { if (t+0 < min+0) { print "ERROR: coverage below floor"; exit 1 } }'
+	echo "pkg coverage: $${total}% (floor $${COVERAGE_MIN:-70.0}%)"; \
+	awk -v t="$$total" -v min="$${COVERAGE_MIN:-70.0}" 'BEGIN { if (t+0 < min+0) { print "ERROR: coverage below floor"; exit 1 } }'
 
 clean:
 	go clean -cache -testcache

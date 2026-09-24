@@ -19,7 +19,7 @@ import "github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope"
 
 - **Stable** (source-compatible within a major version): `message`, `model`,
   `agent` (UnifiedAgent), `tool`, `permission`, `formatter`, `errors`.
-- **Experimental** (may change): `runtime`, `loop`, `app`, `service`, `realtime`,
+- **Experimental** (may change): `inference`, `runtime`, `loop`, `app`, `service`, `realtime`,
   `tune`, `replay/evalkit`, `event/streamcheck`, `agenttest/faults`,
   `providercontract` (test-only), `console`, `channel`, `channel/dingtalk`,
   `hub` (built-in sources), `skill` (`Store` partitions), `middleware/memory`
@@ -106,7 +106,38 @@ ports and deferred work, including realtime/TUI, SOP and model-context wiring.
 
 See [retrieval](docs/retrieval.md), [quality/load testing](docs/benchmarks.md) and
 [the delivery contracts](docs/design/managed-inference.md) for API and lifecycle
-limits. Managed admission and model routing remain proposed subsequent changes.
+limits. Managed admission is available through explicit constructors; model
+routing remains proposed.
+
+## Unreleased managed inference behavior
+
+- `model.NewManagedChatModel` and `embedding.NewManagedEmbeddingModel` bind
+  supported built-in adapters to a host-owned deployment and shared admission
+  pool. Required model interfaces and unmanaged defaults stay unchanged.
+  Managed calls require trusted tenant identity, own physical retries and reject
+  hidden fallback wrappers, custom transports and redirects. See the
+  [adapter support table](docs/managed-inference.md#supported-adapters).
+- Deployment context windows participate in optional `ContextSizer` resolution;
+  explicit agent context overrides still win. Provider-qualified model-card
+  lookup returns owned metadata and does not validate live serving limits.
+- Positive embedding `MaxConcurrency` bounds batch workers. Managed cache keys
+  include tenant and deployment identity; unmanaged cache keys retain their
+  format. Use distinct stable deployment IDs for distinct serving configurations.
+- Physical attempt snapshots expose missing usage/prices and retention loss.
+  `CostLedger` can project this source without counting logical records twice;
+  `RunLoad` can attach matching attempts and scoring attribution to its report.
+- `WithReplyRecovery` opts UnifiedAgent into typed built-in reply budgets,
+  explicit `ResumeReplyStream`, fail-stop persistence and exclusive reply state
+  until actual core completion. Middleware may invoke its reply handler at most
+  once; calls after its output closes are rejected. Pending tools retain their
+  unfinished iteration on resume and pass current validation.
+- Ordinary checkpoints keep schema 1; recovery checkpoints use schema 2 and
+  budget snapshot version 1. Older loaders reject schema 2. New loaders accept
+  older conversation state, but explicit recovery requires its typed snapshot.
+  Use a pre-recovery checkpoint or fresh conversation when rolling back; do not
+  remove counters to bypass resume validation. `SaveCheckpoint` returns errors;
+  legacy `Checkpoint` still logs them. Recovery does not provide exactly-once
+  tool execution or a reservation against concurrent physical spending.
 
 ## Error handling
 

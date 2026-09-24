@@ -7,6 +7,7 @@ import (
 
 	agenterrors "github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/errors"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/event"
+	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/inference"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/model"
 )
 
@@ -25,6 +26,7 @@ import (
 const DefaultLedgerRetention = 100_000
 
 type CostLedger struct {
+	attempts  *inference.Ledger
 	mu        sync.Mutex
 	entries   []LedgerEntry
 	retention int
@@ -51,12 +53,20 @@ type CostFilter struct {
 
 // CostSummary is the aggregated answer to a CostFilter query.
 type CostSummary struct {
-	TotalCostUSD   float64
-	TotalInTokens  int
-	TotalOutTokens int
-	Calls          int
-	ByModel        map[string]float64
-	ByAgent        map[string]float64
+	UnknownUsage          int
+	UnknownCost           int
+	Dropped               uint64
+	Incomplete            bool
+	CostOverflow          bool
+	TokenOverflow         bool
+	TotalCacheReadTokens  int
+	TotalCacheWriteTokens int
+	TotalCostUSD          float64
+	TotalInTokens         int
+	TotalOutTokens        int
+	Calls                 int
+	ByModel               map[string]float64
+	ByAgent               map[string]float64
 }
 
 // NewCostLedger creates an empty ledger with DefaultLedgerRetention.
@@ -74,6 +84,9 @@ func NewCostLedgerWithRetention(retention int) *CostLedger {
 
 // Record appends one cost attribution.
 func (l *CostLedger) Record(e *LedgerEntry) {
+	if l.attempts != nil {
+		return
+	}
 	if e.Timestamp.IsZero() {
 		e.Timestamp = time.Now()
 	}
@@ -87,6 +100,9 @@ func (l *CostLedger) Record(e *LedgerEntry) {
 
 // Summary aggregates entries matching the filter.
 func (l *CostLedger) Summary(f CostFilter) CostSummary {
+	if l.attempts != nil {
+		return l.inferenceSummary(f)
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	out := CostSummary{ByModel: map[string]float64{}, ByAgent: map[string]float64{}}
@@ -138,7 +154,7 @@ func NewCostTracking(ledger *CostLedger, sessionID, agentName string, prices map
 // OnModelCall records usage after each successful call.
 func (m *CostTrackingMiddleware) OnModelCall(ctx context.Context, input *ModelCallInput, next ModelCallHandler) (*model.ChatResponse, error) {
 	resp, err := next(ctx, input)
-	if err != nil || resp == nil || resp.Usage == nil || m.ledger == nil {
+	if err != nil || resp == nil || resp.Usage == nil || m.ledger == nil || m.ledger.attempts != nil {
 		return resp, err
 	}
 	price, ok := m.priceFor(input.ModelName)
@@ -228,7 +244,7 @@ func NewReplyCostBudget(maxUSD float64, opts ...ReplyCostBudgetOption) *ReplyCos
 
 // OnReply resets per-reply cost state.
 func (m *ReplyCostBudgetMiddleware) OnReply(ctx context.Context, input ReplyInput, next ReplyHandler) <-chan event.Event {
-	if mc := GetMiddleContext(ctx); mc != nil {
+	if mc := GetMiddleContext(ctx); mc != nil && budgetState(ctx) == nil {
 		mc.Set(m.Key(), "spent", 0.0)
 		mc.Set(m.Key(), "warned", false)
 	}
@@ -242,7 +258,7 @@ func (m *ReplyCostBudgetMiddleware) OnModelCall(ctx context.Context, input *Mode
 	if mc == nil || m.maxUSD <= 0 {
 		return next(ctx, input)
 	}
-	spent := m.spent(mc)
+	spent := m.spentInContext(ctx, mc)
 	if spent >= m.maxUSD {
 		return nil, agenterrors.ErrBudgetExceeded
 	}
@@ -252,13 +268,7 @@ func (m *ReplyCostBudgetMiddleware) OnModelCall(ctx context.Context, input *Mode
 		return resp, err
 	}
 	if price, ok := m.priceFor(input.ModelName); ok {
-		spent += price.CostUSD(resp.Usage)
-		mc.Set(m.Key(), "spent", spent)
-		if spent >= m.maxUSD*m.warnRatio {
-			if w, _ := mc.Get(m.Key(), "warned"); w != true {
-				mc.Set(m.Key(), "warned", true)
-			}
-		}
+		m.recordInContext(ctx, mc, price.CostUSD(resp.Usage))
 	}
 	return resp, nil
 }
@@ -269,7 +279,7 @@ func (m *ReplyCostBudgetMiddleware) OnSystemPrompt(ctx context.Context, _ string
 	if mc == nil {
 		return currentPrompt
 	}
-	if w, ok := mc.Get(m.Key(), "warned"); ok && w == true {
+	if m.warnedInContext(ctx, mc) {
 		return currentPrompt + "\n\n" + m.hint
 	}
 	return currentPrompt
