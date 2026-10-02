@@ -121,8 +121,12 @@ predeterminados.
 Las herramientas, la entrada multimodal, el razonamiento y las estadísticas de
 uso dependen del proveedor y del modelo. Los métodos `ChatStream` de los
 proveedores exponen fragmentos de respuesta; `UnifiedAgent.ReplyStream` expone
-eventos del ciclo de ejecución y actualmente usa llamadas al modelo sin streaming
-internamente.
+eventos del ciclo de ejecución y deltas de texto y razonamiento mediante
+`ChatStream` de forma predeterminada cuando no hay middleware. Las cadenas de
+middleware existentes conservan llamadas `Chat` con respuesta completa para
+filtrar el contenido antes de publicarlo. Usa `agent.WithModelStreaming(false)`
+para conservar el comportamiento anterior. Consulta [streaming del agente](docs/streaming.md)
+para los detalles de finalización, cancelación y fallback.
 
 Para modelos locales, configura la ventana de contexto y el tiempo de espera
 según el servidor y el dispositivo. Las fichas describen capacidades del modelo;
@@ -156,7 +160,7 @@ necesarios.
 | [agent_v2](examples/agent_v2/) | UnifiedAgent con una herramienta de función |
 | [react_tool](examples/react_tool/) | Una FunctionTool personalizada |
 | [react_builtin_tools](examples/react_builtin_tools/) | Herramientas integradas de programación |
-| [streaming](examples/streaming/) | Eventos del ciclo de ejecución del agente |
+| [streaming](examples/streaming/) | Eventos del agente y deltas de texto del proveedor |
 | [ask_user](examples/ask_user/) | Preguntas estructuradas con un modelo y una respuesta del anfitrión simulados |
 | [console](examples/console/) | Chat en terminal y confirmación de herramientas |
 | [model_call](examples/model_call/) | Streaming del modelo, herramientas y salida estructurada |

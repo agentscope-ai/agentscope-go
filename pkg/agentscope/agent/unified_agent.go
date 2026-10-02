@@ -66,6 +66,7 @@ type UnifiedAgent struct {
 	// agentDrivenCompression registers the compress_context tool so the
 	// model itself can trigger compression (upstream #2143).
 	agentDrivenCompression bool
+	modelStreaming         bool
 }
 
 // ReactConfig controls the ReAct reasoning-acting loop.
@@ -259,12 +260,13 @@ func NewUnifiedAgent(name, systemPrompt string, m model.ChatModel, opts ...Agent
 		panic("agent: NewUnifiedAgent requires a non-nil model")
 	}
 	a := &UnifiedAgent{
-		name:         name,
-		systemPrompt: systemPrompt,
-		model:        m,
-		toolkit:      tool.NewToolkit(),
-		reactCfg:     ReactConfig{MaxIters: defaultUnifiedMaxIters},
-		state:        &AgentState{SessionID: agentscope.GenerateID()},
+		name:           name,
+		systemPrompt:   systemPrompt,
+		model:          m,
+		modelStreaming: true,
+		toolkit:        tool.NewToolkit(),
+		reactCfg:       ReactConfig{MaxIters: defaultUnifiedMaxIters},
+		state:          &AgentState{SessionID: agentscope.GenerateID()},
 	}
 	for _, opt := range opts {
 		opt(a)
@@ -292,13 +294,24 @@ func (a *UnifiedAgent) Reply(ctx context.Context, input string) (*message.Msg, e
 	}
 
 	var replyID string
+	var replyErr error
 	for evt := range ch {
 		if start, ok := evt.(event.ReplyStartEvent); ok {
 			replyID = start.ReplyID
 		}
+		if end, ok := evt.(event.ReplyEndEvent); ok && end.ReplyID == replyID && end.FinishedReason == types.ReplyError {
+			if end.Error != nil {
+				replyErr = fmt.Errorf("agent %s: %s", a.name, end.Error.Message)
+			} else {
+				replyErr = fmt.Errorf("agent %s: reply failed", a.name)
+			}
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if replyErr != nil {
+		return nil, replyErr
 	}
 
 	// Match this invocation, never a reply already present in history.
@@ -486,7 +499,7 @@ func (a *UnifiedAgent) replyLoop(ctx context.Context, input string, ch chan<- ev
 	a.state.Context = append(a.state.Context, userMsg)
 	a.mu.Unlock()
 
-	modelCallHandler := a.buildModelCallHandler()
+	modelCallHandler := a.buildModelCallHandler(ch, replyID)
 	actingHandler := a.buildActingHandler()
 
 	// Swallow loop (Python #2322): an OnReply middleware may swallow the
@@ -667,10 +680,13 @@ reactLoop:
 				Messages:  modelMsgs,
 				Tools:     schemas,
 			})
+			if err == nil && resp == nil {
+				err = fmt.Errorf("agent: model returned no response")
+			}
 			if err != nil {
 				hooks.AfterModelCall(curState, iter, err)
 				logrus.WithError(err).Error("agent: model call failed")
-				emit(ctx, ch, event.NewModelCallEndEvent(replyID, 0, 0))
+				emitModelCallEnd(ctx, ch, replyID, resp)
 				if ctx.Err() != nil {
 					return types.ReplyInterrupted, madeProgress, nil
 				}
@@ -712,7 +728,9 @@ reactLoop:
 			a.saveToContext(resp.Content, resp.Usage)
 
 			// Emit streaming events for consumers
-			emitContentEvents(ctx, ch, replyID, resp.Content)
+			if !a.streamsModel() {
+				emitContentEvents(ctx, ch, replyID, resp.Content)
+			}
 
 			// Inspect: check for tool calls
 			toolCalls := extractToolCalls(resp.Content)
@@ -815,7 +833,7 @@ func emitContentEvents(ctx context.Context, ch chan<- event.Event, replyID strin
 }
 
 // buildModelCallHandler returns a ModelCallHandler wrapped with middleware.
-func (a *UnifiedAgent) buildModelCallHandler() middleware.ModelCallHandler {
+func (a *UnifiedAgent) buildModelCallHandler(ch chan<- event.Event, replyID string) middleware.ModelCallHandler {
 	core := func(ctx context.Context, input *middleware.ModelCallInput) (*model.ChatResponse, error) {
 		var opts []model.CallOption
 		if len(input.Tools) > 0 {
@@ -825,6 +843,9 @@ func (a *UnifiedAgent) buildModelCallHandler() middleware.ModelCallHandler {
 			opts = append(opts, model.WithToolChoice(input.ToolChoice))
 		}
 		opts = ApplyResponseFormat(opts, a.responseFormat)
+		if a.streamsModel() {
+			return a.callModelStreaming(ctx, input.Messages, opts, ch, replyID)
+		}
 		return a.callModel(ctx, input.Messages, opts)
 	}
 	if len(a.middlewares) == 0 {
@@ -1676,8 +1697,11 @@ func (a *UnifiedAgent) forcedFinalSummary(ctx context.Context, ch chan<- event.E
 		Tools:      nil,
 		ToolChoice: &model.ToolChoice{Mode: "none"},
 	})
+	if err == nil && resp == nil {
+		err = fmt.Errorf("agent: model returned no response")
+	}
 	if err != nil {
-		emit(ctx, ch, event.NewModelCallEndEvent(replyID, 0, 0))
+		emitModelCallEnd(ctx, ch, replyID, resp)
 		logrus.WithError(err).WithField("agent", a.name).
 			Warn("forced finalization call failed")
 		return false
@@ -1709,7 +1733,9 @@ func (a *UnifiedAgent) forcedFinalSummary(ctx context.Context, ch chan<- event.E
 	}
 
 	a.saveToContext(content, resp.Usage)
-	emitContentEvents(ctx, ch, replyID, content)
+	if !a.streamsModel() {
+		emitContentEvents(ctx, ch, replyID, content)
+	}
 	return true
 }
 

@@ -379,11 +379,14 @@ func processGeminiStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh
 	defer close(outCh)
 
 	var (
-		accText     string
-		accThinking string
-		toolCallIdx int
-		modelName   string
-		usage       *ChatUsage
+		accText      string
+		accThinking  string
+		toolCallIdx  int
+		toolCalls    []message.ContentBlock
+		finishReason string
+		streamErr    error
+		modelName    string
+		usage        *ChatUsage
 	)
 
 	for evt := range sseCh {
@@ -408,7 +411,8 @@ func processGeminiStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh
 
 		var chunk geminiResponse
 		if err := json.Unmarshal([]byte(evt.Data), &chunk); err != nil {
-			continue
+			streamErr = fmt.Errorf("gemini: invalid stream chunk: %w", err)
+			break
 		}
 
 		if chunk.ModelVersion != "" {
@@ -421,6 +425,9 @@ func processGeminiStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh
 
 		if len(chunk.Candidates) == 0 {
 			continue
+		}
+		if reason := chunk.Candidates[0].FinishReason; reason != "" {
+			finishReason = reason
 		}
 
 		var deltaContent []message.ContentBlock
@@ -441,6 +448,7 @@ func processGeminiStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh
 					State: message.ToolCallPending,
 				}
 				toolCallIdx++
+				toolCalls = append(toolCalls, tc)
 				deltaContent = append(deltaContent, tc)
 			} else if part.Text != "" {
 				accText += part.Text
@@ -480,12 +488,18 @@ func processGeminiStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh
 		})
 	}
 
+	finalContent = append(finalContent, toolCalls...)
+	if streamErr == nil && finishReason != "STOP" && finishReason != "MAX_TOKENS" {
+		streamErr = fmt.Errorf("gemini: stream ended without successful finishReason (%q)", finishReason)
+	}
 	finalResp := ChatResponse{
-		Content:   finalContent,
-		IsLast:    true,
-		CreatedAt: time.Now().Format(message.TimestampFormat),
-		Usage:     usage,
-		ModelName: modelName,
+		Content:    finalContent,
+		IsLast:     true,
+		CreatedAt:  time.Now().Format(message.TimestampFormat),
+		Usage:      usage,
+		ModelName:  modelName,
+		StopReason: normalizeStopReason(finishReason),
+		Error:      streamErr,
 	}
 	select {
 	case outCh <- finalResp:

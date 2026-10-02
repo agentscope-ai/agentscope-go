@@ -45,10 +45,14 @@ JSON tool-calling implementation; avoid extending it when the feature belongs in
 the current agent. `UserAgent` and `A2AAgent` serve interactive-input and remote
 agent use cases.
 
-`UnifiedAgent.ReplyStream` exposes an event stream, but its `callModel` method
-currently calls `ChatModel.Chat`. An event-streaming interface does not imply
-streamed token generation from the provider. `UnifiedAgentRunner.LoopOptions`
-connects the agent to `loop.Loop`; its model adapter also uses `callModel`.
+`UnifiedAgent.ReplyStream` uses `ChatStream` for ordinary rounds and forced
+finalization when model streaming is enabled (the default) and no middleware is
+installed. `agent/model_stream.go` converts text/thinking deltas to events, checks
+final consistency and rejects incomplete streams before tool execution. Legacy
+middleware chains and `WithModelStreaming(false)` use buffered `callModel`/`Chat`
+so response filters run before publication. `Reply` drains the same event path and
+returns terminal reply errors. `UnifiedAgentRunner.LoopOptions` connects the
+agent to `loop.Loop`; its model adapter still uses buffered `callModel`.
 When changing retries, cancellation, permissions or accounting, trace the
 specific entry point and its adapters rather than assuming they share all hooks.
 

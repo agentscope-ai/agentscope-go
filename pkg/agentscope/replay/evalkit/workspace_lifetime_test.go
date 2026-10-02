@@ -164,3 +164,7 @@ func TestRunTaskLaterTurnWaitsForItsOwnToolExit(t *testing.T) {
 	}
 	waitWorkspaceRemoved(t, path)
 }
+
+func (m workspaceHoldModel) ChatStream(context.Context, []*message.Msg, ...model.CallOption) (<-chan model.ChatResponse, error) {
+	return nil, model.ErrStreamNotSupported
+}

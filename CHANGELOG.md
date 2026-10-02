@@ -27,6 +27,18 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ### Fixed
 
+- **Streaming behavior change (#17):** `UnifiedAgent.ReplyStream` now forwards
+  provider thinking/text deltas before the model completes, for ordinary rounds
+  and forced finalization without middleware. `Reply` drains the same path and
+  propagates terminal reply errors. `agent.WithModelStreaming(false)` restores
+  buffered calls; existing middleware chains stay buffered to preserve filtering.
+  Established streams are not retried, incomplete tool calls are not committed,
+  and final content/usage are not emitted twice.
+- OpenAI-compatible streams reject malformed chunks and EOF without a completion
+  marker, and preserve cache-read usage. Gemini streams retain final tool calls
+  and reject missing/unsuccessful completion; Anthropic streams preserve stop
+  reasons so truncated generation cannot be mistaken for completed tool input.
+
 - Synchronous agent replies propagate cancellation and select only the current
   reply; retries and fallback stop after cancellation in both execution entries.
 - Qdrant ingestion no longer panics by passing `[]float32` vectors as payload

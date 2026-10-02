@@ -81,6 +81,14 @@ ports and deferred work, including realtime/TUI, SOP and model-context wiring.
 
 ## Unreleased execution and retrieval behavior
 
+- **Streaming behavior change (#17):** without middleware, `ReplyStream` now
+  uses provider `ChatStream` for normal rounds and forced finalization; `Reply`
+  drains that path. Text/thinking deltas precede `ModelCallEnd`. Use
+  `agent.WithModelStreaming(false)` for buffered compatibility. Legacy middleware
+  chains remain buffered to preserve response filtering. Incomplete streams fail
+  before tool execution, and `Reply` returns terminal reply errors. See
+  [streaming contracts](docs/streaming.md) for provider and helper-path limits.
+
 - Synchronous `Reply` checks caller cancellation after draining events and again
   before returning state, and only selects the current reply ID. Cancellation
   returns a nil message and a recognizable context error; earlier replies are

@@ -147,3 +147,11 @@ func TestRunTaskSetupFailureRetainsEarlierUsage(t *testing.T) {
 		t.Fatalf("prior work lost: %+v", r)
 	}
 }
+
+func (m terminalModel) ChatStream(context.Context, []*message.Msg, ...model.CallOption) (<-chan model.ChatResponse, error) {
+	return nil, model.ErrStreamNotSupported
+}
+
+func (m laterTurnFailure) ChatStream(context.Context, []*message.Msg, ...model.CallOption) (<-chan model.ChatResponse, error) {
+	return nil, model.ErrStreamNotSupported
+}

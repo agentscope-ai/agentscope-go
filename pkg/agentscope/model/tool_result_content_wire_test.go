@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -121,7 +122,12 @@ func TestNativeToolResultContentWire(t *testing.T) {
 					case "gemini":
 						if stream {
 							w.Header().Set("Content-Type", "text/event-stream")
-							fmt.Fprintf(w, "data: %s\n\n", geminiResponseJSON())
+							var compact bytes.Buffer
+							if err := json.Compact(&compact, []byte(geminiResponseJSON())); err != nil {
+								t.Error(err)
+								return
+							}
+							fmt.Fprintf(w, "data: %s\n\n", compact.String())
 						} else {
 							fmt.Fprint(w, geminiResponseJSON())
 						}
