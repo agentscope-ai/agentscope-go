@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/formatter"
@@ -430,10 +431,13 @@ type anthropicContentBlockStart struct {
 	Type         string `json:"type"`
 	Index        int    `json:"index"`
 	ContentBlock struct {
-		Type string `json:"type"` // "text", "thinking", "tool_use"
-		ID   string `json:"id,omitempty"`
-		Name string `json:"name,omitempty"`
-		Text string `json:"text,omitempty"`
+		Type      string          `json:"type"` // "text", "thinking", "tool_use"
+		ID        string          `json:"id,omitempty"`
+		Name      string          `json:"name,omitempty"`
+		Text      string          `json:"text,omitempty"`
+		Thinking  string          `json:"thinking,omitempty"`
+		Signature string          `json:"signature,omitempty"`
+		Input     json.RawMessage `json:"input,omitempty"`
 	} `json:"content_block"`
 }
 
@@ -470,8 +474,8 @@ func processAnthropicStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 		cacheCreationInputTokens int
 		cacheInputTokens         int
 		accBlocks                []anthropicAccBlock
-		currentBlockIdx          int
 		sawMessageStop           bool
+		finishReason             string
 		// streamErr carries an Anthropic "error" SSE event, which arrives
 		// inside an otherwise successful HTTP 200 stream.
 		streamErr error
@@ -504,10 +508,21 @@ func processAnthropicStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 			return
 		}
 
+		decode := func(dst any) bool {
+			if !strings.HasPrefix(strings.TrimSpace(evt.Data), "{") {
+				streamErr = fmt.Errorf("anthropic: invalid %s event object", evt.Event)
+				return false
+			}
+			if err := json.Unmarshal([]byte(evt.Data), dst); err != nil {
+				streamErr = fmt.Errorf("anthropic: invalid %s event: %w", evt.Event, err)
+				return false
+			}
+			return true
+		}
 		switch evt.Event {
 		case "message_start":
 			var ms anthropicMessageStart
-			if json.Unmarshal([]byte(evt.Data), &ms) == nil {
+			if decode(&ms) {
 				responseID = ms.Message.ID
 				modelName = ms.Message.Model
 				if ms.Message.Usage != nil {
@@ -533,21 +548,50 @@ func processAnthropicStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 
 		case "content_block_start":
 			var cbs anthropicContentBlockStart
-			if json.Unmarshal([]byte(evt.Data), &cbs) == nil {
-				currentBlockIdx = cbs.Index
-				for len(accBlocks) <= currentBlockIdx {
-					accBlocks = append(accBlocks, anthropicAccBlock{})
+			if decode(&cbs) {
+				if cbs.Index != len(accBlocks) {
+					streamErr = fmt.Errorf("anthropic: invalid content block start index %d", cbs.Index)
+					break
 				}
-				accBlocks[currentBlockIdx].blockType = cbs.ContentBlock.Type
-				accBlocks[currentBlockIdx].id = cbs.ContentBlock.ID
-				accBlocks[currentBlockIdx].name = cbs.ContentBlock.Name
+				block := anthropicAccBlock{blockType: cbs.ContentBlock.Type, id: cbs.ContentBlock.ID, name: cbs.ContentBlock.Name, text: cbs.ContentBlock.Text, signature: cbs.ContentBlock.Signature}
+				var initial []message.ContentBlock
+				switch block.blockType {
+				case "text":
+					if block.text != "" {
+						initial = []message.ContentBlock{message.TextBlock{Type: "text", Text: block.text}}
+					}
+				case "thinking":
+					block.text = cbs.ContentBlock.Thinking
+					if block.text != "" {
+						initial = []message.ContentBlock{message.ThinkingBlock{Type: "thinking", Thinking: block.text}}
+					}
+				case "tool_use":
+					block.text = string(cbs.ContentBlock.Input)
+				}
+				accBlocks = append(accBlocks, block)
+				if len(initial) > 0 {
+					select {
+					case outCh <- ChatResponse{Content: initial, ID: responseID, ModelName: modelName}:
+					case <-ctx.Done():
+						return
+					}
+				}
 			}
 
 		case "content_block_delta":
 			var cbd anthropicContentBlockDelta
-			if json.Unmarshal([]byte(evt.Data), &cbd) == nil {
+			if decode(&cbd) {
 				idx := cbd.Index
-				if idx >= 0 && idx < len(accBlocks) {
+				if idx < 0 || idx >= len(accBlocks) || accBlocks[idx].closed {
+					streamErr = fmt.Errorf("anthropic: delta for inactive content block %d", idx)
+					break
+				}
+				{
+					expected := map[string]string{"text_delta": "text", "thinking_delta": "thinking", "signature_delta": "thinking", "input_json_delta": "tool_use"}
+					if kind, known := expected[cbd.Delta.Type]; known && kind != accBlocks[idx].blockType {
+						streamErr = fmt.Errorf("anthropic: delta type does not match content block %d", idx)
+						break
+					}
 					switch cbd.Delta.Type {
 					case "text_delta":
 						accBlocks[idx].text += cbd.Delta.Text
@@ -583,6 +627,10 @@ func processAnthropicStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 							return
 						}
 					case "input_json_delta":
+						if !accBlocks[idx].inputStarted {
+							accBlocks[idx].text = ""
+							accBlocks[idx].inputStarted = true
+						}
 						accBlocks[idx].text += cbd.Delta.PartialJSON
 					case "signature_delta":
 						accBlocks[idx].signature += cbd.Delta.Signature
@@ -591,19 +639,33 @@ func processAnthropicStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 			}
 
 		case "content_block_stop":
-			// Block is complete, no action needed
+			var stop struct {
+				Index int `json:"index"`
+			}
+			if decode(&stop) {
+				if stop.Index < 0 || stop.Index >= len(accBlocks) || accBlocks[stop.Index].closed {
+					streamErr = fmt.Errorf("anthropic: invalid content block stop index %d", stop.Index)
+				} else {
+					accBlocks[stop.Index].closed = true
+				}
+			}
 
 		case "message_delta":
 			var md anthropicMessageDelta
-			if json.Unmarshal([]byte(evt.Data), &md) == nil {
+			if decode(&md) {
+				finishReason = md.Delta.StopReason
 				if md.Usage != nil {
 					outputTokens = md.Usage.OutputTokens
 				}
 			}
 
 		case "message_stop":
-			// Stream complete
-			sawMessageStop = true
+			var stop struct {
+				Type string `json:"type"`
+			}
+			if decode(&stop) {
+				sawMessageStop = true
+			}
 
 		case "error":
 			// Anthropic reports mid-stream failures (overloaded_error, rate
@@ -621,6 +683,9 @@ func processAnthropicStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 				}
 				streamErr = fmt.Errorf("anthropic: unparseable stream error event: %s", data)
 			}
+		}
+		if streamErr != nil {
+			break
 		}
 	}
 
@@ -666,12 +731,13 @@ func processAnthropicStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 	}
 
 	finalResp := ChatResponse{
-		Content:   finalContent,
-		IsLast:    true,
-		ID:        responseID,
-		CreatedAt: time.Now().Format(message.TimestampFormat),
-		Usage:     usage,
-		ModelName: modelName,
+		Content:    finalContent,
+		IsLast:     true,
+		ID:         responseID,
+		CreatedAt:  time.Now().Format(message.TimestampFormat),
+		Usage:      usage,
+		ModelName:  modelName,
+		StopReason: normalizeStopReason(finishReason),
 	}
 	// Upstream #2350 class: never end silently. A stream that terminates
 	// without message_stop is truncated (proxy reset, upstream abort); the
@@ -701,11 +767,13 @@ type anthropicStreamError struct {
 }
 
 type anthropicAccBlock struct {
-	blockType string // "text", "thinking", "tool_use"
-	id        string
-	name      string
-	text      string
-	signature string
+	blockType    string // "text", "thinking", "tool_use"
+	id           string
+	name         string
+	text         string
+	signature    string
+	closed       bool
+	inputStarted bool
 }
 
 // CountTokens estimates token count.

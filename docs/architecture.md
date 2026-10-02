@@ -19,6 +19,7 @@ pkg/agentscope/
 ├── agent/                 # Agent abstractions
 │   ├── agent.go           # Agent interface + AgentBase (identity, hooks, subscribers)
 │   ├── unified_agent.go   # UnifiedAgent — native tool calling, streaming, middleware
+│   ├── model_stream.go    # Provider stream consumption, event blocks and final validation
 │   ├── loop_bridge.go     # UnifiedAgentRunner — bridges UnifiedAgent to loop.Loop
 │   ├── user_agent.go      # UserAgent — human input via InputProvider
 │   ├── a2a_agent.go       # A2AAgent — remote agent proxy via HTTP

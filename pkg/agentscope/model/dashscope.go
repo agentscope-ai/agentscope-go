@@ -263,6 +263,8 @@ func processOpenAIStreamCfg(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 		audioBlockID    string
 		audioHeaderSent bool
 		finishReason    string
+		completed       bool
+		streamErr       error
 	)
 
 	for evt := range sseCh {
@@ -291,12 +293,14 @@ func processOpenAIStreamCfg(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 		}
 
 		if evt.Data == "[DONE]" {
+			completed = true
 			break
 		}
 
 		var chunk openAIStreamChunk
 		if err := json.Unmarshal([]byte(evt.Data), &chunk); err != nil {
-			continue
+			streamErr = fmt.Errorf("model: invalid stream chunk: %w", err)
+			break
 		}
 
 		if chunk.ID != "" {
@@ -315,6 +319,9 @@ func processOpenAIStreamCfg(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 				InputTokens:  chunk.Usage.PromptTokens,
 				OutputTokens: outTokens,
 			}
+			if chunk.Usage.PromptTokensDetails != nil {
+				usage.CacheInputTokens = chunk.Usage.PromptTokensDetails.CachedTokens
+			}
 		}
 
 		if len(chunk.Choices) == 0 {
@@ -323,6 +330,7 @@ func processOpenAIStreamCfg(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 
 		if fr := chunk.Choices[0].FinishReason; fr != nil && *fr != "" {
 			finishReason = *fr
+			completed = true
 		}
 
 		delta := chunk.Choices[0].Delta
@@ -432,6 +440,9 @@ func processOpenAIStreamCfg(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 		}
 	}
 
+	if !completed && streamErr == nil {
+		streamErr = fmt.Errorf("model: stream closed without finish_reason or [DONE]")
+	}
 	finalResp := ChatResponse{
 		Content:    assembleStreamContent(accThinking.String(), accText.String(), accToolCalls, accAudioData, audioBlockID, responseID),
 		IsLast:     true,
@@ -440,6 +451,7 @@ func processOpenAIStreamCfg(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 		Usage:      usage,
 		ModelName:  modelName,
 		StopReason: normalizeStopReason(finishReason),
+		Error:      streamErr,
 	}
 	select {
 	case outCh <- finalResp:

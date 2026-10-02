@@ -36,6 +36,7 @@ func TestUnifiedAgentOpenAIToolHistory(t *testing.T) {
 				var requests, executions atomic.Int32
 				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					var req struct {
+						Stream   bool `json:"stream"`
 						Messages []struct {
 							Role       string `json:"role"`
 							Content    string `json:"content"`
@@ -79,15 +80,43 @@ func TestUnifiedAgentOpenAIToolHistory(t *testing.T) {
 						http.Error(w, "tool history was lost between rounds", http.StatusBadRequest)
 						return
 					}
-					w.Header().Set("Content-Type", "application/json")
+					var payload string
 					switch step {
 					case 1:
-						fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"a","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Shanghai\"}"}},{"id":"b","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Hangzhou\"}"}}]}}]}`)
+						payload = `{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"a","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Shanghai\"}"}},{"id":"b","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Hangzhou\"}"}}]}}]}`
 					case 2:
-						fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"One more city.","tool_calls":[{"id":"c","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Suzhou\"}"}}]}}]}`)
+						payload = `{"choices":[{"message":{"role":"assistant","content":"One more city.","tool_calls":[{"id":"c","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Suzhou\"}"}}]}}]}`
 					default:
-						fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"All forecasts ready."},"finish_reason":"stop"}]}`)
+						payload = `{"choices":[{"message":{"role":"assistant","content":"All forecasts ready."},"finish_reason":"stop"}]}`
 					}
+					if req.Stream {
+						var response map[string]any
+						if err := json.Unmarshal([]byte(payload), &response); err != nil {
+							t.Error(err)
+							return
+						}
+						choice := response["choices"].([]any)[0].(map[string]any)
+						delta := choice["message"].(map[string]any)
+						choice["delta"] = delta
+						delete(choice, "message")
+						if calls, ok := delta["tool_calls"].([]any); ok {
+							for i, call := range calls {
+								call.(map[string]any)["index"] = i
+							}
+							choice["finish_reason"] = "tool_calls"
+						}
+						chunk, err := json.Marshal(response)
+						if err != nil {
+							t.Error(err)
+							return
+						}
+						w.Header().Set("Content-Type", "text/event-stream")
+						fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", chunk)
+					} else {
+						w.Header().Set("Content-Type", "application/json")
+						fmt.Fprint(w, payload)
+					}
+
 				}))
 				defer srv.Close()
 				cm, err := provider.newModel(srv.URL)
@@ -102,7 +131,7 @@ func TestUnifiedAgentOpenAIToolHistory(t *testing.T) {
 						executions.Add(1)
 						return "18 C", nil
 					})
-				a := NewUnifiedAgent("weather", "Use weather to compare cities.", cm, WithToolkit(tool.NewToolkit(weather)))
+				a := NewUnifiedAgent("weather", "Use weather to compare cities.", cm, WithToolkit(tool.NewToolkit(weather)), WithModelStreaming(stream))
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				if stream {

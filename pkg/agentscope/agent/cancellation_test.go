@@ -209,3 +209,7 @@ func TestReplyNoNewResponseDoesNotReturnHistory(t *testing.T) {
 		t.Fatalf("old response reused: %v %v", reply, err)
 	}
 }
+
+func (m cancellationModel) ChatStream(context.Context, []*message.Msg, ...model.CallOption) (<-chan model.ChatResponse, error) {
+	return nil, model.ErrStreamNotSupported
+}

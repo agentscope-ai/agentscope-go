@@ -1,5 +1,10 @@
 # Middleware
 
+`UnifiedAgent.ReplyStream` uses buffered model calls whenever a legacy middleware
+chain is installed. `OnModelCall` can inspect, block or replace the complete
+response before any content is published; enabling provider streaming must not
+bypass that contract. See [agent streaming](streaming.md).
+
 ## Overview
 
 The middleware system uses an onion-chain pattern with 7 hooks. Each middleware wraps the next in the chain, enabling logging, tracing, budget control, memory injection, permission interception, and more.

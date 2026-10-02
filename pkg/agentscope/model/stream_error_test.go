@@ -18,6 +18,32 @@ func drainStream(sseCh chan httpx.SSEEvent) []ChatResponse {
 	return out
 }
 
+func TestProcessOpenAIStreamCompletionProtocol(t *testing.T) {
+	for _, tc := range []struct {
+		name, suffix string
+		wantError    bool
+	}{
+		{"clean_eof", "", true},
+		{"malformed", "{bad", true},
+		{"done", "[DONE]", false},
+		{"finish_reason", `{"choices":[{"delta":{},"finish_reason":"stop"}]}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := make(chan httpx.SSEEvent, 2)
+			in <- httpx.SSEEvent{Data: `{"choices":[{"delta":{"content":"partial"}}]}`}
+			if tc.suffix != "" {
+				in <- httpx.SSEEvent{Data: tc.suffix}
+			}
+			close(in)
+			out := drainStream(in)
+			last := out[len(out)-1]
+			if !last.IsLast || (last.Error != nil) != tc.wantError {
+				t.Fatalf("final=%+v", last)
+			}
+		})
+	}
+}
+
 // TestProcessOpenAIStream_PropagatesTerminalError proves a mid-stream transport
 // failure (surfaced as SSEEvent.Err) becomes a ChatResponse with Error set,
 // instead of silently ending as a normal, truncated IsLast response.

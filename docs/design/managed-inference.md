@@ -35,8 +35,8 @@ its executable examples, validation and behavior documentation.
 | Path | Current behavior | Consequence for subsequent work |
 |---|---|---|
 | `UnifiedAgent.Reply` | Drains lifecycle events, checks cancellation, then selects the current reply ID from state | Cancellation returns nil message and a context error; recorded partial state may remain |
-| `UnifiedAgent.ReplyStream` | Emits agent lifecycle events while calling `Chat` | This is not provider token streaming |
-| UnifiedAgent model rounds | Model middleware wraps `callModel`; retries/fallback stop on cancellation | A logical model round can contain several physical requests |
+| `UnifiedAgent.ReplyStream` | Streams provider thinking/text without middleware; legacy middleware remains buffered | Admission must distinguish streamed and buffered paths |
+| UnifiedAgent model rounds | Middleware wraps buffered `callModel`; without middleware the stream path retries setup failures only | A logical model round can contain several physical requests before streaming starts |
 | Loop bridge | Calls `callModel` directly | Do not assume all model middleware runs through this entry |
 | Compression and structured output | Have helper-specific call paths | Account for helper work explicitly in a managed executor |
 | Direct `ChatStream` | Returns provider deltas and a final assembled response | Admission must cover the stream lifetime, not just setup |

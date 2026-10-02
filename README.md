@@ -116,8 +116,12 @@ Adapters are available for **OpenAI** (Chat Completions and Responses),
 
 Tool calling, multimodal input, thinking and usage reporting depend on the
 provider and model. Provider `ChatStream` methods expose response chunks;
-`UnifiedAgent.ReplyStream` exposes lifecycle events and currently uses
-non-streaming model calls internally.
+`UnifiedAgent.ReplyStream` streams thinking/text deltas from `ChatStream` by
+default when no middleware is installed. Legacy middleware chains keep buffered
+`Chat` calls so response filters can run before publication. Use
+`agent.WithModelStreaming(false)` for the previous buffered behavior. See
+[agent streaming](docs/streaming.md) for completion, cancellation and fallback
+semantics.
 
 For local models, configure the context window and request timeout for your
 server and device. Model cards describe model capabilities; they do not configure
@@ -149,7 +153,7 @@ its model choice, environment variables and required services or runtimes.
 | [agent_v2](examples/agent_v2/) | UnifiedAgent with a function tool |
 | [react_tool](examples/react_tool/) | A custom FunctionTool |
 | [react_builtin_tools](examples/react_builtin_tools/) | The built-in coding toolkit |
-| [streaming](examples/streaming/) | Agent lifecycle events |
+| [streaming](examples/streaming/) | Agent lifecycle events and provider text deltas |
 | [ask_user](examples/ask_user/) | Structured questions with a simulated model and host answer |
 | [console](examples/console/) | Terminal chat and tool-call confirmation |
 | [model_call](examples/model_call/) | Direct model streaming, tool calls and structured output |
