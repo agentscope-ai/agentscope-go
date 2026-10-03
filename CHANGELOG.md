@@ -27,6 +27,9 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ### Fixed
 
+- Skill frontmatter parsing recognizes closing `---` only on an unindented
+  delimiter line, preserving inline hyphens and YAML block-scalar content so
+  added skills remain discoverable and removable.
 - **Streaming behavior change (#17):** `UnifiedAgent.ReplyStream` now forwards
   provider thinking/text deltas before the model completes, for ordinary rounds
   and forced finalization without middleware. `Reply` drains the same path and

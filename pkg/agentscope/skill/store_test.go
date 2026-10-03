@@ -327,6 +327,35 @@ func TestStore_YAMLRoundTripWithSpecialChars(t *testing.T) {
 	}
 }
 
+func TestStore_DelimiterMetadataRoundTrip(t *testing.T) {
+	s := NewStore(t.TempDir())
+	const description = "Convert foo---bar safely"
+	const category = "editing---text"
+	const body = "Use foo---bar.\n\n---\n\nKeep the horizontal rule."
+	if _, err := s.Add("alice", "convert", description, category, body); err != nil {
+		t.Fatal(err)
+	}
+	skills, err := s.List("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 1 {
+		t.Errorf("expected the added skill to be listed, got %d skills", len(skills))
+	} else if sk := skills[0]; sk.Name != "convert" || sk.Description != description || sk.Category != category || sk.Markdown != body {
+		t.Errorf("unexpected round-trip skill: %+v", sk)
+	}
+	if err := s.Remove("alice", "convert"); err != nil {
+		t.Fatal(err)
+	}
+	skills, err = s.List("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 0 {
+		t.Errorf("expected no skills after removal, got %d", len(skills))
+	}
+}
+
 func TestStore_AddRejectsInvalidInputSentinel(t *testing.T) {
 	s := NewStore(t.TempDir())
 	if _, err := s.Add("alice", "", "", "", "x"); !errors.Is(err, ErrInvalidInput) {
