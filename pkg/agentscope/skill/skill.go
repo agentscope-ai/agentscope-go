@@ -1,7 +1,6 @@
 package skill
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -118,14 +117,29 @@ func (l *LocalSkillLoader) loadSingle(dir string) (*Skill, error) {
 
 // parseSKILLMD parses a SKILL.md file with YAML frontmatter.
 func parseSKILLMD(data []byte, dir string, mtime float64) (*Skill, error) {
-	content := string(data)
+	content := strings.TrimSpace(string(data))
 
-	if !strings.HasPrefix(strings.TrimSpace(content), "---") {
+	if !strings.HasPrefix(content, "---") {
 		return nil, fmt.Errorf("skill: SKILL.md missing frontmatter in %s", dir)
 	}
 
-	parts := bytes.SplitN(bytes.TrimSpace(data), []byte("---"), 3)
-	if len(parts) < 3 {
+	var frontmatter, markdown string
+	closed := false
+	// A closing delimiter must occupy an unindented line. Inline and indented
+	// occurrences of "---" can be part of YAML scalars.
+	for offset := 3; offset < len(content); {
+		line, rest, hasNewline := strings.Cut(content[offset:], "\n")
+		if strings.TrimRight(line, " \t\r") == "---" {
+			frontmatter, markdown = content[3:offset], rest
+			closed = true
+			break
+		}
+		if !hasNewline {
+			break
+		}
+		offset += len(line) + 1
+	}
+	if !closed {
 		return nil, fmt.Errorf("skill: invalid frontmatter in %s", dir)
 	}
 
@@ -134,14 +148,14 @@ func parseSKILLMD(data []byte, dir string, mtime float64) (*Skill, error) {
 		Description string `yaml:"description"`
 		Category    string `yaml:"category"`
 	}
-	if err := yaml.Unmarshal(parts[1], &fm); err != nil {
+	if err := yaml.Unmarshal([]byte(frontmatter), &fm); err != nil {
 		return nil, fmt.Errorf("skill: parse frontmatter in %s: %w", dir, err)
 	}
 	if fm.Name == "" || fm.Description == "" {
 		return nil, fmt.Errorf("skill: name and description required in %s", dir)
 	}
 
-	body := strings.TrimSpace(string(parts[2]))
+	body := strings.TrimSpace(markdown)
 
 	return &Skill{
 		Name:        fm.Name,
