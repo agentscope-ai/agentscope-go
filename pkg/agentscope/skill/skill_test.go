@@ -41,6 +41,120 @@ func TestParseSKILLMD(t *testing.T) {
 	}
 }
 
+func TestParseSKILLMD_DelimiterLines(t *testing.T) {
+	const body = "Use foo---bar.\n\n---\n\nKeep the horizontal rule."
+	tests := []struct {
+		name         string
+		frontmatter  string
+		wantName     string
+		wantDesc     string
+		wantCategory string
+	}{
+		{
+			name:        "plain description",
+			frontmatter: "name: test\ndescription: Convert foo---bar safely",
+			wantName:    "test", wantDesc: "Convert foo---bar safely",
+		},
+		{
+			name:        "quoted description",
+			frontmatter: "name: test\ndescription: \"Convert foo---bar safely\"",
+			wantName:    "test", wantDesc: "Convert foo---bar safely",
+		},
+		{
+			name:        "plain name",
+			frontmatter: "name: test---skill\ndescription: A test skill",
+			wantName:    "test---skill", wantDesc: "A test skill",
+		},
+		{
+			name:        "quoted name",
+			frontmatter: "name: \"test---skill\"\ndescription: A test skill",
+			wantName:    "test---skill", wantDesc: "A test skill",
+		},
+		{
+			name:        "category",
+			frontmatter: "name: test\ndescription: A test skill\ncategory: group---one",
+			wantName:    "test", wantDesc: "A test skill", wantCategory: "group---one",
+		},
+		{
+			name:        "literal description",
+			frontmatter: "name: test\ndescription: |\n  first\n  ---\n  last",
+			wantName:    "test", wantDesc: "first\n---\nlast\n",
+		},
+		{
+			name:        "folded description",
+			frontmatter: "name: test\ndescription: >-\n  first\n  ---\n  last",
+			wantName:    "test", wantDesc: "first --- last",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := []byte("---\n" + tt.frontmatter + "\n---\n\n" + body)
+			s, err := parseSKILLMD(data, "/dir", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if s.Name != tt.wantName || s.Description != tt.wantDesc || s.Category != tt.wantCategory {
+				t.Errorf("unexpected metadata: name=%q description=%q category=%q", s.Name, s.Description, s.Category)
+			}
+			if s.Markdown != body {
+				t.Errorf("unexpected body: %q", s.Markdown)
+			}
+		})
+	}
+}
+
+func TestParseSKILLMD_DelimiterCompatibility(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     string
+		wantBody string
+	}{
+		{"CRLF", "---\r\nname: test\r\ndescription: A test skill\r\n---\r\n\r\nfirst\r\n---\r\nlast\r\n", "first\r\n---\r\nlast"},
+		{"closing delimiter trailing whitespace", "---\nname: test\ndescription: A test skill\n--- \t\n\nbody", "body"},
+		{"leading whitespace", "\n \t---\nname: test\ndescription: A test skill\n---\n\nbody\n\n", "body"},
+		{"opening prefix", "---name: test\ndescription: A test skill\n---\n\nbody", "body"},
+		{"closing delimiter at EOF", "---\nname: test\ndescription: A test skill\n---", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, err := parseSKILLMD([]byte(tt.data), "/dir", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if s.Name != "test" || s.Description != "A test skill" || s.Markdown != tt.wantBody {
+				t.Errorf("unexpected parsed skill: %+v", s)
+			}
+		})
+	}
+}
+
+func TestParseSKILLMD_InvalidClosingDelimiter(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{"missing", "---\nname: test\ndescription: A test skill\n"},
+		{"inline metadata", "---\nname: test\ndescription: Convert foo---bar safely\n"},
+		{"indented", "---\nname: test\ndescription: A test skill\n  ---\nbody"},
+		{"suffixed", "---\nname: test\ndescription: A test skill\n---body"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseSKILLMD([]byte(tt.data), "/dir", 0)
+			if err == nil || !strings.Contains(err.Error(), "invalid frontmatter") {
+				t.Errorf("expected invalid frontmatter, got %v", err)
+			}
+		})
+	}
+}
+
+func TestParseSKILLMD_InvalidYAML(t *testing.T) {
+	_, err := parseSKILLMD([]byte("---\nname: test\ndescription: [unclosed\n---\nbody"), "/dir", 0)
+	if err == nil || !strings.Contains(err.Error(), "parse frontmatter") {
+		t.Errorf("expected YAML parsing error, got %v", err)
+	}
+}
+
 func TestParseSKILLMD_MissingFrontmatter(t *testing.T) {
 	data := []byte("No frontmatter here.")
 	_, err := parseSKILLMD(data, "/dir", 0)
