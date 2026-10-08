@@ -30,6 +30,11 @@ func TestRunLoadScoresAfterExecutionCleanupCancellation(t *testing.T) {
 	var path string
 	cfg.NewModel = func(ctx context.Context, _ TaskSpec) (model.ChatModel, error) {
 		executionCtx = ctx
+		// Goodput is documented as absent for a zero-length observation
+		// interval. Keep the window wider than coarse-granularity clocks
+		// (Windows CI runners) so the positive-goodput assertion stays
+		// meaningful.
+		time.Sleep(20 * time.Millisecond)
 		return &scriptedModel{}, nil
 	}
 	cfg.Scorer = loadScorerFunc(func(ctx context.Context, _ *TaskSpec, out *TaskOutcome) (float64, error) {
