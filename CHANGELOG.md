@@ -27,6 +27,8 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ### Fixed
 
+- Skill hub installs accept standard tar root directory entries (`.` and `./`)
+  while preserving rejection of unsafe archive paths and root files or links.
 - **Streaming behavior change (#17):** `UnifiedAgent.ReplyStream` now forwards
   provider thinking/text deltas before the model completes, for ordinary rounds
   and forced finalization without middleware. `Reply` drains the same path and

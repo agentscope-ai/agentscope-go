@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -267,6 +268,94 @@ func TestSkillHub_Install(t *testing.T) {
 		if string(data) != f.content {
 			t.Errorf("file %s: expected %q, got %q", f.name, f.content, string(data))
 		}
+	}
+}
+
+func TestSkillHub_InstallArchiveRootEntries(t *testing.T) {
+	tests := []struct {
+		name     string
+		entry    string
+		typeflag byte
+		wantErr  bool
+	}{
+		{"dot directory", ".", tar.TypeDir, false},
+		{"dot slash directory", "./", tar.TypeDir, false},
+		{"dot regular file", ".", tar.TypeReg, true},
+		{"dot symbolic link", ".", tar.TypeSymlink, true},
+		{"dot slash symbolic link", "./", tar.TypeSymlink, true},
+		{"dot hard link", ".", tar.TypeLink, true},
+		{"dot slash hard link", "./", tar.TypeLink, true},
+		{"parent escape", "../outside.txt", tar.TypeReg, true},
+		{"same prefix sibling", "../my-skill-sibling/outside.txt", tar.TypeReg, true},
+		{"dot parent escape", "./../outside.txt", tar.TypeReg, true},
+	}
+	files := []struct {
+		name    string
+		content string
+	}{
+		{"./SKILL.md", "---\nname: my-skill\ndescription: A skill\n---\nUse the helper script.\n"},
+		{"./scripts/run.sh", "#!/bin/sh\necho hello\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			gw := gzip.NewWriter(&buf)
+			tw := tar.NewWriter(gw)
+			hdr := &tar.Header{Name: tt.entry, Mode: 0o755, Typeflag: tt.typeflag}
+			if tt.typeflag == tar.TypeSymlink || tt.typeflag == tar.TypeLink {
+				hdr.Linkname = "SKILL.md"
+			}
+			if err := tw.WriteHeader(hdr); err != nil {
+				t.Fatal(err)
+			}
+			if err := tw.WriteHeader(&tar.Header{Name: "./scripts/", Mode: 0o755, Typeflag: tar.TypeDir}); err != nil {
+				t.Fatal(err)
+			}
+			for _, f := range files {
+				if err := tw.WriteHeader(&tar.Header{Name: f.name, Mode: 0o644, Size: int64(len(f.content)), Typeflag: tar.TypeReg}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := tw.Write([]byte(f.content)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := tw.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := gw.Close(); err != nil {
+				t.Fatal(err)
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v1/skills/my-skill/install" {
+					t.Errorf("unexpected request path: %s", r.URL.Path)
+				}
+				w.Header().Set("Content-Type", "application/gzip")
+				_, _ = w.Write(buf.Bytes())
+			}))
+			defer srv.Close()
+			h := NewSkillHub(SkillHubConfig{BaseURL: srv.URL, HubID: "test-skill"})
+			defer h.Close()
+			targetDir := t.TempDir()
+			err := h.Install(context.Background(), "my-skill", targetDir)
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "invalid tar entry path: "+tt.entry) {
+					t.Fatalf("expected entry rejection, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Install failed: %v", err)
+			}
+			for _, f := range files {
+				data, err := os.ReadFile(filepath.Join(targetDir, "my-skill", f.name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(data) != f.content {
+					t.Errorf("unexpected content for %s: %q", f.name, data)
+				}
+			}
+		})
 	}
 }
 

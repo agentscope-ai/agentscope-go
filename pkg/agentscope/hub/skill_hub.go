@@ -183,6 +183,9 @@ func extractTarGz(r io.Reader, destDir string) error {
 		if err != nil {
 			return fmt.Errorf("read tar: %w", err)
 		}
+		if hdr.Typeflag == tar.TypeDir && (hdr.Name == "." || hdr.Name == "./") {
+			continue
+		}
 
 		// Prevent path traversal attacks.
 		target := filepath.Join(destDir, hdr.Name)
