@@ -13,6 +13,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ### Added
 
+- Experimental `classifier` typed Binary/Choice/Score contracts, validation,
+  explicit attempt/unknown-usage reporting and offline fake, with an offline
+  example and [usage guide](docs/classifier.md). This documents PR #22; Jev
+  integration and model routing remain separate implementation stages.
+
 - Typed Qdrant metadata equality/range filters, applied before topK through
   `QueryVector` and `QueryWithFilter`, with copied host-required conditions.
 - Experimental `evalkit.Runner.RunLoad`: versioned task/arrival manifests,
