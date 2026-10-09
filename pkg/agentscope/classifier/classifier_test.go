@@ -263,7 +263,8 @@ func TestFakeCancellation(t *testing.T) {
 				ctx = deadlineOnCancel{parent}
 				want = context.DeadlineExceeded
 			}
-			f := c.NewFake(&c.FakeConfig{Response: response(), WaitForCancel: true})
+			configuredError := errors.New("preset error overridden by cancellation")
+			f := c.NewFake(&c.FakeConfig{Response: response(), Error: configuredError, WaitForCancel: true})
 			started := f.Started()
 			done := make(chan struct{})
 			var r *c.Response
@@ -280,6 +281,9 @@ func TestFakeCancellation(t *testing.T) {
 			cancel()
 			select {
 			case <-done:
+				if errors.Is(err, configuredError) {
+					t.Error("WaitForCancel did not override the configured error")
+				}
 				assertCancellationError(t, err, want)
 				if len(r.Attempts) == 1 {
 					assertCancellationError(t, r.Attempts[0].Err, want)

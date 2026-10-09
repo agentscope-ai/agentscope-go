@@ -14,7 +14,8 @@ import (
 // FakeConfig specifies a reusable offline fixture. Response.Answers and the
 // first attempt's usage/requested model are copied; attempts are always rebuilt
 // as simulations. Error takes precedence over answer validation. WaitForCancel
-// waits for ctx cancellation after dispatch, then returns that context error.
+// waits for ctx cancellation after dispatch, then returns that context error,
+// overriding any configured Error.
 // Error objects are shared and must be immutable. No external service is used.
 type FakeConfig struct {
 	Response      Response
