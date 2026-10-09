@@ -44,6 +44,8 @@ func NewFake(config *FakeConfig) *Fake {
 
 // Started closes once, at the first simulated dispatch. It is useful for
 // synchronizing cancellation tests; callers must not close the channel.
+// The receiver must be created with NewFake. A nil receiver panics; a zero-value
+// Fake returns a nil channel that never closes.
 func (f *Fake) Started() <-chan struct{} { return f.started }
 
 // Classify validates input, simulates one dispatch, and returns a fresh report.
