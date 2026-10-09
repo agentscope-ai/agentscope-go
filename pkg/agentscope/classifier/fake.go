@@ -15,7 +15,8 @@ import (
 // first attempt's usage/requested model are copied; attempts are always rebuilt
 // as simulations. Error takes precedence over answer validation. WaitForCancel
 // waits for ctx cancellation after dispatch, then returns that context error,
-// overriding any configured Error.
+// overriding any configured Error. Even when WaitForCancel is false, cancellation
+// observed at the post-dispatch context check overrides Error.
 // Error objects are shared and must be immutable. No external service is used.
 type FakeConfig struct {
 	Response      Response

@@ -15,6 +15,15 @@ import (
 // must validate requests before dispatch, honor ctx, and never retry internally.
 // Implementations return a non-nil Response even on errors, retaining any
 // dispatched attempt and known usage. A pre-dispatch failure has zero attempts.
+// Caller cancellation and errors whose chains match context.Canceled or
+// context.DeadlineExceeded via errors.Is use CategoryModel with code
+// classifier.canceled and are non-retryable; messages distinguish pre- and
+// post-dispatch cancellation. Preserve the context cause for errors.Is.
+// Other attempt failures use classifier.failed; validation errors retain their
+// validation codes. Adapters must derive overall request deadlines from ctx,
+// rather than impose shorter independent per-attempt deadlines that would be
+// reported as non-retryable cancellation.
+//
 // Callers must check the error before using answers. Implementations must not
 // mutate requests; callers must not mutate them while a call is in progress.
 // These Go types do not define a provider or persistence JSON wire format.
