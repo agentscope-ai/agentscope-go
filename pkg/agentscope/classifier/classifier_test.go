@@ -193,10 +193,25 @@ func TestFakeSuccessAndOwnership(t *testing.T) {
 	}
 	wg.Wait()
 }
+func assertCancellationError(t *testing.T, err, cause error) {
+	t.Helper()
+	if !errors.Is(err, cause) {
+		t.Fatalf("lost cancellation cause: %v", err)
+	}
+	var typed *ae.AgentError
+	if !errors.As(err, &typed) || typed.Category != ae.CategoryModel || typed.Code != "classifier.canceled" {
+		t.Fatalf("want model/classifier.canceled, got %#v", typed)
+	}
+	if ae.IsRetryable(err) {
+		t.Fatalf("cancellation must not be retryable: %v", err)
+	}
+}
+
 func TestFakeFailures(t *testing.T) {
 	cause := fmt.Errorf("transport: %w", context.DeadlineExceeded)
 	f := c.NewFake(&c.FakeConfig{Response: response(), Error: cause})
 	r, err := f.Classify(context.Background(), request())
+	assertCancellationError(t, err, context.DeadlineExceeded)
 	if !errors.Is(err, context.DeadlineExceeded) || len(r.Attempts) != 1 || !errors.Is(r.Attempts[0].Err, cause) {
 		t.Fatalf("lost dispatched error: %+v %v", r, err)
 	}
@@ -215,6 +230,7 @@ func TestFakeFailures(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	r, err = f.Classify(ctx, request())
+	assertCancellationError(t, err, context.Canceled)
 	if !errors.Is(err, context.Canceled) || len(r.Attempts) != 0 {
 		t.Fatalf("counted canceled predispatch: %+v %v", r, err)
 	}
@@ -250,12 +266,11 @@ func TestFakeCancellation(t *testing.T) {
 			f := c.NewFake(&c.FakeConfig{Response: response(), WaitForCancel: true})
 			started := f.Started()
 			done := make(chan struct{})
+			var r *c.Response
+			var err error
 			go func() {
 				defer close(done)
-				r, err := f.Classify(ctx, request())
-				if !errors.Is(err, want) || len(r.Attempts) != 1 || r.Attempts[0].Kind != c.SimulatedAttempt || !errors.Is(r.Attempts[0].Err, want) {
-					t.Errorf("lost cancellation accounting: %+v %v", r, err)
-				}
+				r, err = f.Classify(ctx, request())
 			}()
 			select {
 			case <-started:
@@ -265,6 +280,13 @@ func TestFakeCancellation(t *testing.T) {
 			cancel()
 			select {
 			case <-done:
+				assertCancellationError(t, err, want)
+				if len(r.Attempts) == 1 {
+					assertCancellationError(t, r.Attempts[0].Err, want)
+				}
+				if !errors.Is(err, want) || len(r.Attempts) != 1 || r.Attempts[0].Kind != c.SimulatedAttempt || !errors.Is(r.Attempts[0].Err, want) {
+					t.Errorf("lost cancellation accounting: %+v %v", r, err)
+				}
 			case <-time.After(time.Second):
 				t.Fatal("cancellation hung")
 			}
@@ -401,6 +423,7 @@ func TestExpiredDeadlineBeforeDispatch(t *testing.T) {
 	defer cancel()
 	f := c.NewFake(&c.FakeConfig{Response: response()})
 	out, err := f.Classify(ctx, request())
+	assertCancellationError(t, err, context.DeadlineExceeded)
 	if !errors.Is(err, context.DeadlineExceeded) || len(out.Attempts) != 0 {
 		t.Fatalf("expired deadline dispatched: %+v %v", out, err)
 	}

@@ -58,7 +58,7 @@ func (f *Fake) Classify(ctx context.Context, r Request) (*Response, error) {
 		return out, invalidRequest("context is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return out, ae.Wrap(err, ae.CategoryContext, "classifier.canceled", "classification canceled before dispatch")
+		return out, ae.Wrap(err, ae.CategoryModel, "classifier.canceled", "classification canceled before dispatch")
 	}
 	if err := ValidateRequest(r); err != nil {
 		return out, err
@@ -73,7 +73,7 @@ func (f *Fake) Classify(ctx context.Context, r Request) (*Response, error) {
 		attempt.Usage = out.Attempts[0].Usage
 	}
 	if err := ctx.Err(); err != nil {
-		return &Response{OperationID: r.OperationID}, ae.Wrap(err, ae.CategoryContext, "classifier.canceled", "classification canceled before dispatch")
+		return &Response{OperationID: r.OperationID}, ae.Wrap(err, ae.CategoryModel, "classifier.canceled", "classification canceled before dispatch")
 	}
 	out.Attempts = []Attempt{attempt}
 	f.once.Do(func() { close(f.started) })
@@ -85,7 +85,11 @@ func (f *Fake) Classify(ctx context.Context, r Request) (*Response, error) {
 		err = ctx.Err()
 	}
 	if err != nil {
-		err = ae.Wrap(err, ae.CategoryModel, "classifier.failed", "classification attempt failed")
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			err = ae.Wrap(err, ae.CategoryModel, "classifier.canceled", "classification canceled after dispatch")
+		} else {
+			err = ae.Wrap(err, ae.CategoryModel, "classifier.failed", "classification attempt failed")
+		}
 	}
 	out.Attempts[0].Duration = time.Since(start)
 	if err == nil {
