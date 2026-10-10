@@ -20,7 +20,8 @@ import "github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope"
 - **Stable** (source-compatible within a major version): `message`, `model`,
   `agent` (UnifiedAgent), `tool`, `permission`, `formatter`, `errors`.
 - **Experimental** (may change): `runtime`, `loop`, `app`, `service`, `realtime`,
-  `tune`, `classifier`, `replay/evalkit`, `event/streamcheck`, `agenttest/faults`,
+  `tune`, `classifier`, `classifier/jev`, `replay/evalkit`, `event/streamcheck`,
+  `agenttest/faults`,
   `providercontract` (test-only), `console`, `channel`, `channel/dingtalk`,
   `hub` (built-in sources), `skill` (`Store` partitions), `middleware/memory`
   (`FileStore` + `AgenticMemoryMiddleware`).

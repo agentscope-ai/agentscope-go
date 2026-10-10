@@ -3,7 +3,8 @@
 The experimental `pkg/agentscope/classifier` package evaluates typed questions
 against shared text or a JSON object. It is independent of `model.ChatModel`.
 This guide covers the classifier abstraction merged in [PR #22](https://github.com/agentscope-ai/agentscope-go/pull/22).
-Jev integration, managed execution and routing are separate stages of
+The [Jev adapter](jev.md) implements these contracts in a separate subpackage.
+Managed execution and routing are later stages of
 [issue #16](https://github.com/agentscope-ai/agentscope-go/issues/16); they are not
 provided by this package. This guide will grow with those stages.
 
@@ -119,4 +120,4 @@ ordered Score levels. Go uses sealed pointer types and explicit validation,
 requires instructions, and keeps score legends in the original request instead
 of duplicating them in every answer. It adds explicit operation/attempt reporting
 and preserves unknown token counts with pointers. Jev-specific credentials,
-parameters and protocol limits belong in the later adapter.
+parameters and protocol limits are documented in the [Jev guide](jev.md).

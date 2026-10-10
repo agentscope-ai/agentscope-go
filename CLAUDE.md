@@ -22,6 +22,7 @@ feature is wired into every execution path.
 | Loop integration | [loop_bridge.go](pkg/agentscope/agent/loop_bridge.go), [loop/](pkg/agentscope/loop/), [runtime/](pkg/agentscope/runtime/) | Agent-to-loop adapters and session execution |
 | Model interface and providers | [model.go](pkg/agentscope/model/model.go), [model/](pkg/agentscope/model/) | Chat calls, responses, usage, provider configuration and model cards |
 | Probabilistic classification | [classifier/](pkg/agentscope/classifier/) | Typed decisions, validation, attempt accounting and offline fake; [guide](docs/classifier.md) |
+| Jev adapter | [classifier/jev/](pkg/agentscope/classifier/jev/) | Single-attempt Jev HTTP conversion, bounded payloads and failure accounting; [guide](docs/jev.md) |
 | Message formatting | [formatter/](pkg/agentscope/formatter/) | Provider-specific message and multimodal formats |
 | Middleware | [middleware.go](pkg/agentscope/middleware/middleware.go), [middleware/](pkg/agentscope/middleware/) | Lifecycle hooks, budgets, tracing, guardrails and memory integration |
 | Tools and permissions | [tool.go](pkg/agentscope/tool/tool.go), [orchestrator.go](pkg/agentscope/tool/orchestrator.go), [permission/](pkg/agentscope/permission/) | Tool contracts, execution and permission decisions |
