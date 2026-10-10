@@ -167,7 +167,7 @@ func (cl *Client) Classify(ctx context.Context, r c.Request) (out *c.Response, e
 	parseErr := decode(body, r, out)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		h := &HTTPError{StatusCode: resp.StatusCode}
-		f := failed(h.Error())
+		f := failed(fmt.Sprintf("HTTP status %d", resp.StatusCode))
 		f.Cause = h
 		f.Retryable = resp.StatusCode == 429 || resp.StatusCode >= 500
 		if f.Retryable {

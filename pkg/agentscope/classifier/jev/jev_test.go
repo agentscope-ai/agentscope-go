@@ -90,6 +90,12 @@ func TestHTTPFailuresNoRetries(t *testing.T) {
 			if !errors.As(err, &a) || a.Code != "classifier.failed" || !errors.As(err, &h) || h.StatusCode != status || a.Retryable != (status == 429 || status >= 500) || calls.Load() != 1 || strings.Contains(err.Error(), "fixture-secret") {
 				t.Fatalf("wrong failure: %v", err)
 			}
+			if want := fmt.Sprintf("Jev: HTTP status %d", status); err.Error() != want {
+				t.Fatalf("failure message = %q, want %q", err.Error(), want)
+			}
+			if want := fmt.Sprintf("Jev HTTP status %d", status); h.Error() != want {
+				t.Fatalf("HTTP cause message = %q, want %q", h.Error(), want)
+			}
 			if out.Attempts[0].Usage == nil || *out.Attempts[0].Usage.InputTokens != 12 {
 				t.Fatal("lost failure usage")
 			}
