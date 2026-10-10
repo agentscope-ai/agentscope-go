@@ -99,12 +99,16 @@ Models: `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-flash-preview`, `gemini-
 
 ```go
 cm, _ := model.NewOllamaChatModel(model.OllamaConfig{
-    BaseURL: "http://localhost:11434", // default
-    Model:   "llama4",
+    BaseURL:     "http://localhost:11434", // default
+    Model:       "llama4",
+    ContextSize: 8192, // the server's num_ctx; not sent to the server
 })
 ```
 
 No API key required. Models: `deepseek-r1-14b`, `llama4`, `qwen3-14b`, `qwen3.5-9b`
+
+`ContextSize` tells context compression the window the server runs with; see
+[edge deployment](edge-deployment.md#match-the-agents-context-size-to-the-servers-window).
 
 ### Moonshot (Kimi)
 

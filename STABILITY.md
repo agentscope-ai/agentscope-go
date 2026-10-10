@@ -530,8 +530,12 @@ return an image to a model that cannot see it. The card data exists
 (`ModelCard.InputTypes`, `ModelCard.SupportsImages()`), but the lookup path does
 not: `model.ResolveContextSize` reaches a card through the optional `ModelNamer`
 interface, which only `openaiResponseModel` and `FallbackChatModel` (by
-delegation) implement. The other eight providers implement neither `ModelNamer`
-nor `ContextSizer`. Wiring this means adding `ModelName()` to those eight first.
+delegation) implement. The other eight providers do not implement `ModelNamer`;
+of those, only `OllamaChatModel` implements `ContextSizer`, reporting the
+explicitly configured `OllamaConfig.ContextSize`. Wiring this means adding
+`ModelName()` to those eight first. For `OllamaChatModel`, that would also let
+`ResolveContextSize` report a card's maximum for an undeclared window, which is
+not the server's `num_ctx`.
 
 ## Open hardening work
 

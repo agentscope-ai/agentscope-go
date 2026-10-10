@@ -107,7 +107,7 @@ fmt.Println(cam.ActiveModel()) // "cloud" or "local"
 ## Context Window and Timeouts for Local Models
 
 Two settings that cloud deployments never touch matter on the edge. Neither is
-discovered automatically today (see
+discovered from the server automatically (see
 [agentscope-go#8](https://github.com/agentscope-ai/agentscope-go/issues/8)), so
 set both explicitly.
 
@@ -115,12 +115,13 @@ set both explicitly.
 
 Ollama's context window (`num_ctx`) is configured on the server, per model,
 and defaults to a small value. The framework cannot read it back. With
-`WithContextConfig` set but no `ContextSize` override, the framework uses a
+`WithContextConfig` set but no window declared, the framework uses a
 128000-token window for the Ollama adapter, so with the default `TriggerRatio`
 compression starts near 102400
 estimated tokens and may trigger only after the server's configured context
 limit has already been exceeded; by then Ollama has silently dropped the oldest
-messages. Raise `num_ctx` in a Modelfile and tell the agent the same number:
+messages. Raise `num_ctx` in a Modelfile and declare the same number as
+`OllamaConfig.ContextSize`:
 
 ```
 # Modelfile
@@ -141,10 +142,11 @@ import (
 )
 
 local, err := model.NewOllamaChatModel(model.OllamaConfig{
-    Model: "qwen-edge",
-    // UnifiedAgent calls the non-streaming Chat path, so the HTTP client's
-    // timeout (60s by default) bounds each HTTP request. Even a 0.5B–3B
-    // model on a Raspberry Pi can need minutes for one long answer.
+    Model:       "qwen-edge",
+    ContextSize: 8192, // same as num_ctx above; not sent to the server
+    // Buffered model calls (listed below) are bounded by the HTTP client's
+    // timeout, 60s by default. Even a 0.5B–3B model on a Raspberry Pi can
+    // need minutes for one long answer or context summary.
     ClientOptions: &model.ClientOptions{Timeout: 10 * time.Minute},
 })
 if err != nil {
@@ -152,11 +154,49 @@ if err != nil {
 }
 
 ag := agent.NewUnifiedAgent("edge", "You are a helpful assistant.", local,
-    agent.WithContextConfig(&agent.ContextConfig{
-        ContextSize: 8192, // same as num_ctx above
-    }),
+    agent.WithContextConfig(&agent.ContextConfig{}), // window from the model
 )
 ```
+
+`OllamaConfig.ContextSize` only tells the agent the window; it does not change
+`num_ctx`, which the OpenAI-compatible endpoint used by the adapter cannot set.
+A nonzero `ContextConfig.ContextSize` still overrides the window a model
+reports. `num_ctx` covers the prompt and the generated tokens, and the agent's
+token count is an estimate, so leave room for `max_tokens` below the
+`TriggerRatio` threshold (0.8 by default).
+
+A `ConnectivityAwareModel` resolves to the smaller of the windows its local and
+cloud models resolve to, whatever the circuit state, because one call can fall
+back from the cloud model to the local one. A model that reports no window
+counts as the 128000-token default, so declare the local model's window. Other
+wrappers do not report every model they may call: `FallbackChatModel` reports
+its first model only, `resilience.Wrap` reports none, and compression does not
+consider `agent.ModelConfig.FallbackModel`. With those, including when they
+wrap a `ConnectivityAwareModel`, set `ContextConfig.ContextSize` to the
+smallest window yourself.
+
+Declaring a small window makes compression actually run on the device. Each
+summary is a buffered `Chat` call; if it fails or times out, the agent falls
+back to truncating old context while keeping the previous summary. Automatic
+compression runs in `UnifiedAgent.Reply` and `ReplyStream`; the
+`UnifiedAgentRunner` loop bridge does not compress automatically.
+
+### Set request timeouts for slow generation
+
+Since the fix for [#17](https://github.com/agentscope-ai/agentscope-go/issues/17),
+merged after v2.0.11, `Reply` and `ReplyStream` without middleware call
+`ChatStream`. Adapters that stream through the shared SSE helper, including
+Ollama, are not bounded by `http.Client.Timeout`, because the helper removes
+it; transport limits such as `ResponseHeaderTimeout` still apply when
+configured. The OpenAI Responses adapter uses its own transport, so its
+streams keep the client timeout (5 minutes by default). These model calls
+remain buffered `Chat` requests bounded by the client timeout:
+
+- every model call in v2.0.11 and earlier releases;
+- agents with middleware, or built with `agent.WithModelStreaming(false)`;
+- the `UnifiedAgentRunner` loop bridge;
+- context-compression summaries and `UnifiedAgent.GenerateStructuredResponse`;
+- providers whose `ChatStream` returns `model.ErrStreamNotSupported`.
 
 `ClientOptions.Timeout` is a per-request timeout: one `UnifiedAgent.Reply` can
 issue several model requests, retries and tool calls. Put the overall reply

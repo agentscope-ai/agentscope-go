@@ -144,7 +144,15 @@ type ModelNamer interface {
 
 // ResolveContextSize returns the context window size for a model.
 // It checks (in order): ContextSizer interface, ModelNamer + model card lookup, default.
+//
+// A ConnectivityAwareModel resolves to the smaller of its members' resolved
+// windows, independent of circuit state: a single call can fall back from the
+// cloud model to the local one. The result never exceeds what either member
+// would resolve to on its own.
 func ResolveContextSize(m ChatModel, fallback int) int {
+	if cam, ok := m.(*ConnectivityAwareModel); ok {
+		return min(ResolveContextSize(cam.local, fallback), ResolveContextSize(cam.cloud, fallback))
+	}
 	if cs, ok := m.(ContextSizer); ok {
 		if s := cs.ContextSize(); s > 0 {
 			return s
