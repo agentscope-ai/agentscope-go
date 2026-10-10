@@ -16,6 +16,7 @@ const defaultOllamaBaseURL = "http://localhost:11434"
 type OllamaChatModel struct {
 	baseURL        string
 	model          string
+	contextSize    int
 	defaultHeaders map[string]string
 	httpClient     *http.Client
 }
@@ -26,12 +27,22 @@ type OllamaConfig struct {
 	Model         string
 	HTTPClient    *http.Client
 	ClientOptions *ClientOptions
+	// ContextSize declares the context window, in tokens, that the Ollama
+	// server uses for Model (its num_ctx). It is reported through
+	// ContextSizer so context compression measures against that window.
+	// It is not sent to the server: set num_ctx in a Modelfile or the
+	// server configuration, because the OpenAI-compatible endpoint used by
+	// this adapter cannot change it. Zero means unknown.
+	ContextSize int
 }
 
 // NewOllamaChatModel creates a ChatModel backed by a local Ollama instance.
 func NewOllamaChatModel(cfg OllamaConfig) (*OllamaChatModel, error) {
 	if cfg.Model == "" {
 		return nil, fmt.Errorf("ollama: Model is required")
+	}
+	if cfg.ContextSize < 0 {
+		return nil, fmt.Errorf("ollama: ContextSize must not be negative")
 	}
 	base := cfg.BaseURL
 	if base == "" {
@@ -44,6 +55,7 @@ func NewOllamaChatModel(cfg OllamaConfig) (*OllamaChatModel, error) {
 	return &OllamaChatModel{
 		baseURL:        base,
 		model:          cfg.Model,
+		contextSize:    cfg.ContextSize,
 		defaultHeaders: defHeaders,
 		httpClient:     defaultHTTPClient(cfg.HTTPClient, cfg.ClientOptions),
 	}, nil
@@ -157,4 +169,10 @@ func (m *OllamaChatModel) ChatStream(ctx context.Context, msgs []*message.Msg, o
 // CountTokens estimates token count.
 func (m *OllamaChatModel) CountTokens(msgs []*message.Msg, tools []ToolSchema) int {
 	return countTokensByBytes(msgs, tools)
+}
+
+// ContextSize implements ContextSizer with OllamaConfig.ContextSize; zero
+// means unknown.
+func (m *OllamaChatModel) ContextSize() int {
+	return m.contextSize
 }

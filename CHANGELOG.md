@@ -30,6 +30,16 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   Reports retain scheduled-arrival latency and remain unchanged after return.
   This supplies the first load-generation building block for RFC #11.
 
+- `model.OllamaConfig.ContextSize` declares the Ollama server's configured
+  window (`num_ctx`) so context compression measures against it (#8). It is
+  reported through `ContextSizer`, is not sent to the server and defaults to
+  zero (unknown, leaving the agent's 128000-token default). Python AgentScope
+  defaults its Ollama `context_size` to 32768
+  ([`42410af`](https://github.com/agentscope-ai/agentscope/blob/42410aff0c007f6fb1687bb749d657108ec48af5/src/agentscope/model/_ollama/_model.py));
+  Go keeps zero so existing agents keep their compression thresholds. Model
+  cards are not consulted, because a card's maximum is not the server's
+  `num_ctx`.
+
 ### Fixed
 
 - Skill frontmatter parsing recognizes closing `---` only on an unindented
@@ -82,6 +92,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   `ChatStream` for providers with `MaxTokensKey` configured (Anthropic
   deliberately skips it: its adapter does not apply the per-call option), and
   registers Ollama and xAI, which were missing from the wall.
+- `model.ResolveContextSize` resolves a `ConnectivityAwareModel` to the smaller
+  of its local and cloud models' resolved windows, independent of circuit
+  state (#8). It previously reported no window, so compression used the
+  128000-token default even though one cloud call can fall back to a smaller
+  local model. Behavior change: when both members report windows above 128000,
+  the wrapper now resolves to the smaller of them instead of 128000.
 
 ## [v2.0.11] - 2026-09-19
 
