@@ -13,6 +13,10 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ### Added
 
+- Experimental `classifier/jev` adapter with single-attempt TypeSafe HTTP
+  conversion, bounded payloads, context cancellation, preserved attempt usage
+  and opt-in live protocol tests. See the [Jev guide](docs/jev.md).
+
 - Experimental `classifier` typed Binary/Choice/Score contracts, validation,
   explicit attempt/unknown-usage reporting and offline fake, with an offline
   example and [usage guide](docs/classifier.md). This documents PR #22; Jev
