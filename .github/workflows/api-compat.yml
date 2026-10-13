@@ -1,0 +1,62 @@
+name: API compatibility
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: ["*"]
+
+permissions: read-all
+
+jobs:
+  # Compares Stable-tier package APIs (STABILITY.md) against the latest v2 tag
+  # and fails a pull request that breaks them, unless the PR carries the
+  # breaking-change label. Push runs report only: a labeled breaking PR must
+  # not leave main permanently red. Behavioral compatibility is out of scope
+  # for this check and remains a review responsibility.
+  apidiff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install apidiff
+        # Pinned to the last x/exp commit whose go.mod supports Go 1.25.
+        run: go install golang.org/x/exp/cmd/apidiff@c1d0aacb2297
+
+      - name: Compare against the latest tag
+        run: |
+          set -e
+          BASE=$(git tag --sort=-v:refname | grep -E '^v2\.' | head -1)
+          if [ -z "$BASE" ]; then
+            echo "No v2 tag found; skipping baseline comparison"
+            exit 0
+          fi
+          echo "Baseline tag: $BASE"
+          git worktree add --detach /tmp/apidiff-base "$BASE"
+          trap 'git worktree remove --force /tmp/apidiff-base' EXIT
+          # Keep this list in sync with the Stable tier in STABILITY.md.
+          STABLE="message model agent tool permission formatter errors"
+          mkdir -p /tmp/apidiff-exp
+          found=0
+          for name in $STABLE; do
+            pkg="github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/$name"
+            (cd /tmp/apidiff-base && apidiff -w "/tmp/apidiff-exp/$name.exp" "$pkg")
+            echo "=== $pkg vs $BASE ==="
+            if ! apidiff -incompatible "/tmp/apidiff-exp/$name.exp" "$pkg"; then
+              found=1
+            fi
+          done
+          echo "BREAKING_FOUND=$found" >> "$GITHUB_ENV"
+
+      - name: Enforce on pull requests
+        if: github.event_name == 'pull_request' && env.BREAKING_FOUND == '1' && !contains(github.event.pull_request.labels.*.name, 'breaking-change')
+        run: |
+          echo "ERROR: incompatible changes to Stable-tier packages. Add the breaking-change label and declare the break per STABILITY.md."
+          exit 1

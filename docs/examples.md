@@ -35,6 +35,7 @@ see the [AskUser contract](tools.md#askuser).
 | [streaming](../examples/streaming/) | Agent lifecycle events |
 | [ask_user](../examples/ask_user/) | Structured questions with a simulated model and host answer |
 | [console](../examples/console/) | Terminal chat and tool-call confirmation |
+| [managed_task](../examples/managed_task/) | Fixed-model managed text execution with a local HTTP fixture |
 | [classifier](../examples/classifier/) | Typed classification with offline fake results and attempt accounting |
 | [model_call](../examples/model_call/) | Direct model streaming, tool calls and structured output |
 | [structured_output](../examples/structured_output/) | Structured output through tool calling |

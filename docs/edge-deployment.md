@@ -160,7 +160,7 @@ ag := agent.NewUnifiedAgent("edge", "You are a helpful assistant.", local,
 
 `OllamaConfig.ContextSize` only tells the agent the window; it does not change
 `num_ctx`, which the OpenAI-compatible endpoint used by the adapter cannot set.
-A nonzero `ContextConfig.ContextSize` still overrides the window a model
+A positive `ContextConfig.ContextSize` still overrides the window a model
 reports. `num_ctx` covers the prompt and the generated tokens, and the agent's
 token count is an estimate, so leave room for `max_tokens` below the
 `TriggerRatio` threshold (0.8 by default).

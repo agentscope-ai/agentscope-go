@@ -146,6 +146,15 @@ riscv64, including a stripped arm64 edge-binary size check. Treat the workflow a
 the source for matrix details and limits. Local success on one platform does not
 establish that the other jobs pass.
 
+Further workflows: `security.yml` runs an advisory `govulncheck` scan (a
+blocking dependency-review gate is planned once the dependency graph is enabled
+for the repository);
+`api-compat.yml` compares Stable-tier package APIs against the latest v2 tag
+and fails unlabeled breaking changes in pull requests; `docs.yml` checks
+markdown links and runs the offline examples; `codeql.yml` and
+`scorecard.yml` provide pull-request static analysis and a scheduled hygiene
+scorecard.
+
 ### Coverage and regression policy
 
 - The library statement-coverage floor is **68.6%**. Keep `COVERAGE_MIN` in CI

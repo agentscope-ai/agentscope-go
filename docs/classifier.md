@@ -4,9 +4,10 @@ The experimental `pkg/agentscope/classifier` package evaluates typed questions
 against shared text or a JSON object. It is independent of `model.ChatModel`.
 This guide covers the classifier abstraction merged in [PR #22](https://github.com/agentscope-ai/agentscope-go/pull/22).
 The [Jev adapter](jev.md) implements these contracts in a separate subpackage.
-Managed execution and routing are later stages of
-[issue #16](https://github.com/agentscope-ai/agentscope-go/issues/16); they are not
-provided by this package. This guide will grow with those stages.
+[Fixed-deployment managed execution](managed-task.md) is a separate entry point
+from stage 3 of [issue #16](https://github.com/agentscope-ai/agentscope-go/issues/16).
+Classifier-driven routing remains a later stage; this package
+selects no generation models.
 
 Run the offline example from a repository checkout:
 

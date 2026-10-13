@@ -1,0 +1,38 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: ["*"]
+
+permissions: read-all
+
+jobs:
+  # Reachability-based vulnerability scan of the module graph. Advisory until
+  # Go 1.26 becomes the minimum supported version: the fixes for the reachable
+  # golang.org/x/net v0.57.0 HTTP/2 findings land in v0.60.0, which requires
+  # go1.26, while go.mod supports Go 1.25. The scan report stays in the log and
+  # a warning annotation marks the job; do not let new findings accumulate.
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          # Latest patch of the supported line, so standard-library findings
+          # track the toolchain actually built, not an outdated patch.
+          go-version: '1.25'
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+
+      - name: Scan
+        continue-on-error: true
+        run: govulncheck ./pkg/...
+
+      - name: Advisory notice
+        if: failure()
+        run: echo "::warning::govulncheck findings are advisory until Go 1.26; review the Scan log"

@@ -3,7 +3,8 @@
 Status: staged implementation of [RFC #11](https://github.com/agentscope-ai/agentscope-go/issues/11).
 The execution, retrieval and quality-measurement foundations described below are
 implemented in this change. Shared inference governance and routing are proposed
-subsequent changes. Availability on `main` does not imply a published release.
+subsequent changes. The separate [fixed managed text-task entry](../managed-task.md)
+implements the narrow stage 3 boundary of RFC #16 without changing these Agent paths. Availability on `main` does not imply a published release.
 
 ## Objective and sequence
 
@@ -155,5 +156,7 @@ Upstream AgentScope was inspected through
 | [Routing #2758](https://github.com/agentscope-ai/agentscope/pull/2758) | Proposed after managed execution/accounting; no Jev dependency in these foundations |
 
 Shared cache namespaces/versioned keys must precede cross-tenant cache sharing or
-same-miss coalescing. Generic classifier APIs, Jev integration, Excel/multimodal
-documents and complete realtime protocols remain conditional separate work.
+same-miss coalescing. The [generic classifier](../classifier.md) and
+[fixed managed text tasks](../managed-task.md) are separate implementations.
+Jev integration, routing, Excel/multimodal documents and complete realtime
+protocols remain separate work.
