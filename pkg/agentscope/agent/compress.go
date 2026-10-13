@@ -68,7 +68,7 @@ const defaultSummaryTemplate = "<system-info>Here is a summary of your previous 
 type ContextConfig struct {
 	TriggerRatio      float64         // Token ratio to trigger compression (default 0.8, max 0.9).
 	ReserveRatio      float64         // Ratio of tokens to keep as recent context (default 0.1).
-	ContextSize       int             // Override context window size (0 = auto-detect from model).
+	ContextSize       int             // Override context window size (0 or negative = auto-detect from model).
 	CompressionPrompt string          // Prompt guiding the model to generate a summary.
 	SummaryTemplate   string          // Template with {field} placeholders for the structured summary.
 	SummarySchema     json.RawMessage // JSON Schema for structured output (matches SummarySchema fields).
@@ -112,6 +112,11 @@ func (c *ContextConfig) withDefaults() ContextConfig {
 	}
 	if cfg.ReserveRatio <= 0 || cfg.ReserveRatio >= 0.9 {
 		cfg.ReserveRatio = 0.1
+	}
+	// A negative window would make the threshold and reserve non-positive, so
+	// every round would summarize and clear the whole context.
+	if cfg.ContextSize < 0 {
+		cfg.ContextSize = 0
 	}
 	if cfg.CompressionPrompt == "" {
 		cfg.CompressionPrompt = defaultCompressionPrompt

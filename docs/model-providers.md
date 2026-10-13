@@ -110,6 +110,13 @@ No API key required. Models: `deepseek-r1-14b`, `llama4`, `qwen3-14b`, `qwen3.5-
 `ContextSize` tells context compression the window the server runs with; see
 [edge deployment](edge-deployment.md#match-the-agents-context-size-to-the-servers-window).
 
+Thinking models return their reasoning as thinking blocks when Ollama sends
+it in the `reasoning` field (Ollama 0.11 or later). The adapter sends no think
+control, so the server default applies. From Ollama 0.12.4, models such as
+`qwen3` and `deepseek-r1` think by default. Ollama 0.11 to 0.12.3 fill the
+field only for models such as `gpt-oss`; other models' reasoning stays inline
+in the text. `model.WithSeed` is sent as `seed`.
+
 ### Moonshot (Kimi)
 
 ```go

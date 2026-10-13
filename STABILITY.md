@@ -20,8 +20,8 @@ import "github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope"
 - **Stable** (source-compatible within a major version): `message`, `model`,
   `agent` (UnifiedAgent), `tool`, `permission`, `formatter`, `errors`.
 - **Experimental** (may change): `runtime`, `loop`, `app`, `service`, `realtime`,
-  `tune`, `classifier`, `classifier/jev`, `replay/evalkit`, `event/streamcheck`,
-  `agenttest/faults`,
+  `tune`, `classifier`, `classifier/jev`, `managedtask`, `replay/evalkit`,
+  `event/streamcheck`, `agenttest/faults`,
   `providercontract` (test-only), `console`, `channel`, `channel/dingtalk`,
   `hub` (built-in sources), `skill` (`Store` partitions), `middleware/memory`
   (`FileStore` + `AgenticMemoryMiddleware`).
@@ -38,6 +38,11 @@ they are graded. That list includes `workspace`, `schedule`, `rag`,
 them: `workspace.ExecPathResolver`, `schedule.TaskRemover`, `rag.Document.Score`
 and `rag.NewLLMReranker`, `rag/parser` `Unit` plus `Validate`, and `middleware`
 `WithRepetitionErrorThreshold` plus `WithRepetitionErrorHint`.
+
+The opt-in `model.OpenAITextClient`, `PreparedTextRequest`, associated text types
+and error sentinels are Experimental despite their placement in `model`. They
+add a strict single-attempt primitive for [managed text tasks](docs/managed-task.md);
+the existing required `ChatModel` interface and ordinary provider calls are unchanged.
 
 Stable means source-compatible for documented usage. It does not mean
 value-compatible. Two Stable-tier contracts changed behavior in the 2026-09 sync
@@ -81,6 +86,14 @@ The [upstream comparison](docs/design/upstream-sync-v2.0.11.md) records the sele
 ports and deferred work, including realtime/TUI, SOP and model-context wiring.
 
 ## Unreleased execution and retrieval behavior
+
+- `managedtask.Executor` is a separate fixed-deployment, plain-text, non-streaming,
+  tool-disabled boundary with host disclosure/qualification, trustworthy context
+  bounds, finite local admission/retries and frozen terminal accounting. Unknown
+  usage/cost stays explicit and strict budgets are rejected. It does not cover
+  ordinary Agent/helper paths, distributed quotas or routing. Local fixtures are
+  not production quality evidence; cleanup can outlive cancellation. See the
+  [managed task guide](docs/managed-task.md).
 
 - **Streaming behavior change (#17):** without middleware, `ReplyStream` now
   uses provider `ChatStream` for normal rounds and forced finalization; `Reply`

@@ -1,0 +1,44 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: ["*"]
+
+permissions: read-all
+
+jobs:
+  # Some referenced sites (for example developers.openai.com) answer bots with
+  # 403 and rate limiters with 429; accept both instead of flaking.
+  # 502/503 are transient availability, not broken links: github.com blob pages
+  # intermittently return 503 to CI runners (observed on a CHANGELOG.md
+  # permalink), and lychee's GitHub API fallback does not cover blob URLs in
+  # public repos, so a token alone does not prevent those flakes.
+  links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2
+        with:
+          args: --accept 200,403,429,502,503 --max-retries 3 './**/*.md'
+          fail: true
+
+  # Offline examples must keep running, not only compiling. Only examples that
+  # need no credentials, servers or devices belong on this list.
+  offline-examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run offline examples
+        run: |
+          go run ./examples/classifier
+          go run ./examples/managed_task
+          go run ./examples/ask_user </dev/null

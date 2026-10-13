@@ -156,6 +156,7 @@ its model choice, environment variables and required services or runtimes.
 | [streaming](examples/streaming/) | Agent lifecycle events and provider text deltas |
 | [ask_user](examples/ask_user/) | Structured questions with a simulated model and host answer |
 | [console](examples/console/) | Terminal chat and tool-call confirmation |
+| [managed_task](examples/managed_task/) | Fixed-model managed text execution with a local HTTP fixture |
 | [classifier](examples/classifier/) | Typed classification with offline fake results and attempt accounting |
 | [model_call](examples/model_call/) | Direct model streaming, tool calls and structured output |
 | [structured_output](examples/structured_output/) | Structured output through tool calling |
@@ -219,6 +220,7 @@ to the same catalog.
 |---|---|
 | Setup and a first agent | [Getting started](docs/getting-started.md) |
 | Models and tools | [Providers](docs/model-providers.md) · [Tools](docs/tools.md) |
+| Managed text tasks | [Fixed-deployment execution, limits and accounting](docs/managed-task.md) |
 | Probabilistic classification | [Classifier API and attempt accounting](docs/classifier.md) · [Jev adapter](docs/jev.md) |
 | Middleware and memory | [Middleware](docs/middleware.md) |
 | Application deployment | [Deployment](docs/deployment.md) · [Execution and session limits](docs/adversarial-hardening.md) |

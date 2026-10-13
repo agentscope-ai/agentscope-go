@@ -21,6 +21,7 @@ feature is wired into every execution path.
 | Context and recovery | [compress.go](pkg/agentscope/agent/compress.go), [checkpoint.go](pkg/agentscope/agent/checkpoint.go) | Context compression, summaries and checkpoint loading |
 | Loop integration | [loop_bridge.go](pkg/agentscope/agent/loop_bridge.go), [loop/](pkg/agentscope/loop/), [runtime/](pkg/agentscope/runtime/) | Agent-to-loop adapters and session execution |
 | Model interface and providers | [model.go](pkg/agentscope/model/model.go), [model/](pkg/agentscope/model/) | Chat calls, responses, usage, provider configuration and model cards |
+| Fixed managed text tasks | [managedtask/](pkg/agentscope/managedtask/), [openai_text.go](pkg/agentscope/model/openai_text.go) | Opt-in fixed deployment, host disclosure policy, bounded admission/retries and frozen attempt snapshots; [guide](docs/managed-task.md) |
 | Probabilistic classification | [classifier/](pkg/agentscope/classifier/) | Typed decisions, validation, attempt accounting and offline fake; [guide](docs/classifier.md) |
 | Jev adapter | [classifier/jev/](pkg/agentscope/classifier/jev/) | Single-attempt Jev HTTP conversion, bounded payloads and failure accounting; [guide](docs/jev.md) |
 | Message formatting | [formatter/](pkg/agentscope/formatter/) | Provider-specific message and multimodal formats |
@@ -164,6 +165,13 @@ as well as successful completion.
 Keep keys out of logs, errors and test fixtures committed to the repository.
 `GenerateStructuredOutput` uses tool calling; its fallback and retry behavior
 must be considered when accounting for model calls and usage.
+
+The explicit `managedtask.Executor` path accepts one projected user text and a
+concrete `model.OpenAITextClient`. It requires host qualification for production,
+a trustworthy bound over final JSON plus output reservation, and dispatch-time
+authorization. Its worker owns task/admission capacity through local cleanup;
+returned terminal snapshots cannot be updated by late work. It does not govern
+ordinary Chat/Agent paths or depend on the proposed shared-inference package.
 
 ### Context and model capabilities
 

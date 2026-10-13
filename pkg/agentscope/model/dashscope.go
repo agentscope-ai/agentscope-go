@@ -334,6 +334,7 @@ func processOpenAIStreamCfg(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 		}
 
 		delta := chunk.Choices[0].Delta
+		thinking := reasoningText(delta.ReasoningContent, delta.Reasoning)
 
 		// Accumulate text
 		if delta.Content != "" {
@@ -341,8 +342,8 @@ func processOpenAIStreamCfg(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 		}
 
 		// Accumulate reasoning/thinking content
-		if delta.ReasoningContent != "" {
-			accThinking.WriteString(delta.ReasoningContent)
+		if thinking != "" {
+			accThinking.WriteString(thinking)
 		}
 
 		// Accumulate tool calls
@@ -410,18 +411,19 @@ func processOpenAIStreamCfg(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 			}
 		}
 
-		// Emit delta chunk
+		// Emit delta chunk. Thinking precedes text, matching the order of the
+		// final assembled response.
 		var deltaContent []message.ContentBlock
+		if thinking != "" {
+			deltaContent = append(deltaContent, message.ThinkingBlock{
+				Type:     "thinking",
+				Thinking: thinking,
+			})
+		}
 		if delta.Content != "" {
 			deltaContent = append(deltaContent, message.TextBlock{
 				Type: "text",
 				Text: delta.Content,
-			})
-		}
-		if delta.ReasoningContent != "" {
-			deltaContent = append(deltaContent, message.ThinkingBlock{
-				Type:     "thinking",
-				Thinking: delta.ReasoningContent,
 			})
 		}
 
@@ -478,7 +480,33 @@ type openAIChatMessage struct {
 	ToolCalls        []openAIToolCall    `json:"tool_calls,omitempty"`
 	ToolCallID       string              `json:"tool_call_id,omitempty"`
 	ReasoningContent string              `json:"reasoning_content,omitempty"`
+	Reasoning        openAIReasoningText `json:"reasoning,omitempty"`
 	Audio            *openAIMessageAudio `json:"audio,omitempty"`
+}
+
+// openAIReasoningText is the string "reasoning" field that Ollama and some
+// other OpenAI-compatible servers use instead of reasoning_content. A
+// non-string value under this key decodes as empty instead of failing the
+// whole response.
+type openAIReasoningText string
+
+func (r *openAIReasoningText) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		*r = ""
+		return nil
+	}
+	*r = openAIReasoningText(s)
+	return nil
+}
+
+// reasoningText selects a message's or delta's thinking text, preferring
+// reasoning_content.
+func reasoningText(reasoningContent string, reasoning openAIReasoningText) string {
+	if reasoningContent != "" {
+		return reasoningContent
+	}
+	return string(reasoning)
 }
 
 type openAIToolCall struct {
@@ -591,6 +619,7 @@ type openAIChunkDelta struct {
 	Role             string                 `json:"role,omitempty"`
 	Content          string                 `json:"content,omitempty"`
 	ReasoningContent string                 `json:"reasoning_content,omitempty"`
+	Reasoning        openAIReasoningText    `json:"reasoning,omitempty"`
 	ToolCalls        []openAIStreamToolCall `json:"tool_calls,omitempty"`
 	Audio            *openAIAudioDelta      `json:"audio,omitempty"`
 }
@@ -637,11 +666,11 @@ func parseOpenAIResponseCfg(parsed *openAIChatResponse, msgs []*message.Msg, inc
 	var content []message.ContentBlock
 
 	// Extract thinking content
-	if choice.Message.ReasoningContent != "" {
+	if thinking := reasoningText(choice.Message.ReasoningContent, choice.Message.Reasoning); thinking != "" {
 		content = append(content, message.ThinkingBlock{
 			Type:     "thinking",
 			ID:       fmt.Sprintf("thinking_%s", parsed.ID),
-			Thinking: choice.Message.ReasoningContent,
+			Thinking: thinking,
 		})
 	}
 

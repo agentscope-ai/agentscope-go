@@ -163,6 +163,7 @@ necesarios.
 | [streaming](examples/streaming/) | Eventos del agente y deltas de texto del proveedor |
 | [ask_user](examples/ask_user/) | Preguntas estructuradas con un modelo y una respuesta del anfitrión simulados |
 | [console](examples/console/) | Chat en terminal y confirmación de herramientas |
+| [managed_task](examples/managed_task/) | Ejecución de texto con modelo fijo y servidor HTTP local de prueba |
 | [classifier](examples/classifier/) | Clasificación tipada con resultados simulados y registro de intentos |
 | [model_call](examples/model_call/) | Streaming del modelo, herramientas y salida estructurada |
 | [structured_output](examples/structured_output/) | Salida estructurada mediante llamadas a herramientas |

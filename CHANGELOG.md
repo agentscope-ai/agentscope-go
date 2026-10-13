@@ -13,6 +13,33 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ### Added
 
+- `model.OllamaNativeChatModel` talks to a local Ollama instance through the
+  native `/api/chat` endpoint instead of the OpenAI-compatible one (#28, first
+  stage). It is opt-in and additive: `OllamaChatModel` is unchanged. The native
+  transport can set per-request options the compatible endpoint cannot —
+  `OllamaNativeConfig.NumCtx` is sent as `options.num_ctx` on every request and
+  reported through `ContextSizer` (zero means server default / unknown) — and
+  maps `WithThinking`/`WithThinkingDisabled` to the native `think` toggle (the
+  thinking budget argument has no native counterpart and is ignored) and
+  `WithResponseFormat` to `format` (`"json"` or an embedded schema object).
+  Reasoning the server reports in `message.thinking` surfaces as a
+  `ThinkingBlock` on both `Chat` and `ChatStream`, published before text
+  within a chunk and assembled before the `TextBlock` in the final response.
+  Usage comes from the final stream frame's `prompt_eval_count`/`eval_count`;
+  base64 image blocks ride the native `images` field. Native tool calling is
+  not supported yet: passing `WithTools` returns an explicit error rather than
+  silently dropping the tools, and tool call/result blocks in history are not
+  replayed (there is no tool protocol to attach them to). Streaming uses a new
+  NDJSON transport (`internal/httpx.DoNDJSONRequest`); a stream that ends
+  without a `done` frame surfaces as `ChatResponse.Error` with the partial
+  content preserved.
+
+- Experimental fixed-deployment `managedtask` text execution and opt-in
+  `model.OpenAITextClient`: host authorization/projection, qualification, trusted
+  context bounds, finite admission/deadlines/retries and attempt/cost uncertainty.
+  Includes an [offline example](examples/managed_task/) and [guide](docs/managed-task.md).
+  Ordinary Chat/Agent behavior is unchanged; routing remains a later stage.
+
 - Experimental `classifier/jev` adapter with single-attempt TypeSafe HTTP
   conversion, bounded payloads, context cancellation, preserved attempt usage
   and opt-in live protocol tests. See the [Jev guide](docs/jev.md).
@@ -115,6 +142,24 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   because that wrapper implements neither `ContextSizer` nor `ModelNamer`; it
   now uses the wrapper's resolved window, which can exceed 128000 when both of
   its models report larger windows.
+- Ollama thinking models no longer lose their reasoning (#8). Ollama returns it
+  in a string `reasoning` field (thinking is on by default for models such as
+  `qwen3`), which the shared OpenAI-compatible parser
+  ignored. `Chat` and `ChatStream` now read that field as thinking when
+  `reasoning_content` is empty; non-string `reasoning` values are ignored
+  instead of failing the response. The parser is shared, so other
+  OpenAI-compatible servers that send a string `reasoning` (not tested here)
+  also yield thinking. Within one stream chunk, thinking is now published before
+  text, matching the final response. Thinking blocks count toward the agent's
+  token estimate, so compression can start earlier; they are not sent back to
+  the server.
+- `model.WithSeed` now reaches Ollama as `seed` on `Chat` and `ChatStream`
+  (#8); it was the only OpenAI-compatible adapter that dropped it.
+- A negative `agent.ContextConfig.ContextSize` is now treated like 0 and
+  resolves the window from the model. It previously bypassed that check: the
+  compression threshold and reserve became zero or negative, so every round
+  summarized the whole context, including in-flight tool calls, and cleared
+  it, and an empty context reported a non-positive threshold error.
 
 ## [v2.0.11] - 2026-09-19
 
