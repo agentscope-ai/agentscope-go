@@ -71,6 +71,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   cards are not consulted, because a card's maximum is not the server's
   `num_ctx`.
 
+- `model.ChatModelUnwrapper`, an optional interface with
+  `Unwrap() ChatModel`, lets a wrapper whose calls are all served by one inner
+  model expose that model (#8). `model.ResolveContextSize` resolves the inner
+  model, with the caller's fallback, when the wrapper reports no window or
+  model card of its own.
+
 ### Fixed
 
 - Skill frontmatter parsing recognizes closing `---` only on an unindented
@@ -160,6 +166,17 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   compression threshold and reserve became zero or negative, so every round
   summarized the whole context, including in-flight tool calls, and cleared
   it, and an empty context reported a non-positive threshold error.
+- `resilience.Wrap` with a circuit breaker or rate limiter now reports the
+  window of the model it wraps to `model.ResolveContextSize`, through
+  `model.ChatModelUnwrapper` (#8). It previously resolved to the caller's
+  fallback, the 128000-token default in compression, so a wrapped local model
+  with a smaller window could overflow before compression ran. Behavior change:
+  a model that implements `Unwrap() model.ChatModel` and reports no window or
+  model card of its own now resolves to its inner model's window, which can
+  exceed 128000. A `ConnectivityAwareModel` or `FallbackChatModel` with such a
+  member, and compression with such a `ModelConfig.FallbackModel`, can therefore
+  resolve to a smaller or larger window. Calling the unwrapped model directly
+  bypasses the circuit breaker and rate limiter.
 
 ## [v2.0.11] - 2026-09-19
 

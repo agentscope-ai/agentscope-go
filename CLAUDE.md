@@ -176,11 +176,13 @@ ordinary Chat/Agent paths or depend on the proposed shared-inference package.
 ### Context and model capabilities
 
 [agent/compress.go](pkg/agentscope/agent/compress.go) owns compression thresholds,
-summary generation and retention of recent context. `ContextConfig.ContextSize`
-is an explicit override. Otherwise `model.ResolveContextSize` checks
-`ContextSizer`, then `ModelNamer` plus a model card, then the caller's fallback.
-These interfaces are optional; do not assume that a provider or wrapper
-implements them.
+summary generation and retention of recent context. A positive
+`ContextConfig.ContextSize` is an explicit override. Otherwise
+`model.ResolveContextSize` takes the minimum over the members of a
+`ConnectivityAwareModel` or `FallbackChatModel`; for other models it checks
+`ContextSizer`, then `ModelNamer` plus a model card, then the inner model of a
+`ChatModelUnwrapper` with the same fallback, then the caller's fallback. These
+interfaces are optional; do not assume that a provider or wrapper implements them.
 
 Embedded cards in [model/models/](pkg/agentscope/model/models/) describe model
 metadata. They do not configure a server or establish its runtime context limit.

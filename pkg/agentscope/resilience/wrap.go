@@ -34,7 +34,10 @@ type resilientModel struct {
 }
 
 // Wrap decorates m with the configured resilience options and returns a
-// model.ChatModel. With no options it returns m unchanged.
+// model.ChatModel. With no options it returns m unchanged. The wrapper
+// implements model.ChatModelUnwrapper, so model.ResolveContextSize reports the
+// window of m. Calling the unwrapped model directly bypasses the circuit
+// breaker and rate limiter.
 func Wrap(m model.ChatModel, opts ...ResilienceOption) model.ChatModel {
 	rm := &resilientModel{inner: m}
 	for _, opt := range opts {
@@ -96,4 +99,9 @@ func (m *resilientModel) ChatStream(ctx context.Context, msgs []*message.Msg, op
 
 func (m *resilientModel) CountTokens(msgs []*message.Msg, tools []model.ToolSchema) int {
 	return m.inner.CountTokens(msgs, tools)
+}
+
+// Unwrap returns the wrapped model.
+func (m *resilientModel) Unwrap() model.ChatModel {
+	return m.inner
 }

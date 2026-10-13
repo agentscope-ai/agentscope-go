@@ -172,9 +172,11 @@ resolves to the smallest window among all its models, and when
 `agent.ModelConfig.FallbackModel` is set, compression uses the smaller of its
 window and the agent model's. A model that reports no window counts as the
 128000-token default, so declare the local model's window. `resilience.Wrap`
-with a circuit breaker or rate limiter reports no window for the model it
-wraps, including either wrapper above; with it, set `ContextConfig.ContextSize`
-to the smallest window yourself.
+resolves to the window of the model it wraps, including either wrapper above.
+A custom wrapper that implements none of `ContextSizer`, `ModelNamer` or
+`model.ChatModelUnwrapper` reports no window. Implement `ContextSizer` on it, or
+`Unwrap` if one inner model serves all its calls, or set
+`ContextConfig.ContextSize` to the smallest window yourself.
 
 Declaring a small window makes compression actually run on the device. Each
 summary is a buffered `Chat` call; if it fails or times out, the agent falls

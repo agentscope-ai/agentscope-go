@@ -142,8 +142,25 @@ type ModelNamer interface {
 	ModelName() string
 }
 
-// ResolveContextSize returns the context window size for a model.
-// It checks (in order): ContextSizer interface, ModelNamer + model card lookup, default.
+// ChatModelUnwrapper is an optional interface for a wrapper whose calls are all
+// served, unchanged, by one inner model, such as a wrapper that only adds rate
+// limiting or a circuit breaker. ResolveContextSize uses it to report the inner
+// model's window. The wrapper's own positive ContextSize or ModelNamer card
+// still takes precedence, and the inner model is resolved with the caller's
+// fallback unchanged. A wrapper that changes the effective window should
+// report it through ContextSizer instead.
+//
+// Unwrap returns nil when there is no inner model. It must not return the
+// wrapper itself or form a cycle: resolution recurses without a limit.
+// Calling the returned model directly bypasses the wrapper.
+type ChatModelUnwrapper interface {
+	Unwrap() ChatModel
+}
+
+// ResolveContextSize returns the context window size for a model. Except for
+// the two wrappers described below, it checks (in order): a positive
+// ContextSizer value, the ModelNamer model card, the inner model of a
+// ChatModelUnwrapper resolved with the same fallback, then fallback.
 //
 // A ConnectivityAwareModel resolves to the smaller of its members' resolved
 // windows, independent of circuit state: a single call can fall back from the
@@ -154,6 +171,9 @@ type ModelNamer interface {
 // models it may call, because a failed call advances along the whole chain.
 // Each member is resolved with the same fallback, so a member that reports no
 // window counts as fallback. An empty chain resolves to fallback.
+//
+// Members and inner models are resolved by these same rules, so a wrapped
+// member reports its inner model's window.
 func ResolveContextSize(m ChatModel, fallback int) int {
 	if cam, ok := m.(*ConnectivityAwareModel); ok {
 		return min(ResolveContextSize(cam.local, fallback), ResolveContextSize(cam.cloud, fallback))
@@ -177,6 +197,11 @@ func ResolveContextSize(m ChatModel, fallback int) int {
 	if mn, ok := m.(ModelNamer); ok {
 		if card, err := GetModelCard(mn.ModelName()); err == nil && card.ContextSize > 0 {
 			return card.ContextSize
+		}
+	}
+	if u, ok := m.(ChatModelUnwrapper); ok {
+		if inner := u.Unwrap(); inner != nil {
+			return ResolveContextSize(inner, fallback)
 		}
 	}
 	return fallback
