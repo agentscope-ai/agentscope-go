@@ -212,8 +212,9 @@ func WithMaxTokens(n int) CallOption {
 	}
 }
 
-// WithSeed pins the sampling seed on providers that support it (OpenAI
-// family). Providers without seed support ignore it.
+// WithSeed pins the sampling seed. The OpenAI Chat Completions, DashScope,
+// DeepSeek, Moonshot, xAI and Ollama adapters send it; other adapters ignore
+// it.
 func WithSeed(seed int64) CallOption {
 	return func(o *CallOptions) {
 		o.Seed = &seed
