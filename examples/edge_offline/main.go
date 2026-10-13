@@ -3,6 +3,7 @@
 // It creates a model that prefers a cloud API when available, but automatically
 // falls back to a local Ollama instance when connectivity is lost. When the cloud
 // comes back, the model switches back automatically via the circuit breaker.
+// The local model uses Ollama's native /api/chat endpoint (OllamaNativeChatModel).
 //
 // Run:
 //
@@ -29,8 +30,9 @@ import (
 )
 
 func main() {
-	// Local model: Ollama on localhost (always available on the edge device).
-	local, err := model.NewOllamaChatModel(model.OllamaConfig{
+	// Local model: Ollama on localhost (always available on the edge device),
+	// via the native /api/chat endpoint.
+	local, err := model.NewOllamaNativeChatModel(model.OllamaNativeConfig{
 		Model: "qwen2.5:0.5b",
 	})
 	if err != nil {
@@ -50,7 +52,8 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
-		// No cloud key — use a second Ollama model as "cloud" for demo purposes.
+		// No cloud key — use a second Ollama model as "cloud" for demo purposes
+		// (kept on the OpenAI-compatible adapter; both adapters are ChatModel).
 		cloud, err = model.NewOllamaChatModel(model.OllamaConfig{
 			BaseURL: "http://cloud-that-does-not-exist:11434",
 			Model:   "qwen2.5:0.5b",

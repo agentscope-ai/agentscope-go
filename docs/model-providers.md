@@ -117,6 +117,25 @@ control, so the server default applies. From Ollama 0.12.4, models such as
 field only for models such as `gpt-oss`; other models' reasoning stays inline
 in the text. `model.WithSeed` is sent as `seed`.
 
+A separate adapter talks to Ollama's native `/api/chat` endpoint:
+
+```go
+cm, _ := model.NewOllamaNativeChatModel(model.OllamaNativeConfig{
+    BaseURL: "http://localhost:11434", // default
+    Model:   "llama4",
+    NumCtx:  8192, // sent as options.num_ctx on every request
+})
+```
+
+`NumCtx` sizes the server's window per request and is also reported through
+`ContextSizer`, so context compression aligns with the server without a
+Modelfile. The native adapter also maps `model.WithThinking` to the `think`
+toggle, supports native structured output via `model.WithResponseFormat`
+(`"json"` or an embedded schema object), and reports usage from the server's
+actual token counts. Tool calling is not supported yet: passing
+`model.WithTools` returns an explicit error — use `OllamaChatModel` when you
+need tools.
+
 ### Moonshot (Kimi)
 
 ```go

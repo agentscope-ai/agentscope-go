@@ -113,25 +113,17 @@ set both explicitly.
 
 ### Match the agent's context size to the server's window
 
-Ollama's context window (`num_ctx`) is configured on the server, per model,
-and defaults to a small value. The framework cannot read it back. With
-`WithContextConfig` set but no window declared, the framework uses a
-128000-token window for the Ollama adapter, so with the default `TriggerRatio`
-compression starts near 102400
-estimated tokens and may trigger only after the server's configured context
-limit has already been exceeded; by then Ollama has silently dropped the oldest
-messages. Raise `num_ctx` in a Modelfile and declare the same number as
-`OllamaConfig.ContextSize`:
+Ollama's context window (`num_ctx`) defaults to a small value, and the
+framework cannot read it back from the server. With `WithContextConfig` set
+but no window declared, the framework uses a 128000-token window for the
+Ollama adapter, so with the default `TriggerRatio` compression starts near
+102400 estimated tokens and may trigger only after the server's configured
+context limit has already been exceeded; by then Ollama has silently dropped
+the oldest messages.
 
-```
-# Modelfile
-FROM qwen2.5:0.5b
-PARAMETER num_ctx 8192
-```
-
-```bash
-ollama create qwen-edge -f Modelfile
-```
+The native adapter sets the window per request, so no server-side
+configuration is needed and the agent's compression threshold automatically
+matches what the server enforces:
 
 ```go
 import (
@@ -141,9 +133,11 @@ import (
     "github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/model"
 )
 
-local, err := model.NewOllamaChatModel(model.OllamaConfig{
-    Model:       "qwen-edge",
-    ContextSize: 8192, // same as num_ctx above; not sent to the server
+local, err := model.NewOllamaNativeChatModel(model.OllamaNativeConfig{
+    Model: "qwen2.5:0.5b",
+    // Sent as options.num_ctx on every request and reported as the model's
+    // context window, so compression measures against the same number.
+    NumCtx: 8192,
     // Buffered model calls (listed below) are bounded by the HTTP client's
     // timeout, 60s by default. Even a 0.5B–3B model on a Raspberry Pi can
     // need minutes for one long answer or context summary.
@@ -158,9 +152,32 @@ ag := agent.NewUnifiedAgent("edge", "You are a helpful assistant.", local,
 )
 ```
 
+With the OpenAI-compatible endpoint instead — required when the agent needs
+tool calling, which the native adapter does not support yet — `num_ctx` can
+only be set on the server. Raise it in a Modelfile and declare the same
+number as `OllamaConfig.ContextSize`:
+
+```
+# Modelfile
+FROM qwen2.5:0.5b
+PARAMETER num_ctx 8192
+```
+
+```bash
+ollama create qwen-edge -f Modelfile
+```
+
+```go
+local, err := model.NewOllamaChatModel(model.OllamaConfig{
+    Model:       "qwen-edge",
+    ContextSize: 8192, // same as num_ctx above; not sent to the server
+    ClientOptions: &model.ClientOptions{Timeout: 10 * time.Minute},
+})
+```
+
 `OllamaConfig.ContextSize` only tells the agent the window; it does not change
-`num_ctx`, which the OpenAI-compatible endpoint used by the adapter cannot set.
-A positive `ContextConfig.ContextSize` still overrides the window a model
+`num_ctx`, which the OpenAI-compatible endpoint used by that adapter cannot
+set. A positive `ContextConfig.ContextSize` still overrides the window a model
 reports. `num_ctx` covers the prompt and the generated tokens, and the agent's
 token count is an estimate, so leave room for `max_tokens` below the
 `TriggerRatio` threshold (0.8 by default).
@@ -186,11 +203,12 @@ compression runs in `UnifiedAgent.Reply` and `ReplyStream`; the
 
 Since the fix for [#17](https://github.com/agentscope-ai/agentscope-go/issues/17),
 merged after v2.0.11, `Reply` and `ReplyStream` without middleware call
-`ChatStream`. Adapters that stream through the shared SSE helper, including
-Ollama, are not bounded by `http.Client.Timeout`, because the helper removes
-it; transport limits such as `ResponseHeaderTimeout` still apply when
-configured. The OpenAI Responses adapter uses its own transport, so its
-streams keep the client timeout (5 minutes by default). These model calls
+`ChatStream`. Adapters that stream through the shared SSE or NDJSON helpers,
+including both Ollama adapters, are not bounded by `http.Client.Timeout`,
+because the helpers remove it; transport limits such as
+`ResponseHeaderTimeout` still apply when configured. The OpenAI Responses
+adapter uses its own transport, so its streams keep the client timeout (5
+minutes by default). These model calls
 remain buffered `Chat` requests bounded by the client timeout:
 
 - every model call in v2.0.11 and earlier releases;
@@ -207,11 +225,13 @@ keeps the 60s default. To remove the client timeout entirely, pass your own
 
 ### Cap the output length
 
-`model.WithMaxTokens(n)` reaches Ollama as `max_tokens` (it was dropped on the
-wire before the fix for agentscope-go#8). Small models tend to run on; a cap
-of a few hundred tokens bounds the generated length of each response. It does
-not bound elapsed time: a slow device can still take minutes to produce a
-capped reply, so keep the request timeout and context deadline above as well.
+`model.WithMaxTokens(n)` reaches Ollama as `max_tokens` on the
+OpenAI-compatible endpoint and as `options.num_predict` on the native one (it
+was dropped on the wire before the fix for agentscope-go#8). Small models tend
+to run on; a cap of a few hundred tokens bounds the generated length of each
+response. It does not bound elapsed time: a slow device can still take minutes
+to produce a capped reply, so keep the request timeout and context deadline
+above as well.
 
 ## Network Considerations
 
