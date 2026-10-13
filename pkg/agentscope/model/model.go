@@ -149,9 +149,25 @@ type ModelNamer interface {
 // windows, independent of circuit state: a single call can fall back from the
 // cloud model to the local one. The result never exceeds what either member
 // would resolve to on its own.
+//
+// A FallbackChatModel likewise resolves to the smallest resolved window of the
+// models it may call, because a failed call advances along the whole chain.
+// Each member is resolved with the same fallback, so a member that reports no
+// window counts as fallback. An empty chain resolves to fallback.
 func ResolveContextSize(m ChatModel, fallback int) int {
 	if cam, ok := m.(*ConnectivityAwareModel); ok {
 		return min(ResolveContextSize(cam.local, fallback), ResolveContextSize(cam.cloud, fallback))
+	}
+	if f, ok := m.(*FallbackChatModel); ok {
+		models := f.effectiveModels()
+		if len(models) == 0 {
+			return fallback
+		}
+		size := ResolveContextSize(models[0], fallback)
+		for _, member := range models[1:] {
+			size = min(size, ResolveContextSize(member, fallback))
+		}
+		return size
 	}
 	if cs, ok := m.(ContextSizer); ok {
 		if s := cs.ContextSize(); s > 0 {

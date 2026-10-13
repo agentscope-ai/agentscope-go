@@ -208,7 +208,12 @@ func (a *UnifiedAgent) compressContextForTool(ctx context.Context) (tool.Compres
 func (a *UnifiedAgent) compressContextImpl(ctx context.Context, cfg *ContextConfig) error {
 	ctxSize := cfg.ContextSize
 	if ctxSize == 0 {
+		// A failed model call is retried on ModelConfig.FallbackModel, so the
+		// context must fit the smaller of the two windows.
 		ctxSize = model.ResolveContextSize(a.model, defaultContextSize)
+		if a.modelCfg.FallbackModel != nil {
+			ctxSize = min(ctxSize, model.ResolveContextSize(a.modelCfg.FallbackModel, defaultContextSize))
+		}
 	}
 
 	// Upstream #2362: limit the images carried in context first, so the

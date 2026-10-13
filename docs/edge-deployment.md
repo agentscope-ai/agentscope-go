@@ -167,13 +167,14 @@ token count is an estimate, so leave room for `max_tokens` below the
 
 A `ConnectivityAwareModel` resolves to the smaller of the windows its local and
 cloud models resolve to, whatever the circuit state, because one call can fall
-back from the cloud model to the local one. A model that reports no window
-counts as the 128000-token default, so declare the local model's window. Other
-wrappers do not report every model they may call: `FallbackChatModel` reports
-its first model only, `resilience.Wrap` reports none, and compression does not
-consider `agent.ModelConfig.FallbackModel`. With those, including when they
-wrap a `ConnectivityAwareModel`, set `ContextConfig.ContextSize` to the
-smallest window yourself.
+back from the cloud model to the local one. A `FallbackChatModel` chain likewise
+resolves to the smallest window among all its models, and when
+`agent.ModelConfig.FallbackModel` is set, compression uses the smaller of its
+window and the agent model's. A model that reports no window counts as the
+128000-token default, so declare the local model's window. `resilience.Wrap`
+with a circuit breaker or rate limiter reports no window for the model it
+wraps, including either wrapper above; with it, set `ContextConfig.ContextSize`
+to the smallest window yourself.
 
 Declaring a small window makes compression actually run on the device. Each
 summary is a buffered `Chat` call; if it fails or times out, the agent falls
