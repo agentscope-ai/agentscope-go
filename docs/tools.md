@@ -162,6 +162,56 @@ weatherTool := tool.NewFunctionTool(
 )
 ```
 
+## Bounded tool dispatch (experimental)
+
+Add `agent.WithToolConcurrencyLimit(n)` to a configured UnifiedAgent to limit
+concurrent tool execution within each reply:
+
+```go
+assistant := agent.NewUnifiedAgent(
+    "assistant", "Compare independent records.", chatModel,
+    agent.WithToolkit(toolkit),
+    agent.WithToolConcurrencyLimit(3),
+)
+```
+
+The width must be positive; applying zero or a negative width panics during
+construction. Omitting the option preserves the existing dispatch behavior.
+This additive option is experimental, including in the Stable-tier `agent` package.
+
+Only consecutive concurrency-safe calls can share the worker pool. Unsafe tools,
+human confirmation and external-tool execution retain their sequential barriers.
+MCP-adapted tools are concurrency-safe by default, so the same option can limit
+local calls to capacity-limited MCP servers. A slot covers the complete framework
+permission/acting operation until actual return. Each idle worker takes the next
+queued call; it does not wait for the entire batch to finish before refilling.
+Queue selection and recorded results/events follow call order, while actual
+invocation and completion order between workers are unspecified. Width one keeps
+the concurrent batch's joined publication timing; it does not change a tool's
+concurrency-safety classification. Execution hooks remain serialized and only
+describe admitted calls. Ordinary tool errors do not cancel siblings.
+
+After the agent observes cancellation it stops admitting the tool step's remaining
+calls, including later sequential/interactive barriers. Never-admitted calls are
+recorded as `ToolResultInterrupted` and finished. Already-admitted calls retain
+their actual outcomes, even when cancellation races their start. A tool that
+ignores context cancellation retains its slot and recovery ownership until it
+returns; closing the outward event stream does not establish cleanup. Cancellation
+can suppress event delivery, so recorded context and stream closure are distinct.
+
+Pending-call recovery also uses the configured width. Successfully saved
+interrupted results are not executed again on explicit resume. Existing
+[checkpoint failure/replay semantics](reply-recovery.md#limits-of-the-contract)
+remain: a canceled or failed save can leave an older pending snapshot. The option
+does not add a checkpoint safe point, schema change, detached persistence or an
+exactly-once effect guarantee.
+
+The limit applies to one reply's framework workers. Batch descriptors and results
+still grow with the number/size of model-emitted calls; tool-owned child work,
+other agents/replies and deployment-wide quotas need their own controls. A shared
+`OnActing` semaphore remains useful for downstream occupancy across agents. The
+loop bridge remains sequential and is unaffected by this option.
+
 ## Tool Groups
 
 Organize tools into activatable groups:

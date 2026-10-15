@@ -13,6 +13,13 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ### Added
 
+- Experimental `agent.WithToolConcurrencyLimit(n)` for opt-in bounded concurrent
+  tool dispatch in UnifiedAgent replies (#58). Idle workers refill in call order;
+  cancellation records never-admitted calls as interrupted while retaining actual
+  admitted outcomes and cleanup ownership. Defaults, interactive/unsafe barriers,
+  result order and checkpoint/recovery contracts remain unchanged. See the
+  [tool guide](docs/tools.md#bounded-tool-dispatch-experimental).
+
 - Opt-in UnifiedAgent reply recovery (`agent.WithReplyRecovery`) with owned,
   versioned built-in reply-budget counters, remaining-iteration tracking and
   observable checkpoint failures via `SaveCheckpoint` and `ResumeReplyStream`.

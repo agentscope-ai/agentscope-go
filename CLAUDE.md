@@ -213,6 +213,13 @@ Adding a tool requires examining schema validation, error behavior, cancellation
 and the relevant permission checks; registration alone does not provide them.
 Do not weaken existing safety checks to make a new path work.
 
+Experimental `agent.WithToolConcurrencyLimit` selects the bounded dispatcher in
+[bounded_tools.go](pkg/agentscope/agent/bounded_tools.go) for both fresh and restored
+tool steps. It admits through a serial coordinator, keeps hooks serial and joins
+actual workers before ordered recording. Never-admitted calls become interrupted
+on cancellation, including later sequential barriers. Checkpoint safe points and
+the loop bridge are unchanged; see [the contract](docs/tools.md#bounded-tool-dispatch-experimental).
+
 `tool.InputValidator` is optional semantic validation after schema checks;
 `tool.ExternalResultValidator` validates successful external results against their
 input. Keep the required `Tool` interface unchanged when adding such hooks.

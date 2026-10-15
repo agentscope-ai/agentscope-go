@@ -19,7 +19,9 @@ contexts and channels, and can be embedded in a service or command-line program.
 
 - **Tool-using assistants:** connect model calls to Go functions, manage context
   and request human confirmation for tool execution. Use [AskUser](docs/tools.md#askuser)
-  to collect structured choices through your own frontend.
+  to collect structured choices through your own frontend. On `main` (unreleased),
+  opt into [bounded tool dispatch](docs/tools.md#bounded-tool-dispatch-experimental)
+  with `agent.WithToolConcurrencyLimit(width)`.
 - **Multi-agent workflows:** coordinate agents with pipelines, message routing
   and leader/worker teams.
 - **Applications with memory:** combine retrieval, conversation state and memory
