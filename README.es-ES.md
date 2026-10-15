@@ -21,7 +21,9 @@ o en un programa de línea de comandos.
 - **Asistentes con herramientas:** conecta llamadas al modelo con funciones de
   Go, gestiona el contexto y solicita confirmación para ejecutar herramientas.
   Usa [AskUser](docs/tools.md#askuser) para recoger respuestas estructuradas
-  mediante tu propia interfaz.
+  mediante tu propia interfaz. En `main` (aún sin publicar), activa el
+  [límite de concurrencia de herramientas](docs/tools.md#bounded-tool-dispatch-experimental)
+  con `agent.WithToolConcurrencyLimit(width)`.
 - **Flujos con varios agentes:** coordina agentes mediante pipelines,
   enrutamiento de mensajes y equipos de líder y trabajadores.
 - **Aplicaciones con memoria:** combina recuperación de información, estado de

@@ -143,6 +143,18 @@ See [retrieval](docs/retrieval.md), [quality/load testing](docs/benchmarks.md) a
 [the delivery contracts](docs/design/managed-inference.md) for API and lifecycle
 limits. Shared governance across ordinary Agent/helper paths remains proposed.
 
+## Unreleased bounded tool dispatch behavior
+
+- Experimental `agent.WithToolConcurrencyLimit(n)` opts UnifiedAgent replies into
+  a positive execution width; invalid configured widths panic during construction.
+  Defaults and required interfaces are unchanged. Cancellation records
+  never-admitted calls as interrupted/finished while admitted operations retain
+  actual outcomes and ownership until return. Original result ordering, sequential
+  interactive/unsafe barriers, reply recovery and checkpoint schema/safe points
+  are retained. Queued/result storage is still proportional to the batch; this is
+  not a cross-agent or deployment-wide quota. The loop bridge remains sequential.
+  See [bounded dispatch](docs/tools.md#bounded-tool-dispatch-experimental).
+
 ## Unreleased reply recovery behavior
 
 - `WithReplyRecovery` opts UnifiedAgent into typed built-in reply budgets,
@@ -171,7 +183,8 @@ honors the typed `Retryable` flag; `errors.RetryAfterOf` extracts a throttle del
 
 Constructors validate inputs and **panic on programmer error** (mirroring
 `message.NewMsg`): e.g. `agent.NewUnifiedAgent` panics on a nil model or empty
-name. These indicate misuse, not runtime conditions — fix the call site.
+name. Explicit `WithToolConcurrencyLimit` widths must also be positive. These
+indicate misuse, not runtime conditions — fix the call site.
 
 ## Production hardening status
 
