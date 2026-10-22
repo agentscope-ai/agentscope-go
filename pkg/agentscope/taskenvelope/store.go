@@ -475,8 +475,13 @@ func (s *Store) dispatchGuardsLocked(rec *Record) error {
 }
 
 // applyOutcomeLocked applies attested outcome evidence (T4/T5; T11 when a
-// cancel is being processed). Caller holds mu.
+// cancel is being processed). Usage evidence is bounds-checked before any
+// mutation: an adversarial executor must not reset the pool by reporting a
+// negative or over-remaining usage. Caller holds mu.
 func (s *Store) applyOutcomeLocked(rec *Record, outcome Outcome, provenance string) error {
+	if err := checkUsageBounds(rec, outcome.Usage); err != nil {
+		return err
+	}
 	switch rec.State {
 	case StateInProgress:
 		rec.Result = outcome.Result
@@ -526,7 +531,8 @@ func (s *Store) applyOutcomeLocked(rec *Record, outcome Outcome, provenance stri
 
 // settleOutcomeUsageLocked settles terminal usage: known evidence (non-nil)
 // settles consumed; unknown usage locks the remainder — a Completed record may
-// still have unknown usage. Caller holds mu.
+// still have unknown usage. Usage is bounds-checked by checkUsageBounds before
+// this runs. Caller holds mu.
 func (s *Store) settleOutcomeUsageLocked(rec *Record, usage *int, provenance string) {
 	if usage != nil {
 		s.settleTerminalLocked(rec, *usage, provenance)
@@ -535,6 +541,27 @@ func (s *Store) settleOutcomeUsageLocked(rec *Record, usage *int, provenance str
 	s.lockRemainderLocked(rec)
 	rec.Settled = true // outcome settled; usage may arrive later via RecordUsageEvidence
 	rec.Provenance = append(rec.Provenance, provenance+": usage unknown, locked")
+}
+
+// checkUsageBounds validates executor-reported usage against the record's own
+// remaining allowance (reserved − consumed): negative or over-remaining
+// reports are rejected as executor-integrity events, matching the bounds
+// checks in Resolve and RecordUsageEvidence. Nil usage (unknown) passes.
+//
+// It runs at the entry of every evidence-ingestion path — applyOutcomeLocked
+// (Dispatch/RecordOutcome/Reconcile) and ProcessCancel — before any mutation.
+// That placement is deliberate: a recorded transition cannot be rolled back
+// without breaking the transition table itself, so the check cannot safely
+// live inside the settlement step.
+func checkUsageBounds(rec *Record, usage *int) error {
+	if usage == nil {
+		return nil
+	}
+	remaining := rec.Allowance.Reserved - rec.Allowance.Consumed
+	if *usage < 0 || *usage > remaining {
+		return fmt.Errorf("%w: usage %d out of bounds for record %s (remaining %d)", ErrIntegrity, *usage, rec.ID, remaining)
+	}
+	return nil
 }
 
 // RecordOutcome ingests push-style outcome evidence for a record (the T11 and
@@ -634,6 +661,11 @@ func (s *Store) ProcessCancel(ctx context.Context, id string, exec Executor) err
 		s.lockRemainderLocked(rec)
 		return s.persistLocked()
 	}
+	// Attested usage is executor evidence like any other: bounds-check before
+	// any mutation (adversarial attestations must not reset the pool).
+	if err := checkUsageBounds(rec, att.Usage); err != nil {
+		return err
+	}
 	rec.Effect = att.Effect
 	if err := s.setStateLocked(rec, StateCanceled, "stop attested"); err != nil {
 		return err
@@ -721,11 +753,13 @@ func (s *Store) Expire() error {
 		case StateProposed, StateAccepted:
 			rec.Effect = EffectNone
 			if err := s.setStateLocked(rec, StateExpired, "TTL elapsed before any attempt reservation"); err != nil {
+				logrus.WithField("record", rec.ID).WithError(err).Debug("taskenvelope: expire skip (transition)")
 				continue
 			}
 			s.settleTerminalLocked(rec, 0, "known-zero settlement")
 		case StateInProgress, StateCanceling:
 			if err := s.setStateLocked(rec, StateUnknownEffect, "TTL elapsed with an attempt in flight"); err != nil {
+				logrus.WithField("record", rec.ID).WithError(err).Debug("taskenvelope: expire skip (transition)")
 				continue
 			}
 			s.lockRemainderLocked(rec)
@@ -736,7 +770,9 @@ func (s *Store) Expire() error {
 
 // Resolve resolves an UnknownEffect record with validated evidence (T12). It
 // never re-dispatches. Usage settles only what the evidence covers: a nil
-// Usage leaves the locked remainder locked.
+// Usage leaves the locked remainder locked. The UnknownEffect precondition
+// and the usage bounds are validated before any mutation: a rejected Resolve
+// never diverges memory from disk.
 func (s *Store) Resolve(id string, ev *Evidence) error {
 	if !ev.Validated || ev.Provenance == "" {
 		return fmt.Errorf("%w: provenance and validation required", ErrEvidence)
@@ -747,6 +783,19 @@ func (s *Store) Resolve(id string, ev *Evidence) error {
 	if !ok {
 		return fmt.Errorf("%w: %s", ErrNotFound, id)
 	}
+	// All validation precedes any mutation.
+	if rec.State != StateUnknownEffect {
+		return fmt.Errorf("%w: Resolve requires UnknownEffect, record %s is %s", ErrInvalidTransition, id, rec.State)
+	}
+	if _, err := checkTransition(rec.State, ev.Outcome); err != nil {
+		return err
+	}
+	if ev.Usage != nil {
+		if u := *ev.Usage; u < 0 || u > rec.Allowance.Locked {
+			return fmt.Errorf("%w: usage %d exceeds locked allowance of %s", ErrIntegrity, u, id)
+		}
+	}
+
 	rec.Result = ev.Result
 	rec.Effect = ev.Effect
 	if err := s.setStateLocked(rec, ev.Outcome, ev.Provenance); err != nil {
@@ -754,9 +803,6 @@ func (s *Store) Resolve(id string, ev *Evidence) error {
 	}
 	if ev.Usage != nil {
 		u := *ev.Usage
-		if u < 0 || u > rec.Allowance.Locked {
-			return fmt.Errorf("%w: usage %d exceeds locked allowance of %s", ErrIntegrity, u, id)
-		}
 		rec.Allowance.Consumed += u
 		released := rec.Allowance.Locked - u
 		rec.Allowance.ReleasedUnused += released
@@ -815,6 +861,7 @@ func (s *Store) Reconcile(ctx context.Context, exec Executor) error {
 		if deadline, ok := rec.Deadline(); ok && !s.now().Before(deadline) {
 			rec.Effect = EffectNone
 			if err := s.setStateLocked(rec, StateExpired, "restart: TTL elapsed"); err != nil {
+				logrus.WithField("record", rec.ID).WithError(err).Debug("taskenvelope: reconcile skip (expire transition)")
 				continue
 			}
 			s.settleTerminalLocked(rec, 0, "known-zero settlement")
@@ -822,6 +869,7 @@ func (s *Store) Reconcile(ctx context.Context, exec Executor) error {
 		}
 		if s.canceledRoots[rec.RootTaskID] || s.epochs[rec.RootTaskID] != rec.TaskEpoch || (s.auth != nil && !s.auth(rec.Scope)) {
 			if err := s.cancelRecordLocked(rec, "restart: guards no longer hold"); err != nil {
+				logrus.WithField("record", rec.ID).WithError(err).Debug("taskenvelope: reconcile skip (cancel transition)")
 				continue
 			}
 		}

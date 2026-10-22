@@ -13,6 +13,18 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ### Added
 
+- Experimental `taskenvelope` package: the subtask-envelope delegation-state
+  contract from issue #67, as a self-contained reference implementation. It
+  models the v2 state machine (T1–T12 + T2b; see `taskenvelope/DESIGN.md`) with
+  a single-writer decision point, an atomic on-disk ledger, the
+  settle-don't-refund allowance model, attempt reservations persisted before
+  any external call, and crash-window/restart reconciliation — all exercised by
+  fault tests that map 1:1 to the transition table, including adversarial
+  executors reporting out-of-bounds usage. Executor-reported usage is
+  bounds-checked on every outcome path, and `Resolve` validates before it
+  mutates. The package shares no state with `agent`, `storage` or
+  `managedtask`, and its API is not Stable-tier.
+
 - `mcp/streamablehttp` provides a Streamable HTTP client for MCP (#55, #63),
   backed by the official `modelcontextprotocol/go-sdk` (pinned v1.8.0) — the
   repository's first protocol-class dependency. It implements the existing

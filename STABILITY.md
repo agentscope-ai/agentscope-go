@@ -24,7 +24,7 @@ import "github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope"
   `replay/evalkit`, `event/streamcheck`, `agenttest/faults`,
   `providercontract` (test-only), `console`, `channel`, `channel/dingtalk`,
   `hub` (built-in sources), `skill` (`Store` partitions), `middleware/memory`
-  (`FileStore` + `AgenticMemoryMiddleware`).
+  (`FileStore` + `AgenticMemoryMiddleware`), `taskenvelope`.
   These are the newer v3 infrastructure layers, harness tooling, the
   console/channel frontends, and the Phase 3 hub/skill/memory additions.
 - **Internal** (`internal/...`): no compatibility guarantee; do not import.

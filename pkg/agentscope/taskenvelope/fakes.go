@@ -29,9 +29,11 @@ type SimExecutor struct {
 	// scenarios).
 	Gate chan struct{}
 	// StopAttested controls what AttestStop reports; StopEffect is the effect
-	// reported with an attested stop.
+	// reported with an attested stop; StopUsage is the usage evidence reported
+	// with it (nil = unknown).
 	StopAttested bool
 	StopEffect   Effect
+	StopUsage    *int
 }
 
 var _ Executor = (*SimExecutor)(nil)
@@ -76,11 +78,12 @@ func (e *SimExecutor) QueryAttempt(_ context.Context, attemptID string) (Outcome
 }
 
 // AttestStop implements Executor. The knobs are the script: StopAttested
-// decides whether a stop is attested, StopEffect is the reported effect.
+// decides whether a stop is attested, StopEffect is the reported effect,
+// StopUsage the reported usage evidence.
 func (e *SimExecutor) AttestStop(_ context.Context, _ string) (StopAttestation, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return StopAttestation{Attested: e.StopAttested, Effect: e.StopEffect}, nil
+	return StopAttestation{Attested: e.StopAttested, Effect: e.StopEffect, Usage: e.StopUsage}, nil
 }
 
 // FakeEdge is a file-backed fake edge service for fault tests. Its attempt log

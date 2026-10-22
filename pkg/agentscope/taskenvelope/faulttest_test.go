@@ -781,3 +781,292 @@ func TestCancelRoot_Sweep(t *testing.T) {
 	close(exec.Gate)
 	<-done
 }
+
+// Blocker regression (adversarial executor): executor-reported usage is
+// bounds-checked at every outcome entry point. A negative or over-remaining
+// report must be rejected as an integrity event without polluting the ledger
+// or the root pool — DESIGN.md forbids limit resets (consumed > total, or
+// available above total).
+func TestAdversarialUsage_DispatchPath(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		usage int
+	}{
+		{"negative", -5},
+		{"over_remaining", 99},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newTestStore(t, nil)
+			setupRoot(t, st, 10)
+			submitOk(t, st, baseSubmission("work"))
+
+			exec := NewSimExecutor()
+			exec.Outcome = Outcome{Success: true, Result: "done", Usage: &tc.usage, Effect: EffectNone}
+			err := st.Dispatch(context.Background(), "work", "do something", exec)
+			if !errors.Is(err, ErrIntegrity) {
+				t.Fatalf("dispatch returned %v, want ErrIntegrity", err)
+			}
+
+			rec, _ := st.Get("work")
+			if rec.State != StateInProgress {
+				t.Errorf("state = %s: rejected outcome must not move the record", rec.State)
+			}
+			if got := rec.Allowance; got != (Allowance{Reserved: 3}) {
+				t.Errorf("allowance polluted: %+v, want reserved 3 only", got)
+			}
+			root, _ := st.Root("root")
+			if root.Available != 7 || root.Consumed != 0 {
+				t.Errorf("root polluted: %+v, want available 7 consumed 0", root)
+			}
+		})
+	}
+}
+
+// Same adversarial usage via the push path (RecordOutcome).
+func TestAdversarialUsage_RecordOutcomePath(t *testing.T) {
+	st := newTestStore(t, nil)
+	setupRoot(t, st, 10)
+	submitOk(t, st, baseSubmission("work"))
+
+	exec := NewSimExecutor()
+	exec.Gate = make(chan struct{})
+	done := make(chan error, 1)
+	go func() { done <- st.Dispatch(context.Background(), "work", "do something", exec) }()
+	for {
+		rec, _ := st.Get("work")
+		if rec.State == StateInProgress {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	bad := -5
+	if err := st.RecordOutcome("work", Outcome{Success: true, Result: "done", Usage: &bad}, "adversary"); !errors.Is(err, ErrIntegrity) {
+		t.Fatalf("RecordOutcome returned %v, want ErrIntegrity", err)
+	}
+	rec, _ := st.Get("work")
+	if rec.State != StateInProgress || rec.Allowance != (Allowance{Reserved: 3}) || rec.Result != "" {
+		t.Errorf("record mutated by rejected push: state=%s result=%q allowance=%+v", rec.State, rec.Result, rec.Allowance)
+	}
+	root, _ := st.Root("root")
+	if root.Available != 7 {
+		t.Errorf("root polluted: available = %d, want 7", root.Available)
+	}
+	close(exec.Gate)
+	<-done
+}
+
+// Same adversarial usage via restart reconciliation: the persisted InProgress
+// record is queried, the executor reports poisoned usage, and Reconcile must
+// surface the integrity error without moving the record or the pool.
+func TestAdversarialUsage_ReconcilePath(t *testing.T) {
+	path := t.TempDir() + "/ledger.json"
+	st, err := Open(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupRoot(t, st, 10)
+	submitOk(t, st, baseSubmission("work"))
+
+	// The executor reports poisoned usage from the start: the first process
+	// "crashes" before recording, so this outcome only reaches the ledger via
+	// the reconcile query.
+	bad := 99
+	exec := NewSimExecutor()
+	exec.Outcome = Outcome{Success: true, Result: "done", Usage: &bad, Effect: EffectNone}
+	st.beforeOutcomeRecord = func() { panic("simulated crash") }
+	dispatchRecover(st, "work", exec)
+
+	st2, err := Open(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := st2.Get("work")
+	if rec.State != StateInProgress {
+		t.Fatalf("after crash: state = %s", rec.State)
+	}
+	attemptID := rec.Attempts[0].ID
+
+	// The executor accounts for the attempt but reports poisoned usage.
+	if err := st2.Reconcile(context.Background(), exec); !errors.Is(err, ErrIntegrity) {
+		t.Fatalf("Reconcile returned %v, want ErrIntegrity", err)
+	}
+	rec, _ = st2.Get("work")
+	if rec.State != StateInProgress || rec.Allowance != (Allowance{Reserved: 3}) {
+		t.Errorf("record polluted: state=%s allowance=%+v", rec.State, rec.Allowance)
+	}
+	root, _ := st2.Root("root")
+	if root.Available != 7 || root.Consumed != 0 {
+		t.Errorf("root polluted: %+v", root)
+	}
+
+	// A later reconciliation with honest usage succeeds cleanly.
+	two := 2
+	exec.mu.Lock()
+	exec.attempts[attemptID] = Outcome{Success: true, Result: "done", Usage: &two, Effect: EffectNone}
+	exec.mu.Unlock()
+	if err := st2.Reconcile(context.Background(), exec); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ = st2.Get("work")
+	if rec.State != StateCompleted || rec.Allowance.Consumed != 2 {
+		t.Errorf("recovery: state=%s allowance=%+v", rec.State, rec.Allowance)
+	}
+}
+
+// Blocker regression (validate-before-mutate): a rejected Resolve leaves the
+// record's state, result and allowance byte-identical.
+func TestResolve_NoMutationOnReject(t *testing.T) {
+	st := newTestStore(t, nil)
+	setupRoot(t, st, 10)
+	submitOk(t, st, baseSubmission("work"))
+
+	exec := NewSimExecutor()
+	exec.LoseResult = true
+	_ = st.Dispatch(context.Background(), "work", "do something", exec)
+	before, _ := st.Get("work")
+	if before.State != StateUnknownEffect {
+		t.Fatalf("setup: state = %s, want UnknownEffect", before.State)
+	}
+
+	// Illegal target state: rejected, nothing mutates.
+	if err := st.Resolve("work", &Evidence{
+		Outcome: StateInProgress, Provenance: "adversary", Validated: true,
+	}); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("illegal target: got %v, want ErrInvalidTransition", err)
+	}
+
+	// Valid target but usage exceeds the locked remainder: rejected, nothing mutates.
+	over := 99
+	if err := st.Resolve("work", &Evidence{
+		Outcome: StateCompleted, Result: "attacker", Usage: &over, Provenance: "adversary", Validated: true,
+	}); !errors.Is(err, ErrIntegrity) {
+		t.Fatalf("over-locked usage: got %v, want ErrIntegrity", err)
+	}
+
+	after, _ := st.Get("work")
+	if after.State != before.State || after.Result != before.Result || after.Effect != before.Effect ||
+		after.Allowance != before.Allowance || len(after.Provenance) != len(before.Provenance) {
+		t.Errorf("rejected Resolve mutated the record:\nbefore %+v\nafter  %+v", before, after)
+	}
+	root, _ := st.Root("root")
+	if root.Available != 7 || root.Consumed != 0 {
+		t.Errorf("root polluted: %+v", root)
+	}
+}
+
+// Blocker regression (precondition): Resolve is a hard UnknownEffect-only
+// entry. On an InProgress record even a table-legal target with over-locked
+// usage must be rejected with everything unchanged.
+func TestResolve_RequiresUnknownEffect(t *testing.T) {
+	st := newTestStore(t, nil)
+	setupRoot(t, st, 10)
+	submitOk(t, st, baseSubmission("work"))
+
+	exec := NewSimExecutor()
+	exec.Gate = make(chan struct{})
+	done := make(chan error, 1)
+	go func() { done <- st.Dispatch(context.Background(), "work", "do something", exec) }()
+	for {
+		rec, _ := st.Get("work")
+		if rec.State == StateInProgress {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	over := 99
+	err := st.Resolve("work", &Evidence{
+		Outcome: StateCompleted, Result: "attacker", Usage: &over, Provenance: "adversary", Validated: true,
+	})
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("Resolve on InProgress: got %v, want ErrInvalidTransition", err)
+	}
+	rec, _ := st.Get("work")
+	if rec.State != StateInProgress || rec.Result != "" || rec.Allowance != (Allowance{Reserved: 3}) {
+		t.Errorf("record mutated: state=%s result=%q allowance=%+v", rec.State, rec.Result, rec.Allowance)
+	}
+	root, _ := st.Root("root")
+	if root.Available != 7 || root.Consumed != 0 {
+		t.Errorf("root polluted: %+v", root)
+	}
+
+	// Disk and memory agree: a fresh store sees the same untouched record.
+	st2, err := Open(st.path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec2, _ := st2.Get("work")
+	if rec2.State != rec.State || rec2.Allowance != rec.Allowance {
+		t.Errorf("memory/disk divergence: memory %+v, disk %+v", rec, rec2)
+	}
+
+	close(exec.Gate)
+	<-done
+}
+
+// Blocker regression (fourth adversarial path): an attested stop carrying
+// poisoned usage must be rejected before any mutation — the record stays
+// Canceling, the ledger and pool are unpolluted, and a later honest
+// attestation still resolves.
+func TestAdversarialUsage_ProcessCancelPath(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		usage int
+	}{
+		{"negative", -5},
+		{"over_remaining", 99},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newTestStore(t, nil)
+			setupRoot(t, st, 10)
+			submitOk(t, st, baseSubmission("work"))
+
+			exec := NewSimExecutor()
+			exec.Gate = make(chan struct{})
+			exec.StopUsage = &tc.usage
+			done := make(chan error, 1)
+			go func() { done <- st.Dispatch(context.Background(), "work", "do something", exec) }()
+			for {
+				rec, _ := st.Get("work")
+				if rec.State == StateInProgress {
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
+			if err := st.Cancel("work"); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := st.ProcessCancel(context.Background(), "work", exec); !errors.Is(err, ErrIntegrity) {
+				t.Fatalf("ProcessCancel returned %v, want ErrIntegrity", err)
+			}
+			rec, _ := st.Get("work")
+			if rec.State != StateCanceling {
+				t.Errorf("state = %s: rejected attestation must not move the record", rec.State)
+			}
+			if rec.Allowance != (Allowance{Reserved: 3}) {
+				t.Errorf("allowance polluted: %+v, want reserved 3 only", rec.Allowance)
+			}
+			root, _ := st.Root("root")
+			if root.Available != 7 || root.Consumed != 0 {
+				t.Errorf("root polluted: %+v", root)
+			}
+
+			// An honest attestation still resolves afterwards.
+			two := 2
+			exec.StopUsage = &two
+			exec.StopEffect = EffectPartial
+			if err := st.ProcessCancel(context.Background(), "work", exec); err != nil {
+				t.Fatal(err)
+			}
+			rec, _ = st.Get("work")
+			if rec.State != StateCanceled || rec.Effect != EffectPartial || rec.Allowance.Consumed != 2 {
+				t.Errorf("recovery: state=%s effect=%s allowance=%+v", rec.State, rec.Effect, rec.Allowance)
+			}
+
+			close(exec.Gate)
+			<-done
+		})
+	}
+}
