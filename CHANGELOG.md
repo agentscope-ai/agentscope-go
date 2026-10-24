@@ -11,6 +11,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — provider retry cancellation
+
+- OpenAI and Anthropic `Chat` calls honor caller cancellation and deadlines
+  during retry delays, and check cancellation before sending an attempt.
+
 ### Changed — agent loop resilience
 
 - **Model-call retry policy (behavior change):** with `ModelConfig.MaxRetries`

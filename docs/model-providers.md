@@ -244,6 +244,11 @@ resp, _ := cm.Chat(ctx, msgs,
 )
 ```
 
+For `OpenAIChatModel.Chat` and `AnthropicChatModel.Chat`, `model.WithRetries`
+configures additional attempts and the delay between them. Their retry waits
+honor the caller's context: cancellation and deadlines return errors matching
+`context.Canceled` and `context.DeadlineExceeded`, respectively.
+
 ## Fallback Model
 
 Automatic failover from a primary to a backup provider:

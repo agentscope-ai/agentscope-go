@@ -65,6 +65,9 @@ func (m *OpenAIChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts ..
 	if len(msgs) == 0 {
 		return nil, fmt.Errorf("openai: msgs must not be empty")
 	}
+	if ctx == nil {
+		return nil, fmt.Errorf("openai: context must not be nil")
+	}
 
 	callOpts := &CallOptions{}
 	for _, opt := range opts {
@@ -111,7 +114,12 @@ func (m *OpenAIChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts ..
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
-			time.Sleep(retryDelay)
+			if err := waitForRetry(ctx, retryDelay); err != nil {
+				return nil, fmt.Errorf("openai: %w", err)
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("openai: %w", err)
 		}
 		lastErr = httpx.DoJSONRequest(
 			ctx,

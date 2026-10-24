@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"net/http"
 	"time"
 )
@@ -8,6 +9,18 @@ import (
 // defaultModelTimeout is the HTTP timeout applied to all model API calls
 // when the caller does not supply a custom http.Client.
 const defaultModelTimeout = 60 * time.Second
+
+func waitForRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		// Cancellation may be ready at the same time as the timer.
+		return ctx.Err()
+	}
+}
 
 // ClientOptions provides production-grade HTTP client configuration for model
 // providers, mirroring Python's client_kwargs. Use it to set proxy, custom

@@ -185,6 +185,9 @@ type anthropicResponse struct {
 
 // Chat implements the non-streaming ChatModel call for Anthropic.
 func (m *AnthropicChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts ...CallOption) (*ChatResponse, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("anthropic: context must not be nil")
+	}
 	if len(msgs) == 0 {
 		return nil, fmt.Errorf("anthropic: msgs must not be empty")
 	}
@@ -247,7 +250,12 @@ func (m *AnthropicChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
-			time.Sleep(retryDelay)
+			if err := waitForRetry(ctx, retryDelay); err != nil {
+				return nil, fmt.Errorf("anthropic: %w", err)
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("anthropic: %w", err)
 		}
 		lastErr = httpx.DoJSONRequest(
 			ctx,
