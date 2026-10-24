@@ -136,6 +136,123 @@ func TestConvertToolResult_Empty(t *testing.T) {
 	}
 }
 
+func TestToolCallResult_StructuredContentWire(t *testing.T) {
+	var result toolCallResult
+	payload := `{"content":[{"type":"text","text":"x"}],"structuredContent":{"a":1}}`
+	if err := json.Unmarshal([]byte(payload), &result); err != nil {
+		t.Fatal(err)
+	}
+	if string(result.StructuredContent) != `{"a":1}` {
+		t.Errorf("StructuredContent = %s, want wire JSON preserved", result.StructuredContent)
+	}
+}
+
+func TestConvertToolResult_StructuredContentFallback(t *testing.T) {
+	result := toolCallResult{
+		StructuredContent: json.RawMessage(`{"answer":"42"}`),
+	}
+
+	resp := convertToolResult(result)
+	if resp.State != message.ToolResultSuccess {
+		t.Errorf("state = %s, want success", resp.State)
+	}
+	if len(resp.Content) != 1 {
+		t.Fatalf("content len = %d, want 1", len(resp.Content))
+	}
+	tb, ok := resp.Content[0].(message.TextBlock)
+	if !ok {
+		t.Fatalf("content type = %T, want TextBlock", resp.Content[0])
+	}
+	if tb.Text != `{"answer":"42"}` {
+		t.Errorf("text = %s, want structured JSON", tb.Text)
+	}
+}
+
+func TestConvertToolResult_StructuredContentSkippedWhenTextPresent(t *testing.T) {
+	result := toolCallResult{
+		Content:           []mcpContent{{Type: "text", Text: "42"}},
+		StructuredContent: json.RawMessage(`{"answer":"42"}`),
+	}
+
+	resp := convertToolResult(result)
+	if len(resp.Content) != 1 {
+		t.Fatalf("content len = %d, want 1 (no structured fallback)", len(resp.Content))
+	}
+	tb, ok := resp.Content[0].(message.TextBlock)
+	if !ok || tb.Text != "42" {
+		t.Errorf("content[0] = %+v, want the original text block", resp.Content[0])
+	}
+}
+
+func TestConvertToolResult_StructuredContentAppendedToImageOnly(t *testing.T) {
+	result := toolCallResult{
+		Content:           []mcpContent{{Type: "image", Data: "aGVsbG8=", MimeType: "image/png"}},
+		StructuredContent: json.RawMessage(`{"width":4}`),
+	}
+
+	resp := convertToolResult(result)
+	if len(resp.Content) != 2 {
+		t.Fatalf("content len = %d, want image plus structured fallback", len(resp.Content))
+	}
+	if _, ok := resp.Content[0].(message.DataBlock); !ok {
+		t.Errorf("content[0] type = %T, want DataBlock", resp.Content[0])
+	}
+	tb, ok := resp.Content[1].(message.TextBlock)
+	if !ok || tb.Text != `{"width":4}` {
+		t.Errorf("content[1] = %+v, want structured JSON text", resp.Content[1])
+	}
+}
+
+func TestConvertToolResult_StructuredContentNull(t *testing.T) {
+	result := toolCallResult{StructuredContent: json.RawMessage(`null`)}
+
+	resp := convertToolResult(result)
+	if len(resp.Content) != 1 {
+		t.Fatalf("content len = %d, want default block", len(resp.Content))
+	}
+	tb, ok := resp.Content[0].(message.TextBlock)
+	if !ok || tb.Text != "" {
+		t.Errorf("content[0] = %+v, want empty default block", resp.Content[0])
+	}
+}
+
+func TestConvertToolResult_StructuredContentErrorState(t *testing.T) {
+	result := toolCallResult{
+		IsError:           true,
+		StructuredContent: json.RawMessage(`{"code":"E_FAIL"}`),
+	}
+
+	resp := convertToolResult(result)
+	if resp.State != message.ToolResultError {
+		t.Errorf("state = %s, want error", resp.State)
+	}
+	if len(resp.Content) != 1 {
+		t.Fatalf("content len = %d, want structured fallback", len(resp.Content))
+	}
+	tb, ok := resp.Content[0].(message.TextBlock)
+	if !ok || tb.Text != `{"code":"E_FAIL"}` {
+		t.Errorf("content[0] = %+v, want structured JSON text", resp.Content[0])
+	}
+}
+
+func TestConvertToolResult_StructuredContentWithAudioOnly(t *testing.T) {
+	result := toolCallResult{
+		Content:           []mcpContent{{Type: "audio", Data: "aGk=", MimeType: "audio/wav"}},
+		StructuredContent: json.RawMessage(`{"transcript":"hi"}`),
+	}
+
+	resp := convertToolResult(result)
+	// The audio block is textified by the default branch; the structured
+	// payload must still surface as JSON text.
+	if len(resp.Content) != 2 {
+		t.Fatalf("content len = %d, want audio placeholder plus structured fallback", len(resp.Content))
+	}
+	tb, ok := resp.Content[1].(message.TextBlock)
+	if !ok || tb.Text != `{"transcript":"hi"}` {
+		t.Errorf("content[1] = %+v, want structured JSON text", resp.Content[1])
+	}
+}
+
 func TestMCPTool_Execute(t *testing.T) {
 	mock := &mockMCPClient{
 		result: tool.NewTextResponse("mock result"),

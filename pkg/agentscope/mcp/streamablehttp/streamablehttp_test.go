@@ -88,6 +88,38 @@ func newFixtureServer(t *testing.T, protocolVersions ...string) *httptest.Server
 		}, nil
 	})
 
+	server.AddTool(&sdkmcp.Tool{
+		Name:        "structured_tool",
+		Description: "Returns only structured content",
+		InputSchema: map[string]any{"type": "object"},
+	}, func(_ context.Context, _ *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		return &sdkmcp.CallToolResult{
+			StructuredContent: map[string]any{"city": "Beijing", "temp_c": 22, "note": "a<b>&c"},
+		}, nil
+	})
+
+	server.AddTool(&sdkmcp.Tool{
+		Name:        "structured_text_tool",
+		Description: "Returns text plus structured content",
+		InputSchema: map[string]any{"type": "object"},
+	}, func(_ context.Context, _ *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		return &sdkmcp.CallToolResult{
+			Content:           []sdkmcp.Content{&sdkmcp.TextContent{Text: "22C in Beijing"}},
+			StructuredContent: map[string]any{"temp_c": 22},
+		}, nil
+	})
+
+	server.AddTool(&sdkmcp.Tool{
+		Name:        "structured_audio_tool",
+		Description: "Returns audio plus structured content",
+		InputSchema: map[string]any{"type": "object"},
+	}, func(_ context.Context, _ *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		return &sdkmcp.CallToolResult{
+			Content:           []sdkmcp.Content{&sdkmcp.AudioContent{Data: []byte("wav"), MIMEType: "audio/wav"}},
+			StructuredContent: map[string]any{"transcript": "hi"},
+		}, nil
+	})
+
 	handler := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, nil)
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
@@ -163,8 +195,8 @@ func TestListTools_Mapping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(schemas) != 4 {
-		t.Fatalf("got %d tools, want 4", len(schemas))
+	if len(schemas) != 7 {
+		t.Fatalf("got %d tools, want 7", len(schemas))
 	}
 
 	var found bool
@@ -284,6 +316,86 @@ func TestCallTool_UnmappedContent(t *testing.T) {
 	tb, ok := resp.Content[0].(message.TextBlock)
 	if !ok || !strings.Contains(tb.Text, "audio/wav") {
 		t.Errorf("Content[0] = %+v, want text carrying the audio payload", resp.Content[0])
+	}
+}
+
+// TestCallTool_StructuredContentFallback proves a result carrying only
+// structured content stays visible: the converter serializes it into a text
+// block instead of dropping it.
+func TestCallTool_StructuredContentFallback(t *testing.T) {
+	srv := newFixtureServer(t)
+	c := mustClient(t, srv, nil)
+
+	resp, err := c.CallTool(context.Background(), "structured_tool", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.State != message.ToolResultSuccess {
+		t.Errorf("State = %q", resp.State)
+	}
+	if len(resp.Content) != 1 {
+		t.Fatalf("Content = %+v", resp.Content)
+	}
+	tb, ok := resp.Content[0].(message.TextBlock)
+	if !ok {
+		t.Fatalf("Content[0] = %T, want TextBlock", resp.Content[0])
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(tb.Text), &decoded); err != nil {
+		t.Fatalf("fallback text is not JSON: %v", err)
+	}
+	if decoded["city"] != "Beijing" || decoded["temp_c"] != float64(22) {
+		t.Errorf("decoded = %+v, want the structured payload", decoded)
+	}
+	if !strings.Contains(tb.Text, "a<b>&c") {
+		t.Errorf("text = %q, want HTML characters unescaped", tb.Text)
+	}
+}
+
+// TestCallTool_StructuredContentSkippedWhenTextPresent proves the fallback
+// does not duplicate structured content the server already serialized into a
+// text block.
+func TestCallTool_StructuredContentSkippedWhenTextPresent(t *testing.T) {
+	srv := newFixtureServer(t)
+	c := mustClient(t, srv, nil)
+
+	resp, err := c.CallTool(context.Background(), "structured_text_tool", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Content) != 1 {
+		t.Fatalf("Content = %+v, want only the original text block", resp.Content)
+	}
+	tb, ok := resp.Content[0].(message.TextBlock)
+	if !ok || tb.Text != "22C in Beijing" {
+		t.Errorf("Content[0] = %+v", resp.Content[0])
+	}
+}
+
+// TestCallTool_StructuredContentWithAudioOnly proves non-text content does
+// not suppress the structured fallback: audio plus structured content yields
+// the textified audio block and the structured JSON text.
+func TestCallTool_StructuredContentWithAudioOnly(t *testing.T) {
+	srv := newFixtureServer(t)
+	c := mustClient(t, srv, nil)
+
+	resp, err := c.CallTool(context.Background(), "structured_audio_tool", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Content) != 2 {
+		t.Fatalf("Content = %+v, want audio text plus structured fallback", resp.Content)
+	}
+	tb, ok := resp.Content[1].(message.TextBlock)
+	if !ok {
+		t.Fatalf("Content[1] = %T, want TextBlock", resp.Content[1])
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(tb.Text), &decoded); err != nil {
+		t.Fatalf("fallback text is not JSON: %v", err)
+	}
+	if decoded["transcript"] != "hi" {
+		t.Errorf("decoded = %+v, want the structured payload", decoded)
 	}
 }
 

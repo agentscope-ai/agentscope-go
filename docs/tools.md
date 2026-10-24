@@ -224,6 +224,13 @@ The go-sdk dependency (pinned to v1.8.0) is opt-in: only importing
 it. See [the self-contained demo](../examples/mcp_streamable/), which includes
 an in-process spec-compliant server.
 
+Tool results that carry MCP `structuredContent` without any text block are
+surfaced as a JSON text block in the `ToolResponse`, on all three clients;
+results that already include text content are returned unchanged. On the
+Streamable HTTP client, numbers in that fallback JSON pass through the go-sdk
+decode (`float64`), so integers beyond 2^53 lose precision; the stdio and
+bare-HTTP clients carry the wire JSON verbatim.
+
 MCP servers may also elicit user input in the middle of a tool call. Set
 `ElicitationHandler` on `mcp.StdioConfig` (subprocess servers) or
 `streamablehttp.Config` (Streamable HTTP servers) to declare the capability

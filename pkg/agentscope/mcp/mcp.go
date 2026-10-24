@@ -193,8 +193,9 @@ type toolCallParams struct {
 }
 
 type toolCallResult struct {
-	Content []mcpContent `json:"content"`
-	IsError bool         `json:"isError"`
+	Content           []mcpContent    `json:"content"`
+	IsError           bool            `json:"isError"`
+	StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
 }
 
 type mcpContent struct {

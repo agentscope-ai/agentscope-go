@@ -397,6 +397,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ### Fixed
 
+- MCP tool results carrying `structuredContent` without any text block now
+  surface it as a JSON text block in `ToolResponse` instead of dropping it, on
+  both the stdio/HTTP JSON-RPC clients and the Streamable HTTP client. Results
+  that already include a text block are unchanged, matching upstream AgentScope
+  (agentscope-ai/agentscope#3389).
 - App session cancellation now signals active ordinary and streaming chats as
   well as registered background tasks (#48). Session admission stays exclusive
   until accepted Agent cores finish after cancellation, including synchronous
