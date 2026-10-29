@@ -208,6 +208,7 @@ its model choice, environment variables and required services or runtimes.
 | [guardrail](examples/guardrail/) | Block, redact and warn with mock model responses |
 | [spend_cap](examples/spend_cap/) | Observed-cost budgets with a mock model |
 | [agent_service](examples/agent_service/) | HTTP service and SSE events |
+| [scoped_service](examples/scoped_service/) | Offline shared service with owner-scoped sessions and file tools |
 | [webui](examples/webui/) | Embedded browser UI |
 | [dingtalk_channel](examples/dingtalk_channel/) | DingTalk messages and confirmations |
 | [scheduled_task](examples/scheduled_task/) | One-shot and recurring tasks |
@@ -236,6 +237,7 @@ to the same catalog.
 | Middleware and memory | [Middleware](docs/middleware.md) |
 | Goal execution | [Experimental GoalPipeline and Agent adapters](docs/goal-pipeline.md) |
 | Named-member teams | [Experimental serial TeamPipeline and host interactions](docs/team-pipeline.md) |
+| Shared HTTP service | [Experimental owner-scoped sessions and request-aware construction](docs/scoped-service.md) |
 | Application deployment | [Deployment](docs/deployment.md) · [Execution and session limits](docs/adversarial-hardening.md) · [Reply recovery](docs/reply-recovery.md) |
 | Runtime and evaluation | [Runtime features](docs/go-exclusive.md) · [Load and quality testing](docs/benchmarks.md) · [Replay and evaluation source](pkg/agentscope/replay/) |
 | Local models and devices | [Edge deployment](docs/edge-deployment.md) · [Device tools](docs/device-tools.md) · [Multi-device coordination](docs/multi-device.md) · [Offline operation](docs/offline-operation.md) |

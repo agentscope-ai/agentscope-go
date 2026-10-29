@@ -415,6 +415,16 @@ decisions when adding or changing execution paths.
 
 ### Persistence and internal services
 
+[`service.NewScoped`](pkg/agentscope/service/scoped.go) is an opt-in shared HTTP
+service. Its session wrapper resolves owner identity before body reads/limits;
+scope metadata is private to the in-memory registry. Scoped stream confirmation
+retains server calls and supplies a reply-local input via
+[`internal/confirmation`](pkg/agentscope/internal/confirmation/), bound to the
+receiving Agent. The default Agent input channel and legacy `service.New` path
+remain unchanged. Scoped replies retain their session slot until accepted cores
+join. See [the guide](docs/scoped-service.md); do not infer authentication,
+durable owner storage or general confirmation replay protection from this seam.
+
 Storage, session state, replay files and tool writes have distinct durability
 contracts. [internal/fsutil](pkg/agentscope/internal/fsutil/) provides atomic
 replacement, but not every writer uses it. Check the actual writer before

@@ -24,6 +24,11 @@ model and a simulated host answer, without credentials or user interaction.
 A real application must collect the user's response through its own frontend;
 see the [AskUser contract](tools.md#askuser).
 
+For a shared Agent Service, run `go run ./examples/scoped_service`. It uses fixed
+authentication fixtures, scripted models and actual temporary file reads. See
+[owner-scoped service](scoped-service.md) for the host-authentication and lifetime
+contracts; no real identity-provider or model integration is claimed.
+
 ## Catalog
 
 | Example | Demonstrates |
@@ -82,6 +87,7 @@ see the [AskUser contract](tools.md#askuser).
 | [guardrail](../examples/guardrail/) | Block, redact and warn with mock model responses |
 | [spend_cap](../examples/spend_cap/) | Observed-cost budgets with a mock model |
 | [agent_service](../examples/agent_service/) | HTTP service and SSE events |
+| [scoped_service](../examples/scoped_service/) | Offline shared service with owner-scoped sessions and file tools |
 | [webui](../examples/webui/) | Embedded browser UI |
 | [dingtalk_channel](../examples/dingtalk_channel/) | DingTalk messages and confirmations |
 | [scheduled_task](../examples/scheduled_task/) | One-shot and recurring tasks |

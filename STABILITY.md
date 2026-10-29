@@ -87,6 +87,15 @@ ports and deferred work, including realtime/TUI, SOP and model-context wiring.
 
 ## Unreleased execution and retrieval behavior
 
+- Experimental `service.NewScoped` requires both an owner-scope resolver and a
+  context-aware factory; `New`, `Config` and `AgentFactory` remain compatible.
+  Owner metadata and pending confirmations are in memory only. Host
+  authentication, tool permissions, saver namespaces and external-resource
+  lifetimes are separate contracts. Scoped replies are serialized per session
+  until accepted cores return; cancellation does not revoke admitted work.
+  The ID-only confirmation payload does not distinguish reused call IDs within
+  one live reply. See [scoped service](docs/scoped-service.md) for limits.
+
 - `pipeline.TeamPipeline` / `TeamRun` are Experimental. Stage 1 provides serial
   named-member delegation, validated participant interactions and final text
   results. Factories own fresh agents per run, with member history retained
