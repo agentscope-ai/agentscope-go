@@ -11,6 +11,16 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Added — owner-scoped Agent Service
+
+- Experimental `service.NewScoped` combines request-aware agent construction
+  with owner-scoped session access and listing. Identity resolution precedes
+  body reads/limits; scoped JSON requests are bounded complete documents.
+  Scoped streams retain server tool-call metadata for owner confirmation and
+  use reply-owned input. A session admits one scoped reply until its cores exit.
+  Existing `New`/`AgentFactory` defaults remain unchanged. See
+  [the guide](docs/scoped-service.md) and offline `scoped_service` example.
+
 ### Added — serial named-member teams
 
 - Experimental `pipeline.TeamPipeline` runs named-member assignments serially,
