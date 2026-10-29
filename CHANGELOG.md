@@ -328,6 +328,15 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   routed Agent path without claiming live-provider or hardware performance.
   Selecting another model endpoint creates no subtask envelope; the API is not
   Stable-tier.
+- Experimental `embodied` package for issue #67 milestone 2A: versioned
+  observations with per-tier disclosure, structured plans and skills, complete
+  persisted action identities, and a simulated action gateway/controller.
+  `Gateway` composes `taskenvelope` for lifecycle and recovery, revalidates
+  current state before replay and recovery, and performs final local admission
+  before any simulated effect. Durable controller evidence covers duplicate
+  delivery, lost ACK reconciliation, partial effects and crash windows without
+  blind redispatch. Plan ordering remains host-owned; no media fetching,
+  hardware, real-time or exactly-once physical behavior is claimed.
 
 - `mcp/streamablehttp` provides a Streamable HTTP client for MCP (#55, #63),
   backed by the official `modelcontextprotocol/go-sdk` (pinned v1.8.0) — the
