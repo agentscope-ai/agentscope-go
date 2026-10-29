@@ -42,6 +42,7 @@ jobs:
           go run ./examples/classifier
           go run ./examples/goal_pipeline
           go run ./examples/team_pipeline
+          go run ./examples/openai_server -self-test
           go run ./examples/managed_task
           go run ./examples/managed_routing
           go run ./examples/tier_routing

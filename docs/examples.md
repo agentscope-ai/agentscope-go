@@ -46,6 +46,7 @@ see the [AskUser contract](tools.md#askuser).
 | [multiagent](../examples/multiagent/) | Multi-agent conversation |
 | [multiagent_multimodal](../examples/multiagent_multimodal/) | Multi-agent conversation with image input |
 | [openai_response](../examples/openai_response/) | OpenAI Responses API |
+| [openai_server](../examples/openai_server/) | OpenAI-compatible Chat Completions serving; run with `-self-test` for an offline request |
 | [middleware](../examples/middleware/) | Model-call and tool-execution hooks |
 | [permission](../examples/permission/) | Tool permission modes |
 | [tracing](../examples/tracing/) | Tracing with LoggerTracer |

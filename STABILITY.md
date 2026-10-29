@@ -19,7 +19,7 @@ import "github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope"
 
 - **Stable** (source-compatible within a major version): `message`, `model`,
   `agent` (UnifiedAgent), `tool`, `permission`, `formatter`, `errors`.
-- **Experimental** (may change): `runtime`, `loop`, `app`, `service`, `realtime`,
+- **Experimental** (may change): `runtime`, `loop`, `app`, `service`, `openaiserver`, `realtime`,
   `tune`, `classifier`, `classifier/jev`, `classifier/bailian`, `classifier/openai`, `managedtask`,
   `replay/evalkit`, `event/streamcheck`, `agenttest/faults`,
   `providercontract` (test-only), `console`, `channel`, `channel/dingtalk`,
