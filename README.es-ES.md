@@ -177,6 +177,7 @@ necesarios.
 | [multiagent](examples/multiagent/) | Conversación entre agentes |
 | [multiagent_multimodal](examples/multiagent_multimodal/) | Conversación entre agentes con imágenes |
 | [openai_response](examples/openai_response/) | API Responses de OpenAI |
+| [openai_server](examples/openai_server/) | Servicio Chat Completions compatible con OpenAI y un asistente de pedidos simulado |
 | [middleware](examples/middleware/) | Hooks de llamadas al modelo y ejecución de herramientas |
 | [permission](examples/permission/) | Modos de permisos para herramientas |
 | [tracing](examples/tracing/) | Trazas con LoggerTracer |

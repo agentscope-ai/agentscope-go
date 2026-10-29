@@ -11,6 +11,15 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Added — OpenAI-compatible agent serving
+
+- Experimental `openaiserver` exposes streamed/non-streamed text Chat
+  Completions and model discovery through a standard `http.Handler`. Each
+  request owns its agent and hydrated history; deployment tools retain their
+  permission checks. Body/concurrency/deadline limits and disconnect
+  cancellation bound execution, with admission held through core cleanup.
+  See [the guide](docs/openai-serving.md) and offline `openai_server` example.
+
 ### Added — serial named-member teams
 
 - Experimental `pipeline.TeamPipeline` runs named-member assignments serially,

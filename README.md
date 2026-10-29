@@ -172,6 +172,7 @@ its model choice, environment variables and required services or runtimes.
 | [multiagent](examples/multiagent/) | Multi-agent conversation |
 | [multiagent_multimodal](examples/multiagent_multimodal/) | Multi-agent conversation with image input |
 | [openai_response](examples/openai_response/) | OpenAI Responses API |
+| [openai_server](examples/openai_server/) | OpenAI-compatible Chat Completions serving with a simulated order assistant |
 | [middleware](examples/middleware/) | Model-call and tool-execution hooks |
 | [permission](examples/permission/) | Tool permission modes |
 | [tracing](examples/tracing/) | Tracing with LoggerTracer |
@@ -237,6 +238,7 @@ to the same catalog.
 | Goal execution | [Experimental GoalPipeline and Agent adapters](docs/goal-pipeline.md) |
 | Named-member teams | [Experimental serial TeamPipeline and host interactions](docs/team-pipeline.md) |
 | Application deployment | [Deployment](docs/deployment.md) · [Execution and session limits](docs/adversarial-hardening.md) · [Reply recovery](docs/reply-recovery.md) |
+| OpenAI-compatible serving | [Experimental Chat Completions handler and client contract](docs/openai-serving.md) |
 | Runtime and evaluation | [Runtime features](docs/go-exclusive.md) · [Load and quality testing](docs/benchmarks.md) · [Replay and evaluation source](pkg/agentscope/replay/) |
 | Local models and devices | [Edge deployment](docs/edge-deployment.md) · [Device tools](docs/device-tools.md) · [Multi-device coordination](docs/multi-device.md) · [Offline operation](docs/offline-operation.md) |
 | Implementation and compatibility | [Source map](CLAUDE.md) · [API stability](STABILITY.md) · [Changelog](CHANGELOG.md) |
