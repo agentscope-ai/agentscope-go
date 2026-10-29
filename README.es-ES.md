@@ -168,6 +168,7 @@ necesarios.
 | [managed_routing_eval](examples/managed_routing_eval/) | Comparación de modelo fijo, reglas y clasificación; pruebas locales y piloto real opcional |
 | [managed_routing](examples/managed_routing/) | Pools, clasificación y alternativas con datos de prueba sin servicios externos |
 | [tier_routing](examples/tier_routing/) | UnifiedAgent con ChatModels simulados, fijos y enrutados en tres niveles |
+| [embodied_demo](examples/embodied_demo/) | Observación, planificación local/nube y ciclo de acciones simuladas en un dispositivo |
 | [managed_task](examples/managed_task/) | Ejecución de texto con modelo fijo y servidor HTTP local de prueba |
 | [classifier](examples/classifier/) | Clasificación tipada con resultados simulados y registro de intentos |
 | [model_call](examples/model_call/) | Streaming del modelo, herramientas y salida estructurada |
