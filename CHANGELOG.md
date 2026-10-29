@@ -336,7 +336,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   before any simulated effect. Durable controller evidence covers duplicate
   delivery, lost ACK reconciliation, partial effects and crash windows without
   blind redispatch. Plan ordering remains host-owned; no media fetching,
-  hardware, real-time or exactly-once physical behavior is claimed.
+  hardware, real-time or exactly-once physical behavior is claimed. The
+  `embodied_demo` offline example adds the milestone-2B single-device loop:
+  a real buffered device Agent, edge coordination and an optional read-only
+  cloud planner, bounded text-only observation projection, structured actions,
+  no-cloud degradation and lost-ACK recovery. Edge-only and edge+cloud
+  comparisons report request/effect evidence without performance claims.
 
 - `mcp/streamablehttp` provides a Streamable HTTP client for MCP (#55, #63),
   backed by the official `modelcontextprotocol/go-sdk` (pinned v1.8.0) — the
