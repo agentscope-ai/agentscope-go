@@ -94,10 +94,12 @@ messages, options or hashed operation fields with the same ID return
 All original `CallOption` functions are applied exactly once per `Chat`
 invocation. Their resulting `CallOptions` snapshot is cloned for hashing and
 every tier attempt, so a stateful option is not re-executed during fallback.
-Nested retries are rejected. Message and response metadata must contain
-supported JSON-compatible values and valid UTF-8. Invalid UTF-8, cyclic
-containers and unsupported values fail closed rather than being dropped,
-coerced or recursively expanded. Typed-nil containers remain nil.
+Nested retries are rejected. A `RetryDelay` supplied without `MaxRetries` is
+inert: it is preserved in the frozen options but does not create a retry by
+itself. Message and response metadata must contain supported JSON-compatible
+values and valid UTF-8. Invalid UTF-8, cyclic containers and unsupported
+values fail closed rather than being dropped, coerced or recursively expanded.
+Typed-nil containers remain nil.
 
 A zero `SubmittedAt` is stamped at first admission. The original operation
 and deadline are stored with the record. Later submissions cannot extend or
@@ -109,7 +111,15 @@ Epoch and TTL are checked at admission and before every dispatch, including
 an unattached-tier record. A clean fake-provider failure can advance to the
 next candidate. Cancellation, deadline expiry and unknown outcomes stop the
 operation without fallback. Retry after uncertainty requires a new operation
-ID.
+ID. `policy.Prefer` and the epoch callback run under the router mutex; they
+must be fast, concurrency-safe and must not call back into the same router.
+
+Replay also checks the original operation's current guards before returning a
+recorded outcome. Consequently, replaying a `no-route` rejection after an
+epoch advance reports `ErrStaleEpoch`, while the snapshot retains `no-route`
+as the original stop reason. A first-call invalid response returns
+`ErrChatInvalidResponse`; replaying that uncertain record returns
+`ErrUncertain`. Both paths fail closed and neither redispatches.
 
 A response returned without a Go error is usable only when it is non-nil, has
 no in-band `ChatResponse.Error`, is final, contains at least one text block,
