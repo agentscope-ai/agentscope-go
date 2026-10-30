@@ -229,14 +229,20 @@ func (s *FileStore) Delete(_ context.Context, id string) error {
 	if idx < 0 {
 		return fmt.Errorf("memory %q not found", id)
 	}
-	s.memories = append(s.memories[:idx], s.memories[idx+1:]...)
-	return s.rewriteLocked()
+	remaining := make([]Memory, 0, len(s.memories)-1)
+	remaining = append(remaining, s.memories[:idx]...)
+	remaining = append(remaining, s.memories[idx+1:]...)
+	if err := s.rewriteLocked(remaining); err != nil {
+		return err
+	}
+	s.memories = remaining
+	return nil
 }
 
 // rewriteLocked atomically rewrites the backing file from memory.
-func (s *FileStore) rewriteLocked() error {
+func (s *FileStore) rewriteLocked(memories []Memory) error {
 	var b strings.Builder
-	for _, m := range s.memories {
+	for _, m := range memories {
 		line, err := json.Marshal(fileRecord(m))
 		if err != nil {
 			return fmt.Errorf("memory: marshal record: %w", err)

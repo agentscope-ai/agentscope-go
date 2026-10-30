@@ -2,8 +2,10 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -104,6 +106,75 @@ func TestFileStore_DeletePersists(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].Text != "keep me" {
 		t.Fatalf("delete must persist, got %+v", list)
+	}
+}
+
+func TestFileStore_DeleteFailurePreservesSnapshot(t *testing.T) {
+	for _, tc := range []struct{ count, target int }{{3, 1}, {3, 2}, {3, 3}, {1, 1}} {
+		t.Run(fmt.Sprintf("%d_of_%d", tc.target, tc.count), func(t *testing.T) {
+			dir := t.TempDir()
+			s, err := NewFileStore(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			for i := 1; i <= tc.count; i++ {
+				if err := s.Add(ctx, fmt.Sprintf("memory %d", i), "u1", "a"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := s.List(ctx, "u1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, FileStoreFilename)
+			backup := path + ".saved"
+			if err := os.Rename(path, backup); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(path, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			id := fmt.Sprintf("mem_%d", tc.target)
+			if err := s.Delete(ctx, id); err == nil {
+				t.Fatal("replacing a directory must fail")
+			}
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(backup, path); err != nil {
+				t.Fatal(err)
+			}
+			after, err := s.List(ctx, "u1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(after, before) {
+				t.Fatalf("failed delete changed the snapshot: before=%+v after=%+v", before, after)
+			}
+			if err := s.Delete(ctx, id); err != nil {
+				t.Fatalf("retry: %v", err)
+			}
+			if err := s.Add(ctx, "after retry", "u1", "a"); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := NewFileStore(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			persisted, err := reopened.List(ctx, "u1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(persisted) != tc.count || persisted[len(persisted)-1].ID != fmt.Sprintf("mem_%d", tc.count+1) {
+				t.Fatalf("retry/add did not persist or continue IDs: %+v", persisted)
+			}
+			for _, m := range persisted {
+				if m.ID == id {
+					t.Fatalf("deleted memory survived retry: %+v", m)
+				}
+			}
+		})
 	}
 }
 

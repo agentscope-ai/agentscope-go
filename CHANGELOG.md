@@ -11,6 +11,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — file memory delete failures
+
+- Keep the live `middleware/memory.FileStore` snapshot unchanged when a delete
+  cannot be persisted, so reads stay consistent and the deletion can be retried.
+
 ### Added — serial named-member teams
 
 - Experimental `pipeline.TeamPipeline` runs named-member assignments serially,
