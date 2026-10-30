@@ -255,6 +255,15 @@ and keeps completed responses only for process-local replay. It does not alter
 `managedtask`, cover streaming/tools/multimodal/helpers, or recover responses
 across processes. See [three-tier routing](docs/tier-routing.md).
 
+Experimental `embodied` provides versioned observations, structured plans and
+simulated action admission for issue #67 milestone 2A. `Gateway` composes
+`taskenvelope` rather than duplicating its lifecycle, persists complete action
+bindings and revalidates current state on replay/recovery. `SimController`
+performs final local admission and owns an independent durable command/effect
+log. The host schedules plan steps; the package does not fetch media, control
+hardware or provide real-time/exactly-once physical guarantees. See
+[embodied contracts](docs/embodied-contracts.md).
+
 ### Context and model capabilities
 
 [agent/compress.go](pkg/agentscope/agent/compress.go) owns compression thresholds,
