@@ -45,9 +45,12 @@ type Action struct {
 }
 
 // Scope returns the skill, destination and version authority tuple.
-func (a *Action) Scope() string {
+func (a *Action) Scope() (string, error) {
+	if a == nil || a.StepIndex < 0 || a.StepIndex >= len(a.Plan.Steps) {
+		return "", ErrInvalidArgument
+	}
 	step := a.Plan.Steps[a.StepIndex]
-	return fmt.Sprintf("%s@%s@%s", step.Skill, step.Destination, step.SkillVersion)
+	return fmt.Sprintf("%s@%s@%s", step.Skill, step.Destination, step.SkillVersion), nil
 }
 
 // ValidateBasic checks the immutable plan, step, observation and deadline fields.

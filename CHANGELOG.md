@@ -347,6 +347,10 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   cloud planner, bounded text-only observation projection, structured actions,
   no-cloud degradation and lost-ACK recovery. Edge-only and edge+cloud
   comparisons report request/effect evidence without performance claims.
+  The embodied API now rejects nil/invalid inputs, returns explicit scope and
+  world-state errors, refuses to overwrite controller finalize hooks, keeps
+  recovery cancellation metadata consistent, supports honest metadata-write
+  retries and rolls back failed controller admission records.
 
 - `mcp/streamablehttp` provides a Streamable HTTP client for MCP (#55, #63),
   backed by the official `modelcontextprotocol/go-sdk` (pinned v1.8.0) — the

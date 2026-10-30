@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/internal/fsutil"
@@ -42,11 +41,13 @@ type Gateway struct {
 	observations  map[string]*Observation
 	canceledRoots map[string]bool
 	epochs        map[string]int64
-	recovering    atomic.Bool
 }
 
 // NewGateway loads persisted action bindings and opens the taskenvelope ledger.
 func NewGateway(cfg *GatewayConfig) (*Gateway, error) {
+	if cfg == nil {
+		return nil, ErrInvalidArgument
+	}
 	if cfg.LedgerPath == "" || cfg.MetadataPath == "" || cfg.Controller == nil || cfg.Now == nil {
 		return nil, errors.New("embodied: invalid gateway configuration")
 	}
@@ -83,6 +84,9 @@ func NewGateway(cfg *GatewayConfig) (*Gateway, error) {
 		g.epochs[action.Plan.RootTaskID] = store.Epoch(action.Plan.RootTaskID)
 	}
 	if controller, ok := cfg.Controller.(*SimController); ok {
+		if controller.finalize != nil {
+			return nil, errors.New("embodied: controller already has a finalize hook")
+		}
 		controller.finalize = g.finalAdmission
 	}
 	return g, nil
@@ -90,10 +94,22 @@ func NewGateway(cfg *GatewayConfig) (*Gateway, error) {
 
 // RegisterRoot declares a root task allowance pool.
 func (g *Gateway) RegisterRoot(rootTaskID string, allowanceUnits int) error {
+	if allowanceUnits < 0 {
+		return errors.New("embodied: allowance must not be negative")
+	}
 	g.lifecycleMu.Lock()
 	defer g.lifecycleMu.Unlock()
-	if err := g.store.RegisterRoot(rootTaskID, allowanceUnits); err != nil {
-		return err
+	if _, ok := g.store.Root(rootTaskID); ok {
+		reopened, err := taskenvelope.Open(g.config.LedgerPath, &taskenvelope.Options{Authority: g.scopeAllowed, Now: g.config.Now})
+		if err != nil {
+			return err
+		}
+		g.store = reopened
+	}
+	if _, ok := g.store.Root(rootTaskID); !ok {
+		if err := g.store.RegisterRoot(rootTaskID, allowanceUnits); err != nil {
+			return err
+		}
 	}
 	epoch := g.store.Epoch(rootTaskID)
 	g.mu.Lock()
@@ -104,15 +120,22 @@ func (g *Gateway) RegisterRoot(rootTaskID string, allowanceUnits int) error {
 }
 
 // SetWorldState replaces the trusted current state for a root task.
-func (g *Gateway) SetWorldState(state *WorldState) {
+func (g *Gateway) SetWorldState(state *WorldState) error {
+	if state == nil {
+		return ErrInvalidArgument
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	state.Conditions = cloneConditions(state.Conditions)
 	g.worlds[state.RootTaskID] = *state
+	return nil
 }
 
 // RegisterObservation binds an immutable observation ID to its validated content.
 func (g *Gateway) RegisterObservation(obs *Observation) error {
+	if obs == nil {
+		return ErrInvalidArgument
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	obs = cloneObservation(obs)
@@ -136,32 +159,36 @@ func (g *Gateway) RegisterObservation(obs *Observation) error {
 
 // Execute validates and dispatches one action without advancing any plan step.
 func (g *Gateway) Execute(ctx context.Context, action *Action) (*taskenvelope.Record, error) {
+	if action == nil {
+		return nil, ErrInvalidArgument
+	}
 	g.lifecycleMu.RLock()
 	defer g.lifecycleMu.RUnlock()
-	if g.recovering.Load() {
-		return nil, errors.New("embodied: recovery in progress")
-	}
 	if err := g.bindAction(action); err != nil {
-		rec, _ := g.ActionRecord(action.ID)
+		rec, _ := g.actionRecordUnlocked(action.ID)
 		return rec, err
 	}
 	content, err := action.canonicalContent()
 	if err != nil {
 		return nil, err
 	}
+	scope, err := action.Scope()
+	if err != nil {
+		return nil, err
+	}
 	rec, err := g.store.Submit(&taskenvelope.Submission{
 		ID: action.ID, RootTaskID: action.Plan.RootTaskID, ParentID: action.Plan.ID,
-		Scope: action.Scope(), Content: content, Epoch: action.Plan.TaskEpoch,
+		Scope: scope, Content: content, Epoch: action.Plan.TaskEpoch,
 		TTL: action.Plan.ValidUntil.Sub(g.config.Now()), MaxAttempts: 1, AllowanceUnits: 1,
 	})
 	if err != nil || rec.State != taskenvelope.StateAccepted {
 		return rec, err
 	}
 	if err := g.store.Dispatch(ctx, action.ID, content, g.config.Controller); err != nil {
-		rec, _ := g.ActionRecord(action.ID)
+		rec, _ := g.actionRecordUnlocked(action.ID)
 		return rec, err
 	}
-	rec, _ = g.ActionRecord(action.ID)
+	rec, _ = g.actionRecordUnlocked(action.ID)
 	return rec, nil
 }
 
@@ -200,11 +227,15 @@ func (g *Gateway) validateActionLocked(action *Action) error {
 	if !ok || observationHash(registered) != observationHash(&action.Observation) {
 		return fmt.Errorf("%w: observation identity mismatch", ErrStalePlan)
 	}
-	if _, ok := g.skills[action.Scope()]; !ok {
+	scope, err := action.Scope()
+	if err != nil {
+		return err
+	}
+	if _, ok := g.skills[scope]; !ok {
 		return fmt.Errorf("%w: skill or destination revoked", ErrStalePlan)
 	}
 	world := g.worlds[action.Plan.RootTaskID]
-	for _, condition := range append(g.skills[action.Scope()].Preconditions, action.Plan.Steps[action.StepIndex].Preconditions...) {
+	for _, condition := range append(g.skills[scope].Preconditions, action.Plan.Steps[action.StepIndex].Preconditions...) {
 		if !world.Conditions[condition] {
 			return fmt.Errorf("%w: precondition %s", ErrStalePlan, condition)
 		}
@@ -241,10 +272,6 @@ func (g *Gateway) finalAdmission(attempt taskenvelope.Attempt) error {
 func (g *Gateway) Recover(ctx context.Context) error {
 	g.lifecycleMu.Lock()
 	defer g.lifecycleMu.Unlock()
-	if !g.recovering.CompareAndSwap(false, true) {
-		return errors.New("embodied: recovery already in progress")
-	}
-	defer g.recovering.Store(false)
 	staleRoots := make(map[string]bool)
 	g.mu.Lock()
 	actionIDs := make([]string, 0, len(g.actions))
@@ -256,7 +283,7 @@ func (g *Gateway) Recover(ctx context.Context) error {
 	}
 	g.mu.Unlock()
 	for root := range staleRoots {
-		if err := g.store.CancelRoot(root); err != nil {
+		if err := g.cancelRootUnlocked(root); err != nil {
 			return err
 		}
 	}
@@ -264,7 +291,7 @@ func (g *Gateway) Recover(ctx context.Context) error {
 		return err
 	}
 	for _, actionID := range actionIDs {
-		rec, ok := g.ActionRecord(actionID)
+		rec, ok := g.actionRecordUnlocked(actionID)
 		if !ok {
 			continue
 		}
@@ -272,7 +299,7 @@ func (g *Gateway) Recover(ctx context.Context) error {
 			if err := g.store.ProcessCancel(ctx, actionID, g.config.Controller); err != nil {
 				return err
 			}
-			rec, _ = g.ActionRecord(actionID)
+			rec, _ = g.actionRecordUnlocked(actionID)
 		}
 		if rec.State != taskenvelope.StateUnknownEffect || len(rec.Attempts) == 0 {
 			continue
@@ -301,6 +328,12 @@ func (g *Gateway) Recover(ctx context.Context) error {
 
 // CancelRoot durably cancels a root and prevents stale replay from authorizing work.
 func (g *Gateway) CancelRoot(rootTaskID string) error {
+	g.lifecycleMu.RLock()
+	defer g.lifecycleMu.RUnlock()
+	return g.cancelRootUnlocked(rootTaskID)
+}
+
+func (g *Gateway) cancelRootUnlocked(rootTaskID string) error {
 	g.mu.Lock()
 	g.canceledRoots[rootTaskID] = true
 	err := g.persistMetadataLocked()
@@ -331,6 +364,12 @@ func (g *Gateway) AdvanceEpoch(rootTaskID string) (int64, error) {
 
 // ActionRecord returns historical evidence without treating it as current authorization.
 func (g *Gateway) ActionRecord(actionID string) (*taskenvelope.Record, bool) {
+	g.lifecycleMu.RLock()
+	defer g.lifecycleMu.RUnlock()
+	return g.actionRecordUnlocked(actionID)
+}
+
+func (g *Gateway) actionRecordUnlocked(actionID string) (*taskenvelope.Record, bool) {
 	return g.store.Get(actionID)
 }
 

@@ -38,6 +38,15 @@ submission and deep-copied to prevent caller mutation.
 Every action uses one attempt and positive allowance. TTL is derived from the
 plan's absolute deadline. Gateway and Store share the host clock.
 
+`Action.Scope()` returns `(string, error)` and rejects nil actions or invalid
+step indices. `SetWorldState`, `RegisterObservation`, `Execute` and
+`NewGateway` return `ErrInvalidArgument` for nil inputs; `Observation.ValidateAt`
+also rejects a nil receiver or current world. A controller with an existing
+finalize hook is rejected rather than silently overwritten. Metadata writes
+roll back in-memory additions on failure, allowing honest retries; controller
+admission records follow the same rule. Recovery persists canceled roots just
+as public cancellation does.
+
 ## Dispatch and recovery
 
 `Gateway` composes `taskenvelope.Store`; it does not reimplement its state

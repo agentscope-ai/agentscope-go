@@ -12,6 +12,8 @@ import (
 )
 
 var (
+	// ErrInvalidArgument rejects nil or otherwise invalid public API inputs.
+	ErrInvalidArgument = errors.New("embodied: invalid argument")
 	// ErrStaleObservation rejects expired, future or version-mismatched observations.
 	ErrStaleObservation = errors.New("embodied: stale or invalid observation")
 	// ErrObservationProjection rejects disclosure to an unapproved tier.
@@ -72,6 +74,9 @@ type WorldState struct {
 
 // ValidateAt checks observation identity, freshness and current world versions.
 func (o *Observation) ValidateAt(now time.Time, current *WorldState) error {
+	if o == nil || current == nil {
+		return ErrInvalidArgument
+	}
 	if o.RootTaskID == "" || o.ID == "" || o.Sequence == 0 || o.ClockDomain != "host" || o.MaxAge <= 0 ||
 		o.Frame == "" || o.Units == "" || o.CalibrationVersion == "" || o.MapVersion == "" || o.SiteStateVersion == 0 ||
 		o.CapturedAt.IsZero() || now.Before(o.CapturedAt) || now.Sub(o.CapturedAt) > o.MaxAge ||

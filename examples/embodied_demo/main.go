@@ -61,23 +61,10 @@ var (
 )
 
 func main() {
-	reports := make([]scenarioReport, 0, 2)
-	for _, cfg := range []scenarioConfig{
-		{UseCloud: false, CloudAvailable: false, LocalAlternative: "B", ApprovedAlternatives: []string{"B"}},
-		{UseCloud: true, CloudAvailable: true, ApprovedAlternatives: []string{"B"}},
-	} {
-		dir, err := os.MkdirTemp("", "embodied-demo-")
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		cfg.Dir = dir
-		report, err := runScenario(cfg)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		reports = append(reports, report)
+	reports, err := runDemo()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
@@ -85,6 +72,30 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func runDemo() ([]scenarioReport, error) {
+	reports := make([]scenarioReport, 0, 2)
+	for _, cfg := range []scenarioConfig{
+		{UseCloud: false, CloudAvailable: false, LocalAlternative: "B", ApprovedAlternatives: []string{"B"}},
+		{UseCloud: true, CloudAvailable: true, ApprovedAlternatives: []string{"B"}},
+	} {
+		dir, err := os.MkdirTemp("", "embodied-demo-")
+		if err != nil {
+			return nil, err
+		}
+		cfg.Dir = dir
+		report, runErr := runScenario(cfg)
+		removeErr := os.RemoveAll(dir)
+		if runErr != nil {
+			return nil, runErr
+		}
+		if removeErr != nil {
+			return nil, removeErr
+		}
+		reports = append(reports, report)
+	}
+	return reports, nil
 }
 
 func runScenario(cfg scenarioConfig) (scenarioReport, error) {
@@ -97,7 +108,7 @@ func runScenario(cfg scenarioConfig) (scenarioReport, error) {
 
 func newScenario(cfg scenarioConfig) (*scenario, error) {
 	if cfg.Dir == "" {
-		cfg.Dir = os.TempDir() + "/embodied-default"
+		return nil, errors.New("scenario directory required")
 	}
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	controller, err := embodied.OpenSimController(cfg.Dir+"/controller.json", nil)
@@ -156,7 +167,7 @@ func newScenario(cfg scenarioConfig) (*scenario, error) {
 		RootTaskID: "root-1", TaskEpoch: 1, Frame: "map", Units: "m", CalibrationVersion: "cal-1", MapVersion: "map-1", SiteStateVersion: 1,
 		Conditions: map[string]bool{"clear": true, "packing-unavailable": true},
 	}
-	gateway.SetWorldState(&world)
+	_ = gateway.SetWorldState(&world)
 	if cfg.Reopen {
 		if err := gateway.Recover(context.Background()); err != nil {
 			return nil, err
