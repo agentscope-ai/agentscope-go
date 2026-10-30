@@ -24,7 +24,7 @@ import "github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope"
   `replay/evalkit`, `event/streamcheck`, `agenttest/faults`,
   `providercontract` (test-only), `console`, `channel`, `channel/dingtalk`,
   `hub` (built-in sources), `skill` (`Store` partitions), `middleware/memory`
-  (`FileStore` + `AgenticMemoryMiddleware`), `taskenvelope`, `tierrouter`.
+  (`FileStore` + `AgenticMemoryMiddleware`), `taskenvelope`, `tierrouter`, `embodied`.
   These are the newer v3 infrastructure layers, harness tooling, the
   console/channel frontends, and the Phase 3 hub/skill/memory additions.
 - **Internal** (`internal/...`): no compatibility guarantee; do not import.
@@ -148,6 +148,14 @@ ports and deferred work, including realtime/TUI, SOP and model-context wiring.
   provider error evidence or durable response recovery. The exercised Agent
   configuration disables streaming, Agent fallback and additional retries.
   See the [three-tier routing guide](docs/tier-routing.md).
+
+- Experimental `embodied` adds observation, structured-plan and simulated
+  action-admission contracts. It composes `taskenvelope`, persists action
+  bindings and controller evidence, and revalidates current state before
+  dispatch/replay/recovery. Hosts own plan ordering and current world state.
+  It does not fetch media, control hardware, schedule plans automatically or
+  provide real-time, exactly-once or physical-safety guarantees. See
+  [embodied contracts](docs/embodied-contracts.md).
 
 - Experimental `evalkit.Runner.RunManagedLoad` evaluates the managed entry point
   directly with independent scoring and all-arrival/cost reporting. It creates no
