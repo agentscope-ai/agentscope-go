@@ -37,6 +37,8 @@ see the [AskUser contract](tools.md#askuser).
 | [console](../examples/console/) | Terminal chat and tool-call confirmation |
 | [managed_routing_eval](../examples/managed_routing_eval/) | Three managed evaluation groups, bilingual fixtures and explicit live Jev configuration |
 | [managed_routing](../examples/managed_routing/) | Rules, simulated classification, explicit defaults and constrained fallback |
+| [tier_routing](../examples/tier_routing/) | Fixed and three-tier routed fake ChatModels; see the [routing guide](tier-routing.md) |
+| [embodied_demo](../examples/embodied_demo/) | Single-device observation, planning and simulated actions; see the [demo guide](embodied-demo.md) and [contracts](embodied-contracts.md) |
 | [managed_task](../examples/managed_task/) | Fixed-model managed text execution with a local HTTP fixture |
 | [classifier](../examples/classifier/) | Typed classification with offline fake results and attempt accounting |
 | [model_call](../examples/model_call/) | Direct model streaming, tool calls and structured output |
