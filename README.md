@@ -163,6 +163,7 @@ its model choice, environment variables and required services or runtimes.
 | [managed_routing_eval](examples/managed_routing_eval/) | Managed fixed/rules/classifier comparisons, offline fixtures and opt-in live pilot |
 | [managed_routing](examples/managed_routing/) | Managed pools, classification and fallback with offline fixtures |
 | [tier_routing](examples/tier_routing/) | UnifiedAgent with fixed and three-tier routed fake ChatModels |
+| [embodied_demo](examples/embodied_demo/) | Single-device observation, edge/cloud planning and simulated action loop |
 | [managed_task](examples/managed_task/) | Fixed-model managed text execution with a local HTTP fixture |
 | [classifier](examples/classifier/) | Typed classification with offline fake results and attempt accounting |
 | [model_call](examples/model_call/) | Direct model streaming, tool calls and structured output |

@@ -45,4 +45,5 @@ jobs:
           go run ./examples/managed_task
           go run ./examples/managed_routing
           go run ./examples/tier_routing
+          go run ./examples/embodied_demo
           go run ./examples/ask_user </dev/null
