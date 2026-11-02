@@ -86,6 +86,7 @@ func (c *SimController) Do(ctx context.Context, attempt taskenvelope.Attempt) (t
 	rec := &ControllerRecord{AttemptID: attempt.ID, PayloadHash: payloadHash, Command: attempt.Content, Effect: taskenvelope.EffectUnknown}
 	c.records[attempt.ID] = rec
 	if err := c.persistLocked(); err != nil {
+		delete(c.records, attempt.ID)
 		return taskenvelope.Outcome{}, err
 	}
 	rec.EffectApplied = true

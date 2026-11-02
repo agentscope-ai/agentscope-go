@@ -30,7 +30,7 @@ func TestGatewayActionIdentityAndCurrentState(t *testing.T) {
 	}
 	world := testWorld()
 	world.TaskEpoch = 2
-	g.SetWorldState(world)
+	_ = g.SetWorldState(world)
 	if _, err := g.Execute(context.Background(), action); !errors.Is(err, ErrStaleObservation) {
 		t.Fatalf("stale replay: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestControllerFinalAdmissionRevocation(t *testing.T) {
 	controller.BeforeAdmission = func() {
 		world := testWorld()
 		world.Conditions["clear"] = false
-		g.SetWorldState(world)
+		_ = g.SetWorldState(world)
 	}
 	rec, err := g.Execute(context.Background(), testAction(now))
 	if err == nil || rec.State != taskenvelope.StateUnknownEffect {
@@ -130,7 +130,7 @@ func newTestGateway(t *testing.T) (*Gateway, *SimController, time.Time) {
 	if _, err := g.AdvanceEpoch("root-1"); err != nil {
 		t.Fatal(err)
 	}
-	g.SetWorldState(testWorld())
+	_ = g.SetWorldState(testWorld())
 	obs := testObservation(now)
 	if err := g.RegisterObservation(&obs); err != nil {
 		t.Fatal(err)
@@ -151,7 +151,7 @@ func reopenGateway(t *testing.T, old *Gateway) (*Gateway, *SimController) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g.SetWorldState(testWorld())
+	_ = g.SetWorldState(testWorld())
 	return g, controller
 }
 

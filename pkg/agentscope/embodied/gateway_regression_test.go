@@ -239,7 +239,7 @@ func TestConcurrentEpochAdvanceExecuteAndRecover(t *testing.T) {
 func TestRestartRestoresRootWithoutActions(t *testing.T) {
 	g, _, now := newTestGateway(t)
 	reopened, _ := reopenGateway(t, g)
-	reopened.SetWorldState(testWorld())
+	_ = reopened.SetWorldState(testWorld())
 	obs := testObservation(now)
 	if err := reopened.RegisterObservation(&obs); err != nil {
 		t.Fatal(err)
