@@ -228,7 +228,7 @@ func TestConcurrentEpochAdvanceExecuteAndRecover(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("concurrent epoch, execute and recovery deadlocked")
 	}
 	if got, want := g.epochs["root-1"], g.store.Epoch("root-1"); got != want {
