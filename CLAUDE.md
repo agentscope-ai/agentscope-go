@@ -33,6 +33,7 @@ feature is wired into every execution path.
 | Execution backends | [tool/backend.go](pkg/agentscope/tool/backend.go), [workspace/](pkg/agentscope/workspace/) | Local or remote filesystem/command execution and workspace lifecycle |
 | State and sessions | [storage/](pkg/agentscope/storage/), [session/](pkg/agentscope/session/) | Storage interfaces, implementations and session state |
 | Service and UI | [app/](pkg/agentscope/app/), [service/](pkg/agentscope/service/), [webui/](pkg/agentscope/webui/), [console/](pkg/agentscope/console/) | Application wiring, HTTP handlers and interaction frontends |
+| OpenAI-compatible serving | [openaiserver/](pkg/agentscope/openaiserver/) | Experimental stateless text Chat Completions, server-owned tools and request admission; [guide](docs/openai-serving.md) |
 | External integrations | [mcp/](pkg/agentscope/mcp/), [a2a/](pkg/agentscope/a2a/), [channel/](pkg/agentscope/channel/) | Tool servers, remote agents and messaging channels |
 | Retrieval and memory | [rag/](pkg/agentscope/rag/), [embedding/](pkg/agentscope/embedding/), [memory/](pkg/agentscope/memory/) | Retrieval, embeddings and memory stores |
 | Composition and scheduling | [pipeline/](pkg/agentscope/pipeline/), [team/](pkg/agentscope/team/), [schedule/](pkg/agentscope/schedule/) | Agent coordination and scheduled execution |
