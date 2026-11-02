@@ -33,10 +33,12 @@ var sessionCounter atomic.Int64
 
 // Service is the HTTP agent service.
 type Service struct {
-	cfg     Config
-	factory AgentFactory
-	model   model.ChatModel
-	mux     *http.ServeMux
+	cfg            Config
+	factory        AgentFactory
+	scopeResolver  ScopeResolver
+	contextFactory ContextAgentFactory
+	model          model.ChatModel
+	mux            *http.ServeMux
 
 	mu       sync.RWMutex
 	sessions map[string]*sessionState
@@ -44,8 +46,11 @@ type Service struct {
 }
 
 type sessionState struct {
-	agent     *agent.UnifiedAgent
-	createdAt time.Time
+	agent       *agent.UnifiedAgent
+	createdAt   time.Time
+	ownerScope  string
+	pending     *scopedPendingConfirmation
+	activeReply bool
 }
 
 // New creates a new agent service.
@@ -115,14 +120,14 @@ func (s *Service) registerRoutes() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	s.mux.HandleFunc("POST /api/chat", s.handleChat)
-	s.mux.HandleFunc("GET /api/chat/stream", s.handleChatStream)
-	s.mux.HandleFunc("POST /api/session", s.handleCreateSession)
-	s.mux.HandleFunc("GET /api/session/", s.handleGetSession)
-	s.mux.HandleFunc("GET /api/sessions", s.handleListSessions)
-	s.mux.HandleFunc("DELETE /api/session/", s.handleDeleteSession)
+	s.mux.HandleFunc("POST /api/chat", s.sessionRoute(s.handleChat))
+	s.mux.HandleFunc("GET /api/chat/stream", s.sessionRoute(s.handleChatStream))
+	s.mux.HandleFunc("POST /api/session", s.sessionRoute(s.handleCreateSession))
+	s.mux.HandleFunc("GET /api/session/", s.sessionRoute(s.handleGetSession))
+	s.mux.HandleFunc("GET /api/sessions", s.sessionRoute(s.handleListSessions))
+	s.mux.HandleFunc("DELETE /api/session/", s.sessionRoute(s.handleDeleteSession))
 	s.mux.HandleFunc("GET /api/models", s.handleListModels)
-	s.mux.HandleFunc("POST /api/confirm", s.handleConfirm)
+	s.mux.HandleFunc("POST /api/confirm", s.sessionRoute(s.handleConfirm))
 }
 
 // --- Request/Response types ---
@@ -163,20 +168,28 @@ type ConfirmRequest struct {
 
 // --- Handlers ---
 
-func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleChat(w http.ResponseWriter, r *http.Request, scope string) {
 	var req ChatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.decodeRequest(w, r, &req) {
 		return
 	}
 
-	sess := s.getSession(req.SessionID)
+	sess := s.getSession(req.SessionID, scope)
 	if sess == nil {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
 
-	reply, err := sess.agent.Reply(r.Context(), req.Message)
+	ctx := r.Context()
+	if s.scopeResolver != nil {
+		owned, finish, ok := s.beginScopedReply(w, r, sess)
+		if !ok {
+			return
+		}
+		defer finish()
+		ctx = owned
+	}
+	reply, err := sess.agent.Reply(ctx, req.Message)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -189,7 +202,7 @@ func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, ChatResponse{SessionID: req.SessionID, Reply: text})
 }
 
-func (s *Service) handleChatStream(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleChatStream(w http.ResponseWriter, r *http.Request, scope string) {
 	sessionID := r.URL.Query().Get("session_id")
 	msg := r.URL.Query().Get("message")
 	if sessionID == "" || msg == "" {
@@ -197,9 +210,13 @@ func (s *Service) handleChatStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess := s.getSession(sessionID)
+	sess := s.getSession(sessionID, scope)
 	if sess == nil {
 		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	if s.scopeResolver != nil {
+		s.handleScopedStream(w, r, sess, msg)
 		return
 	}
 
@@ -220,10 +237,9 @@ func (s *Service) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Service) handleCreateSession(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleCreateSession(w http.ResponseWriter, r *http.Request, scope string) {
 	var req SessionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.decodeRequest(w, r, &req) {
 		return
 	}
 
@@ -236,14 +252,38 @@ func (s *Service) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		prompt = "You are a helpful assistant."
 	}
 
-	a := s.factory(name, prompt, s.model)
+	var a *agent.UnifiedAgent
+	if s.contextFactory != nil {
+		if requestCanceled(w, r) {
+			return
+		}
+		var err error
+		a, err = s.contextFactory(r.Context(), name, prompt, s.model)
+		if requestCanceled(w, r) {
+			return
+		}
+		if err != nil || a == nil {
+			writeError(w, http.StatusInternalServerError, "agent construction failed")
+			return
+		}
+	} else {
+		a = s.factory(name, prompt, s.model)
+	}
 
 	sessionID := fmt.Sprintf("sess_%d", sessionCounter.Add(1))
 
 	s.mu.Lock()
+	// The final cancellation check is the scoped construction admission point.
+	// Cancellation after this check does not revoke an admitted session.
+	if s.scopeResolver != nil && r.Context().Err() != nil {
+		s.mu.Unlock()
+		requestCanceled(w, r)
+		return
+	}
 	s.sessions[sessionID] = &sessionState{
-		agent:     a,
-		createdAt: time.Now(),
+		agent:      a,
+		createdAt:  time.Now(),
+		ownerScope: scope,
 	}
 	s.mu.Unlock()
 
@@ -254,14 +294,14 @@ func (s *Service) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Service) handleGetSession(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleGetSession(w http.ResponseWriter, r *http.Request, scope string) {
 	sessionID := strings.TrimPrefix(r.URL.Path, "/api/session/")
 	if sessionID == "" {
 		writeError(w, http.StatusBadRequest, "session_id is required")
 		return
 	}
 
-	sess := s.getSession(sessionID)
+	sess := s.getSession(sessionID, scope)
 	if sess == nil {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
@@ -273,12 +313,15 @@ func (s *Service) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Service) handleListSessions(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleListSessions(w http.ResponseWriter, _ *http.Request, scope string) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	sessions := make([]SessionResponse, 0, len(s.sessions))
 	for id, sess := range s.sessions {
+		if sess.ownerScope != scope {
+			continue
+		}
 		sessions = append(sessions, SessionResponse{
 			SessionID: id,
 			CreatedAt: sess.createdAt.Format(time.RFC3339),
@@ -287,7 +330,7 @@ func (s *Service) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sessions)
 }
 
-func (s *Service) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleDeleteSession(w http.ResponseWriter, r *http.Request, scope string) {
 	sessionID := strings.TrimPrefix(r.URL.Path, "/api/session/")
 	if sessionID == "" {
 		writeError(w, http.StatusBadRequest, "session_id is required")
@@ -295,7 +338,8 @@ func (s *Service) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
-	_, ok := s.sessions[sessionID]
+	sess, ok := s.sessions[sessionID]
+	ok = ok && sess.ownerScope == scope
 	if ok {
 		delete(s.sessions, sessionID)
 	}
@@ -313,16 +357,19 @@ func (s *Service) handleListModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, models)
 }
 
-func (s *Service) handleConfirm(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleConfirm(w http.ResponseWriter, r *http.Request, scope string) {
 	var req ConfirmRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.decodeRequest(w, r, &req) {
 		return
 	}
 
-	sess := s.getSession(req.SessionID)
+	sess := s.getSession(req.SessionID, scope)
 	if sess == nil {
 		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	if s.scopeResolver != nil {
+		s.handleScopedConfirmation(w, r, sess, req)
 		return
 	}
 
@@ -340,10 +387,14 @@ func (s *Service) handleConfirm(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Service) getSession(id string) *sessionState {
+func (s *Service) getSession(id, scope string) *sessionState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.sessions[id]
+	sess := s.sessions[id]
+	if sess != nil && sess.ownerScope != scope {
+		return nil
+	}
+	return sess
 }
 
 // --- CORS ---
