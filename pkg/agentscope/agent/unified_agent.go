@@ -16,6 +16,7 @@ import (
 	agentscope "github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope"
 	agenterrors "github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/errors"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/event"
+	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/internal/confirmation"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/internal/runctx"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/loop"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/message"
@@ -1256,6 +1257,10 @@ func (a *UnifiedAgent) executeToolCallWithPermission(
 }
 
 func (a *UnifiedAgent) waitForConfirmation(ctx context.Context, toolCallID string) (bool, message.ToolCallBlock) {
+	var input <-chan event.UserConfirmResultEvent = a.confirmCh
+	if scoped := confirmation.Input(ctx, a); scoped != nil {
+		input = scoped
+	}
 	// A batch confirmation consumed by an earlier waiter may already carry our
 	// call (HARNESS review M2): check the stash first.
 	if confirmed, tc, found := a.takeStashedConfirm(toolCallID); found {
@@ -1263,7 +1268,10 @@ func (a *UnifiedAgent) waitForConfirmation(ctx context.Context, toolCallID strin
 	}
 	for {
 		select {
-		case result := <-a.confirmCh:
+		case result, ok := <-input:
+			if !ok {
+				return false, message.ToolCallBlock{}
+			}
 			var match *event.ConfirmResult
 			for i := range result.ConfirmResults {
 				cr := &result.ConfirmResults[i]
