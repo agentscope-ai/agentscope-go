@@ -338,7 +338,8 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   operation-level routing policy, as a self-contained reference
   implementation. It models the routing contract (see `tierrouter/DESIGN.md`):
   a serialized decision point that rechecks task epoch and TTL at admission
-  and at every dispatch, a persisted
+  and at every dispatch, and again when a successful call settles — a stale
+  success settles the record `superseded` instead of being returned — a persisted
   decision log with a commit boundary before any provider call, guarded
   fallback with failure evidence, a local-only guard that binds regardless of
   policy preference, unknown-outcome attempts that are never auto-retried,

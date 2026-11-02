@@ -268,7 +268,7 @@ func (r *Router) Route(ctx context.Context, op *Operation) (*Record, error) {
 
 		result, callErr := p.Complete(ctx, op)
 
-		settled := r.settleAttempt(rec, tier, result, callErr)
+		settled := r.settleAttempt(rec, op, tier, result, callErr)
 		if settled != nil {
 			return rec.Clone(), settled
 		}
@@ -444,11 +444,16 @@ func (r *Router) commitAttempt(rec *Record, op *Operation, tier Tier, reason str
 }
 
 // settleAttempt records the provider call outcome and settles the attempt
-// (R4, R5). A non-nil returned error is a persistence failure, not a routing
-// outcome. Unlike admit/commitAttempt there is no rollback here: the provider
-// call already happened, so the in-memory outcome is the most truthful
-// evidence available and must survive to block silent re-dispatch.
-func (r *Router) settleAttempt(rec *Record, tier Tier, result string, callErr error) error {
+// (R4, R5). A non-nil returned error is a persistence failure or a guard
+// outcome, never a clean-failure routing signal. On success it rechecks the
+// dispatch guards (R2): if the epoch advanced or the TTL elapsed while the
+// call was in flight, the attempt stays as completed evidence and the
+// operation settles superseded, so a stale success is never returned as a
+// routing result — the same alignment ChatRouter applies. Unlike
+// admit/commitAttempt there is no rollback here: the provider call already
+// happened, so the in-memory outcome is the most truthful evidence available
+// and must survive to block silent re-dispatch.
+func (r *Router) settleAttempt(rec *Record, op *Operation, tier Tier, result string, callErr error) error {
 	r.log.mu.Lock()
 	defer r.log.mu.Unlock()
 	at := &rec.Attempts[len(rec.Attempts)-1]
@@ -457,6 +462,9 @@ func (r *Router) settleAttempt(rec *Record, tier Tier, result string, callErr er
 	case callErr == nil:
 		at.Outcome = AttemptCompleted
 		at.Result = result
+		if code, err := r.guardLocked(op); err != nil {
+			return r.supersedeLocked(rec, code, err)
+		}
 		rec.State = StateCompleted
 	case unknownOutcome(callErr):
 		at.Outcome = AttemptUnknown

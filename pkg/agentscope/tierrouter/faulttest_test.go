@@ -593,6 +593,67 @@ func TestFaultF13_GuardStopsFallback(t *testing.T) {
 	})
 }
 
+// Fault test F13, success variant (R2): the epoch advances, or the TTL
+// elapses, while the preferred provider is in flight and the call then
+// completes successfully. The attempt stays as completed evidence, the
+// operation settles superseded, and the stale success is never returned
+// as a routing result — the base Router aligns with ChatRouter here.
+func TestFaultF13_StaleSuccessIsSuperseded(t *testing.T) {
+	t.Run("epoch advance", func(t *testing.T) {
+		epoch := int64(1)
+		cloud := NewFakeProvider(TierCloud)
+		edge := NewFakeProvider(TierEdge)
+		r := newHarness(t, "", func() int64 { return epoch },
+			StaticPolicy{Default: []Tier{TierCloud, TierEdge}},
+			hookProvider{inner: cloud, hook: func() { epoch = 2 }}, edge)
+
+		rec, err := r.Route(context.Background(), &Operation{ID: "f13-es", TaskEpoch: 1, Content: "x"})
+		if !errors.Is(err, ErrStaleEpoch) {
+			t.Fatalf("want ErrStaleEpoch, got %v", err)
+		}
+		if rec.State != StateSuperseded || rec.StopReason != rejectStaleEpoch {
+			t.Fatalf("record: %+v", rec)
+		}
+		// The in-flight attempt's success survives as evidence.
+		if len(rec.Attempts) != 1 || rec.Attempts[0].Outcome != AttemptCompleted {
+			t.Fatalf("attempts: %+v", rec.Attempts)
+		}
+		if len(cloud.Requests()) != 1 || len(edge.Requests()) != 0 {
+			t.Fatalf("cloud=%d edge=%d, want 1/0", len(cloud.Requests()), len(edge.Requests()))
+		}
+	})
+
+	t.Run("ttl expiry", func(t *testing.T) {
+		now := time.Now()
+		clock := &now
+		cloud := NewFakeProvider(TierCloud)
+		edge := NewFakeProvider(TierEdge)
+		r := newHarness(t, "", func() int64 { return 1 },
+			StaticPolicy{Default: []Tier{TierCloud, TierEdge}},
+			hookProvider{inner: cloud, hook: func() { *clock = now.Add(2 * time.Minute) }}, edge)
+		r.now = func() time.Time { return *clock }
+
+		op := &Operation{ID: "f13-ts", TaskEpoch: 1, Content: "x", TTL: time.Minute, SubmittedAt: now}
+		rec, err := r.Route(context.Background(), op)
+		if !errors.Is(err, ErrExpired) {
+			t.Fatalf("want ErrExpired, got %v", err)
+		}
+		if rec.State != StateSuperseded || rec.StopReason != rejectExpired {
+			t.Fatalf("record: %+v", rec)
+		}
+		if len(rec.Attempts) != 1 || rec.Attempts[0].Outcome != AttemptCompleted {
+			t.Fatalf("attempts: %+v", rec.Attempts)
+		}
+		if len(cloud.Requests()) != 1 || len(edge.Requests()) != 0 {
+			t.Fatalf("cloud=%d edge=%d, want 1/0", len(cloud.Requests()), len(edge.Requests()))
+		}
+		// Replay returns the guard error, never the stale result.
+		if _, err := r.Route(context.Background(), op); !errors.Is(err, ErrExpired) {
+			t.Fatalf("replay: want ErrExpired, got %v", err)
+		}
+	})
+}
+
 // Fault test F14 (R2, interpretation h): replaying a completed record after
 // the root epoch advanced returns the historical record unchanged — replay
 // preserves evidence, and using the result requires a separate current-state

@@ -56,7 +56,7 @@ Operation states:
 | `completed` | an attempt completed; result recorded | yes |
 | `rejected` | never dispatched: stale epoch, expired TTL, or no route | yes |
 | `exhausted` | every candidate tier failed cleanly | yes |
-| `superseded` | admitted, then the guards ceased to hold before a later dispatch; prior attempts remain as evidence | yes |
+| `superseded` | admitted, then the guards ceased to hold before a later dispatch or when an in-flight call settled; prior attempts remain as evidence | yes |
 | `uncertain` | an attempt outcome is unknown | no automatic exit; retry means a new operation id |
 
 ## Invariants
@@ -70,10 +70,14 @@ Operation states:
   operation at admission is rejected and the rejection is recorded; if the
   guards cease to hold *after* admission — the epoch advanced or the TTL
   elapsed while an attempt was in flight — the in-flight attempt settles
-  truthfully; when a further dispatch decision is reached, the guards block
-  it and the record is `superseded` with the stop reason recorded. (If no
-  candidate remains, the loop instead settles as `exhausted` on the settled
-  evidence.) Neither is silently re-evaluated later.
+  truthfully; when the in-flight call ends in a clean failure and a further
+  dispatch decision is reached, the guards block it and the record is
+  `superseded` with the stop reason recorded, and when the in-flight call
+  succeeds the guards are rechecked at the settle point itself, so the
+  attempt stays as `completed` evidence while the record is `superseded`
+  and the stale result is never returned. (If no candidate remains, the
+  loop instead settles as `exhausted` on the settled evidence.) Neither is
+  silently re-evaluated later.
 - **R3 Idempotent identity** — same `id` + same content replays the recorded
   outcome without re-dispatch, including across restart. Same `id` +
   different content is a conflict rejection. Concurrent duplicates serialize
@@ -112,7 +116,7 @@ Operation states:
 | F10 | Kill after admission but before the first attempt (pending, zero attempts) → reopen → `uncertain`, replay `ErrUncertain` | R6 |
 | F11 | Kill between attempts (pending, all attempts settled after a clean failure) → reopen → `uncertain`, replay `ErrUncertain` | R6 |
 | F12 | Epoch advances after admission but before the first dispatch → `superseded`, nothing dispatched | R2 |
-| F13 | Epoch advances, or TTL elapses, while the preferred provider is in flight, followed by a clean failure → in-flight attempt settles, fallback never dispatched | R2 |
+| F13 | Epoch advances, or TTL elapses, while the preferred provider is in flight → clean failure: in-flight attempt settles, fallback never dispatched; success: attempt stays `completed` evidence, record `superseded`, stale result never returned | R2 |
 | F14 | Replaying a completed record after the root epoch advanced returns the historical record unchanged | R2, interpretation h |
 | F15 | Guards cease after admission and the remaining candidates are unattached → `superseded`, no missed-tier record after the guard failure | R2 |
 
