@@ -176,6 +176,13 @@ implementations. Shared types or options do not prove that every provider
 serializes a field or interprets it identically. Trace request construction and
 response parsing in both call paths.
 
+`model/volcengine.go` provides direct Ark Chat Completions construction with a
+complete versioned API prefix, tri-state thinking and reasoning effort. Its
+shared request builder serves both call paths; streaming owns a child context
+that releases the HTTP reader when processing ends. Positive thinking budgets
+are rejected. App credential registration is deferred; see
+[provider configuration](docs/model-providers.md#volcengine-ark).
+
 The OpenAI-compatible formatter expands a merged agent message into ordered
 assistant/tool messages, keeping all calls in a round before their results.
 Its output count can exceed the input count. Multi-agent formatting assigns the

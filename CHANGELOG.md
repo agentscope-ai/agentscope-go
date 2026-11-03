@@ -11,6 +11,15 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Added — Volcengine Ark chat
+
+- `model.NewVolcengineChatModel` supports direct Ark Chat Completions calls,
+  SSE streaming, tool calls and explicit thinking/reasoning-effort controls.
+  Positive thinking-token budgets are rejected; use a zero budget for the toggle.
+  App credential/provider registration is deferred. See
+  [provider configuration](docs/model-providers.md#volcengine-ark) and the
+  [example](examples/volcengine/).
+
 ### Added — owner-scoped Agent Service
 
 - Experimental `service.NewScoped` combines request-aware agent construction
