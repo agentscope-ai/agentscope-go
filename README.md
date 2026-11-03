@@ -114,8 +114,8 @@ steps, see [Getting started](docs/getting-started.md).
 ## Model providers
 
 Adapters are available for **OpenAI** (Chat Completions and Responses),
-**Anthropic**, **DashScope**, **DeepSeek**, **Gemini**, **Moonshot**, **xAI** and
-**Ollama**. See [provider configuration](docs/model-providers.md) and the
+**Anthropic**, **DashScope**, **DeepSeek**, **Gemini**, **Moonshot**, **xAI**,
+**Ollama** and **Volcengine Ark**. See [provider configuration](docs/model-providers.md) and the
 [adapter source](pkg/agentscope/model/) for options and defaults.
 
 Tool calling, multimodal input, thinking and usage reporting depend on the
@@ -167,6 +167,7 @@ its model choice, environment variables and required services or runtimes.
 | [managed_task](examples/managed_task/) | Fixed-model managed text execution with a local HTTP fixture |
 | [classifier](examples/classifier/) | Typed classification with offline fake results and attempt accounting |
 | [model_call](examples/model_call/) | Direct model streaming, tool calls and structured output |
+| [volcengine](examples/volcengine/) | Direct Ark chat streaming with API-key authentication |
 | [structured_output](examples/structured_output/) | Structured output through tool calling |
 | [multi_provider](examples/multi_provider/) | Provider configuration and model cards |
 | [multimodal](examples/multimodal/) | Image input using URLs and base64 data |

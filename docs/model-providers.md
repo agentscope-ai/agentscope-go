@@ -1,6 +1,6 @@
 # Model Providers
 
-agentscope-go supports 9 LLM providers, all implementing the `ChatModel` interface with `Chat`, `ChatStream`, and `CountTokens`.
+The adapters below implement the `ChatModel` interface with `Chat`, `ChatStream`, and `CountTokens`.
 
 ## Configuration Pattern
 
@@ -17,7 +17,7 @@ cm, err := model.NewXxxChatModel(model.XxxConfig{
         Transport:      customTransport, // for proxy
     },
 })
-// Note: Anthropic and OpenAI Response take pointer configs (*AnthropicConfig, *OpenAIResponseConfig)
+// Note: Anthropic, OpenAI Responses and Volcengine take pointer configs.
 ```
 
 ## Providers
@@ -161,6 +161,59 @@ cm, _ := model.NewXAIChatModel(model.XAIConfig{
 
 Models: `grok-3`, `grok-3-fast`, `grok-3-mini`, `grok-4.3`
 
+### Volcengine Ark
+
+Available on main (Unreleased), through direct Go construction:
+
+```go
+cm, err := model.NewVolcengineChatModel(&model.VolcengineConfig{
+    SecretAPIKey: model.NewSecretStr(os.Getenv("ARK_API_KEY")),
+    Model:        os.Getenv("ARK_MODEL"), // Your enabled model ID.
+})
+```
+
+The default API prefix is `https://ark.cn-beijing.volces.com/api/v3`; the adapter
+appends `/chat/completions`. A custom `BaseURL` must include its version/path
+prefix, with an optional trailing slash. Do not pass a full chat URL. Bearer
+API-key authentication is used; `SecretAPIKey` takes precedence over `APIKey`.
+`HTTPClient` and `ClientOptions` follow the shared configuration rules.
+The default targets the standard Ark data plane; Coding Plan uses different
+endpoints and must be configured according to its own service documentation.
+
+Both `Chat` and `ChatStream` support text and tool calls. Options map as follows:
+
+| Call option | Ark request |
+|---|---|
+| Thinking unset | Omit `thinking`; use the provider default |
+| `WithThinking(true, 0)` | `thinking.type = "enabled"` |
+| `WithThinkingDisabled()` or `WithThinking(false, 0)` | `thinking.type = "disabled"` |
+| `WithReasoningEffort("low")` | Top-level `reasoning_effort` |
+| `WithMaxTokens(n)` | `max_tokens` |
+| Temperature, top-p, tools, tool choice | Corresponding OpenAI-compatible fields |
+
+Positive thinking budgets are rejected before dispatch; use zero for the toggle.
+This differs from Anthropic's budget-based thinking. The effort values exposed by
+the [Python Ark adapter](https://github.com/agentscope-ai/agentscope/blob/9c006f3865c53a3769a4c9411b3b7b4b579195e6/src/agentscope/model/_volcengine/_model.py)
+are `minimal`, `low`, `medium` and `high`. Values are forwarded without rewriting;
+model-specific restrictions on effort, thinking and tool choice remain provider
+errors. See [Ark thinking controls](https://docs.volcengine.com/docs/ark/deep-thinking?lang=zh)
+and [endpoint/authentication](https://docs.volcengine.com/docs/ark/base-url-and-authentication?lang=zh).
+Other shared options (including seed, voice, response format and additional
+`WithRetries` attempts) are not mapped by this adapter. Buffered calls still use
+the shared HTTP helper's retry policy; streaming has no setup retry loop.
+
+Responses retain text, reasoning, tool calls, stop reasons, usage and cache-read
+tokens. `CountTokens` remains an estimate. Streams emit deltas and an assembled
+`IsLast` response; inspect each chunk's `Error`, and check `ctx.Err()` after channel
+closure. Do not append final assembled text to the deltas again. Supply a context
+deadline and cancel when abandoning a stream; see [streaming](streaming.md).
+
+This slice does not add `provider: volcengine` to the credential/app factory,
+Responses API, media support, AK/SK signing or model/pricing cards. Construct the
+adapter directly. The [runnable example](../examples/volcengine/) requires a real
+API key and model ID. Adapter tests use local HTTP/SSE fixtures; they do not
+establish live Ark compatibility.
+
 ## Tool-call history in OpenAI-compatible chat
 
 **Unreleased fix for [#7](https://github.com/agentscope-ai/agentscope-go/issues/7):**
@@ -227,7 +280,8 @@ Models: `gemini-2.5-flash-preview-tts`
 
 ## Common Call Options
 
-All providers support the same `CallOption` set:
+All providers accept the common `CallOption` type; supported options and mappings
+vary by adapter. Consult the provider sections above:
 
 ```go
 resp, _ := cm.Chat(ctx, msgs,
