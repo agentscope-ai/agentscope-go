@@ -552,10 +552,11 @@ type openAIChatRequest struct {
 	// Thinking carries provider-specific reasoning configuration: DeepSeek
 	// and Moonshot disable thinking via {"type":"disabled"} (upstream #2140
 	// structured-output fallback).
-	Thinking      *openAIThinking    `json:"thinking,omitempty"`
-	Audio         *openAIAudioConfig `json:"audio,omitempty"`
-	Modalities    []string           `json:"modalities,omitempty"`
-	StreamOptions *openAIStreamOpts  `json:"stream_options,omitempty"`
+	Thinking        *openAIThinking    `json:"thinking,omitempty"`
+	ReasoningEffort *string            `json:"reasoning_effort,omitempty"` // Ark reasoning depth.
+	Audio           *openAIAudioConfig `json:"audio,omitempty"`
+	Modalities      []string           `json:"modalities,omitempty"`
+	StreamOptions   *openAIStreamOpts  `json:"stream_options,omitempty"`
 }
 
 // openAIThinking is the OpenAI-compatible thinking configuration object
