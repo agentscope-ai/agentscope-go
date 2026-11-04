@@ -115,7 +115,7 @@ steps, see [Getting started](docs/getting-started.md).
 
 Adapters are available for **OpenAI** (Chat Completions and Responses),
 **Anthropic**, **DashScope**, **DeepSeek**, **Gemini**, **Moonshot**, **xAI**,
-**Ollama** and **Volcengine Ark**. See [provider configuration](docs/model-providers.md) and the
+**Ollama**, **Volcengine Ark** and **MiniMax**. See [provider configuration](docs/model-providers.md) and the
 [adapter source](pkg/agentscope/model/) for options and defaults.
 
 Tool calling, multimodal input, thinking and usage reporting depend on the
@@ -168,6 +168,7 @@ its model choice, environment variables and required services or runtimes.
 | [classifier](examples/classifier/) | Typed classification with offline fake results and attempt accounting |
 | [model_call](examples/model_call/) | Direct model streaming, tool calls and structured output |
 | [volcengine](examples/volcengine/) | Direct Ark chat streaming with API-key authentication |
+| [minimax](examples/minimax/) | MiniMax tool use with preserved thinking and a streamed follow-up |
 | [structured_output](examples/structured_output/) | Structured output through tool calling |
 | [multi_provider](examples/multi_provider/) | Provider configuration and model cards |
 | [multimodal](examples/multimodal/) | Image input using URLs and base64 data |

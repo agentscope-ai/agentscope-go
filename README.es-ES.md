@@ -115,7 +115,7 @@ para configuración y siguientes pasos, consulta [Primeros pasos](docs/getting-s
 ## Proveedores de modelos
 
 Hay adaptadores para **OpenAI** (Chat Completions y Responses), **Anthropic**,
-**DashScope**, **DeepSeek**, **Gemini**, **Moonshot**, **xAI**, **Ollama** y **Volcengine Ark**.
+**DashScope**, **DeepSeek**, **Gemini**, **Moonshot**, **xAI**, **Ollama**, **Volcengine Ark** y **MiniMax**.
 Consulta la [configuración de proveedores](docs/model-providers.md) y el
 [código de los adaptadores](pkg/agentscope/model/) para ver sus opciones y valores
 predeterminados.
@@ -173,6 +173,7 @@ necesarios.
 | [classifier](examples/classifier/) | Clasificación tipada con resultados simulados y registro de intentos |
 | [model_call](examples/model_call/) | Streaming del modelo, herramientas y salida estructurada |
 | [volcengine](examples/volcengine/) | Streaming directo de Ark con autenticación por clave de API |
+| [minimax](examples/minimax/) | Herramientas de MiniMax con razonamiento conservado y respuesta posterior en streaming |
 | [structured_output](examples/structured_output/) | Salida estructurada mediante llamadas a herramientas |
 | [multi_provider](examples/multi_provider/) | Configuración de proveedores y fichas de modelos |
 | [multimodal](examples/multimodal/) | Imágenes mediante URL y datos base64 |
