@@ -136,13 +136,19 @@ type anthropicMessage struct {
 }
 
 type anthropicRequest struct {
-	Model      string               `json:"model"`
-	Messages   []anthropicMessage   `json:"messages"`
-	MaxTokens  int                  `json:"max_tokens"`
-	System     interface{}          `json:"system,omitempty"` // string OR []anthropicSystemBlock (M8a)
-	Tools      []anthropicTool      `json:"tools,omitempty"`
-	ToolChoice *anthropicToolChoice `json:"tool_choice,omitempty"`
-	Thinking   *anthropicThinking   `json:"thinking,omitempty"`
+	Model        string                 `json:"model"`
+	Messages     []anthropicMessage     `json:"messages"`
+	MaxTokens    int                    `json:"max_tokens"`
+	System       interface{}            `json:"system,omitempty"` // string OR []anthropicSystemBlock (M8a)
+	Tools        []anthropicTool        `json:"tools,omitempty"`
+	ToolChoice   *anthropicToolChoice   `json:"tool_choice,omitempty"`
+	Thinking     *anthropicThinking     `json:"thinking,omitempty"`
+	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
+	Stream       bool                   `json:"stream,omitempty"`
+}
+
+type anthropicOutputConfig struct {
+	Effort string `json:"effort"`
 }
 
 type anthropicToolChoice struct {
@@ -163,10 +169,11 @@ type anthropicTool struct {
 }
 
 type anthropicResponse struct {
-	ID      string `json:"id"`
-	Model   string `json:"model"`
-	Role    string `json:"role"`
-	Content []struct {
+	StopReason string `json:"stop_reason"`
+	ID         string `json:"id"`
+	Model      string `json:"model"`
+	Role       string `json:"role"`
+	Content    []struct {
 		Type      string          `json:"type"`
 		Text      string          `json:"text,omitempty"`
 		Thinking  string          `json:"thinking,omitempty"`
@@ -197,47 +204,7 @@ func (m *AnthropicChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts
 		opt(callOpts)
 	}
 
-	am, system := convertMessagesToAnthropic(msgs)
-
-	reqBody := anthropicRequest{
-		Model:     m.model,
-		Messages:  am,
-		MaxTokens: m.maxOutputTok,
-		System:    system,
-	}
-
-	// Thinking parameters
-	if callOpts.ThinkingEnable != nil && *callOpts.ThinkingEnable {
-		budget := reqBody.MaxTokens / 2
-		if callOpts.ThinkingBudget != nil && *callOpts.ThinkingBudget > 0 {
-			budget = *callOpts.ThinkingBudget
-		}
-		if budget >= reqBody.MaxTokens {
-			reqBody.MaxTokens = budget + 1024
-		}
-		reqBody.Thinking = &anthropicThinking{Type: "enabled", BudgetTokens: budget}
-	} else if callOpts.ThinkingEnable != nil && !*callOpts.ThinkingEnable {
-		// Upstream #2140: explicitly disable thinking (structured-output
-		// fallback rung; Anthropic rejects forced tool_choice with thinking).
-		reqBody.Thinking = &anthropicThinking{Type: "disabled"}
-	}
-
-	if len(callOpts.Tools) > 0 {
-		for _, ts := range callOpts.Tools {
-			reqBody.Tools = append(reqBody.Tools, anthropicTool{
-				Name:        ts.Function.Name,
-				Description: ts.Function.Description,
-				InputSchema: ts.Function.Parameters,
-			})
-		}
-	}
-
-	if callOpts.ToolChoice != nil && len(reqBody.Tools) > 0 {
-		reqBody.ToolChoice = formatToolChoiceAnthropic(callOpts.ToolChoice)
-	}
-
-	// M8a: apply prompt caching last so it sees the finalized system + tools.
-	reqBody.System, reqBody.Tools = m.applyPromptCaching(system, reqBody.Tools)
+	reqBody := m.request(msgs, callOpts)
 
 	// Retry loop
 	maxRetries := callOpts.MaxRetries
@@ -281,64 +248,7 @@ func (m *AnthropicChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts
 		return nil, fmt.Errorf("anthropic: %w", lastErr)
 	}
 
-	if len(parsed.Content) == 0 {
-		return nil, fmt.Errorf("anthropic: empty content")
-	}
-
-	var content []message.ContentBlock
-	for _, c := range parsed.Content {
-		switch c.Type {
-		case "text":
-			content = append(content, message.TextBlock{
-				Type: "text",
-				ID:   fmt.Sprintf("text_%s", parsed.ID),
-				Text: c.Text,
-			})
-		case "thinking":
-			tb := message.ThinkingBlock{
-				Type:     "thinking",
-				ID:       fmt.Sprintf("thinking_%s", parsed.ID),
-				Thinking: c.Thinking,
-			}
-			if c.Signature != "" {
-				tb.Extra = map[string]any{"signature": c.Signature}
-			}
-			content = append(content, tb)
-		case "tool_use":
-			inputStr := string(c.Input)
-			content = append(content, message.ToolCallBlock{
-				Type:  "tool_call",
-				ID:    c.ID,
-				Name:  c.Name,
-				Input: inputStr,
-				State: message.ToolCallPending,
-			})
-		}
-	}
-
-	var usage *ChatUsage
-	if parsed.Usage != nil {
-		usage = &ChatUsage{
-			InputTokens:              parsed.Usage.InputTokens,
-			OutputTokens:             parsed.Usage.OutputTokens,
-			CacheCreationInputTokens: parsed.Usage.CacheCreationInputTokens,
-			CacheInputTokens:         parsed.Usage.CacheReadInputTokens,
-			// Anthropic's input_tokens excludes cache-read/cache-creation
-			// tokens; the context-window fill level is the sum.
-			TotalInputTokens: parsed.Usage.InputTokens +
-				parsed.Usage.CacheCreationInputTokens +
-				parsed.Usage.CacheReadInputTokens,
-		}
-	}
-
-	return &ChatResponse{
-		Content:   content,
-		IsLast:    true,
-		ID:        parsed.ID,
-		CreatedAt: time.Now().Format(message.TimestampFormat),
-		Usage:     usage,
-		ModelName: parsed.Model,
-	}, nil
+	return parseAnthropicResponse(&parsed)
 }
 
 // ChatStream implements streaming chat via Anthropic's SSE event format.
@@ -352,47 +262,8 @@ func (m *AnthropicChatModel) ChatStream(ctx context.Context, msgs []*message.Msg
 		opt(callOpts)
 	}
 
-	am, system := convertMessagesToAnthropic(msgs)
-
-	reqBody := anthropicStreamRequest{
-		Model:     m.model,
-		Messages:  am,
-		MaxTokens: m.maxOutputTok,
-		System:    system,
-		Stream:    true,
-	}
-
-	if callOpts.ThinkingEnable != nil && *callOpts.ThinkingEnable {
-		budget := reqBody.MaxTokens / 2
-		if callOpts.ThinkingBudget != nil && *callOpts.ThinkingBudget > 0 {
-			budget = *callOpts.ThinkingBudget
-		}
-		if budget >= reqBody.MaxTokens {
-			reqBody.MaxTokens = budget + 1024
-		}
-		reqBody.Thinking = &anthropicThinking{Type: "enabled", BudgetTokens: budget}
-	} else if callOpts.ThinkingEnable != nil && !*callOpts.ThinkingEnable {
-		// Upstream #2140: explicitly disable thinking (structured-output
-		// fallback rung; Anthropic rejects forced tool_choice with thinking).
-		reqBody.Thinking = &anthropicThinking{Type: "disabled"}
-	}
-
-	if len(callOpts.Tools) > 0 {
-		for _, ts := range callOpts.Tools {
-			reqBody.Tools = append(reqBody.Tools, anthropicTool{
-				Name:        ts.Function.Name,
-				Description: ts.Function.Description,
-				InputSchema: ts.Function.Parameters,
-			})
-		}
-	}
-
-	if callOpts.ToolChoice != nil && len(reqBody.Tools) > 0 {
-		reqBody.ToolChoice = formatToolChoiceAnthropic(callOpts.ToolChoice)
-	}
-
-	// M8a: apply prompt caching last so it sees the finalized system + tools.
-	reqBody.System, reqBody.Tools = m.applyPromptCaching(system, reqBody.Tools)
+	reqBody := m.request(msgs, callOpts)
+	reqBody.Stream = true
 
 	sseCh, err := httpx.DoSSERequest(
 		ctx,
@@ -413,17 +284,6 @@ func (m *AnthropicChatModel) ChatStream(ctx context.Context, msgs []*message.Msg
 	outCh := make(chan ChatResponse, 16)
 	go processAnthropicStream(ctx, sseCh, outCh)
 	return outCh, nil
-}
-
-type anthropicStreamRequest struct {
-	Model      string               `json:"model"`
-	Messages   []anthropicMessage   `json:"messages"`
-	MaxTokens  int                  `json:"max_tokens"`
-	System     interface{}          `json:"system,omitempty"` // string OR []anthropicSystemBlock (M8a)
-	Tools      []anthropicTool      `json:"tools,omitempty"`
-	ToolChoice *anthropicToolChoice `json:"tool_choice,omitempty"`
-	Thinking   *anthropicThinking   `json:"thinking,omitempty"`
-	Stream     bool                 `json:"stream"`
 }
 
 // Anthropic SSE event data types
@@ -472,11 +332,23 @@ type anthropicMessageDelta struct {
 		StopReason string `json:"stop_reason"`
 	} `json:"delta"`
 	Usage *struct {
-		OutputTokens int `json:"output_tokens"`
+		OutputTokens             *int `json:"output_tokens"`
+		InputTokens              *int `json:"input_tokens"`
+		CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
+		CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
 	} `json:"usage,omitempty"`
 }
 
 func processAnthropicStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh chan<- ChatResponse) {
+	processAnthropicStreamWithPolicy(ctx, sseCh, outCh, anthropicStreamPolicy{})
+}
+
+type anthropicStreamPolicy struct {
+	stopAtMessageStop     bool
+	preserveReportedUsage bool
+}
+
+func processAnthropicStreamWithPolicy(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh chan<- ChatResponse, policy anthropicStreamPolicy) {
 	defer close(outCh)
 
 	var (
@@ -492,6 +364,7 @@ func processAnthropicStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 		// streamErr carries an Anthropic "error" SSE event, which arrives
 		// inside an otherwise successful HTTP 200 stream.
 		streamErr error
+		sawUsage  bool
 	)
 
 	for evt := range sseCh {
@@ -540,7 +413,11 @@ func processAnthropicStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 				responseID = ms.Message.ID
 				modelName = ms.Message.Model
 				if ms.Message.Usage != nil {
+					sawUsage = true
 					inputTokens = ms.Message.Usage.InputTokens
+					if policy.preserveReportedUsage {
+						outputTokens = ms.Message.Usage.OutputTokens
+					}
 				}
 			}
 			// Also try to extract cache tokens from message_start
@@ -667,9 +544,27 @@ func processAnthropicStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 		case "message_delta":
 			var md anthropicMessageDelta
 			if decode(&md) {
-				finishReason = md.Delta.StopReason
+				if md.Delta.StopReason != "" || !policy.preserveReportedUsage {
+					finishReason = md.Delta.StopReason
+				}
 				if md.Usage != nil {
-					outputTokens = md.Usage.OutputTokens
+					sawUsage = true
+					if md.Usage.OutputTokens != nil {
+						outputTokens = *md.Usage.OutputTokens
+					} else if !policy.preserveReportedUsage {
+						outputTokens = 0
+					}
+					if policy.preserveReportedUsage {
+						if md.Usage.InputTokens != nil {
+							inputTokens = *md.Usage.InputTokens
+						}
+						if md.Usage.CacheReadInputTokens != nil {
+							cacheInputTokens = *md.Usage.CacheReadInputTokens
+						}
+						if md.Usage.CacheCreationInputTokens != nil {
+							cacheCreationInputTokens = *md.Usage.CacheCreationInputTokens
+						}
+					}
 				}
 			}
 
@@ -701,6 +596,14 @@ func processAnthropicStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 		if streamErr != nil {
 			break
 		}
+		if policy.stopAtMessageStop && sawMessageStop {
+			break
+		}
+	}
+
+	// Cancellation-induced EOF is not a successful MiniMax completion.
+	if policy.stopAtMessageStop && ctx.Err() != nil {
+		return
 	}
 
 	// Build final accumulated response
@@ -735,7 +638,7 @@ func processAnthropicStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 	}
 
 	var usage *ChatUsage
-	if inputTokens > 0 || outputTokens > 0 {
+	if inputTokens > 0 || outputTokens > 0 || (policy.preserveReportedUsage && sawUsage) {
 		usage = &ChatUsage{
 			InputTokens:              inputTokens,
 			OutputTokens:             outputTokens,
@@ -764,7 +667,7 @@ func processAnthropicStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 		finalResp.Error = fmt.Errorf("%w (stream also ended without message_stop)", streamErr)
 	case streamErr != nil:
 		finalResp.Error = streamErr
-	case !sawMessageStop && ctx.Err() == nil:
+	case !sawMessageStop && (policy.stopAtMessageStop || ctx.Err() == nil):
 		finalResp.Error = fmt.Errorf("anthropic: stream ended without message_stop (truncated)")
 	}
 	select {
