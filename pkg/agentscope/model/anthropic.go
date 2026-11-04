@@ -163,10 +163,11 @@ type anthropicTool struct {
 }
 
 type anthropicResponse struct {
-	ID      string `json:"id"`
-	Model   string `json:"model"`
-	Role    string `json:"role"`
-	Content []struct {
+	StopReason string `json:"stop_reason"`
+	ID         string `json:"id"`
+	Model      string `json:"model"`
+	Role       string `json:"role"`
+	Content    []struct {
 		Type      string          `json:"type"`
 		Text      string          `json:"text,omitempty"`
 		Thinking  string          `json:"thinking,omitempty"`
@@ -332,12 +333,13 @@ func (m *AnthropicChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts
 	}
 
 	return &ChatResponse{
-		Content:   content,
-		IsLast:    true,
-		ID:        parsed.ID,
-		CreatedAt: time.Now().Format(message.TimestampFormat),
-		Usage:     usage,
-		ModelName: parsed.Model,
+		Content:    content,
+		IsLast:     true,
+		ID:         parsed.ID,
+		CreatedAt:  time.Now().Format(message.TimestampFormat),
+		Usage:      usage,
+		ModelName:  parsed.Model,
+		StopReason: normalizeStopReason(parsed.StopReason),
 	}, nil
 }
 
