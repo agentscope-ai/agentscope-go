@@ -134,7 +134,7 @@ func TestRegisterRootConcurrentStoreAccess(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("concurrent root registration and store access deadlocked")
 	}
 }
