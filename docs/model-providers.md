@@ -17,7 +17,7 @@ cm, err := model.NewXxxChatModel(model.XxxConfig{
         Transport:      customTransport, // for proxy
     },
 })
-// Note: Anthropic, OpenAI Responses and Volcengine take pointer configs.
+// Note: Anthropic, OpenAI Responses, Volcengine and MiniMax take pointer configs.
 ```
 
 ## Providers
@@ -213,6 +213,82 @@ Responses API, media support, AK/SK signing or model/pricing cards. Construct th
 adapter directly. The [runnable example](../examples/volcengine/) requires a real
 API key and model ID. Adapter tests use local HTTP/SSE fixtures; they do not
 establish live Ark compatibility.
+
+### MiniMax
+
+Direct Go construction for MiniMax's Anthropic-compatible Messages API:
+
+```go
+cm, err := model.NewMiniMaxChatModel(&model.MiniMaxConfig{
+    SecretAPIKey:    model.NewSecretStr(os.Getenv("MINIMAX_API_KEY")),
+    Model:          os.Getenv("MINIMAX_MODEL"),
+    MaxOutputTokens: 4096,
+})
+```
+
+The default prefix is `https://api.minimax.io/anthropic`; the adapter appends
+`/v1/messages`. A custom `BaseURL` is the complete prefix with an optional
+trailing slash, not the full Messages URL. `SecretAPIKey` takes precedence over
+`APIKey`. Requests use Bearer authentication; required authentication/content-type
+headers take precedence over default headers regardless of casing. Custom
+`HTTPClient`/`ClientOptions` follow the shared configuration rules.
+
+| Option | MiniMax request |
+|---|---|
+| Thinking unset | Omit `thinking`; retain model default |
+| `WithThinking(true, 0)` | `thinking.type = "adaptive"`, without a token budget |
+| `WithThinkingDisabled()` / `WithThinking(false, 0)` | `thinking.type = "disabled"` |
+| `WithReasoningEffort(value)` | `output_config.effort` |
+| `WithMaxTokens(n)` | Override configured `max_tokens` for this call |
+| Tools / tool choice | Anthropic-format tools and tool selection |
+
+`MaxOutputTokens` defaults to 4096; a negative configuration value or nonpositive
+per-call limit is rejected. Thinking consumes the output limit too: generation
+can end with reasoning but no text. Positive thinking budgets are rejected before
+dispatch; use zero for the toggle. `max_tokens` stop reasons normalize to
+`model.StopReasonLength` in both call paths.
+
+According to the [official compatibility guide](https://platform.minimax.io/docs/api-reference/text-anthropic-api),
+M3 defaults to thinking off and allows disabling, while M3.1-Flash thinks by
+default and rejects disabling. Flash effort values include `low`, `medium`,
+`high`, `xhigh` and `max`. The adapter forwards effort without rewriting it;
+model-specific rejection remains observable. Structured-output fallback may try
+disabled thinking, receive a rejection, then proceed to its next strategy; it
+does not establish that a model can stop thinking.
+
+The official overview describes tool choice as supported, while the detailed
+[Messages reference](https://platform.minimax.io/docs/api-reference/text-chat-anthropic)
+lists only `auto`. This adapter converts `auto`, `required` and named choices
+to Anthropic shapes, preserving service rejections. Local wire tests establish
+serialization, not acceptance by a live model. Use `auto` for the example.
+Unsupported sampling controls, seed, voice, response format and additional
+`WithRetries` attempts are not mapped. Buffered requests retain the shared HTTP
+helper's retry policy; streaming has no setup retry loop. Anthropic prompt-cache
+control markers are not added.
+
+Preserve the full assistant reply (thinking, optional signature, text and tool
+calls) before adding tool results. MiniMax also expands merged AgentScope
+assistant histories into assistant/user-result messages for the provider,
+preserving block order without changing the stored history.
+The [runnable example](../examples/minimax/)
+demonstrates this with local tool data and real model calls. Streams emit deltas
+followed by an assembled `IsLast` response; inspect `Error` on every chunk and
+`ctx.Err()` after closure. Do not append final assembled text to deltas again.
+Use a context deadline and cancel if abandoning the stream.
+
+Provider usage is distinct from estimated `CountTokens`. MiniMax's
+[cache guide](https://platform.minimax.io/docs/api-reference/text-prompt-caching)
+defines `input_tokens` as new input, with cached input reported separately.
+The adapter retains those raw counts and reports effective total input as new
+input plus cache-read/cache-creation tokens. Reported zero/cache-only usage and
+optional trailing stream usage updates are retained.
+
+The adaptive-thinking mapping follows [Python MiniMaxChatModel](https://github.com/agentscope-ai/agentscope/blob/f37adb1d467b7801cde830ddf2ac5cf5c5fd03bd/src/agentscope/model/_minimax/_model.py).
+Effort support follows current provider docs and goes beyond that wrapper,
+which suppresses output configuration. This slice covers direct text/tool
+construction: app credential registration, media, other MiniMax APIs and model
+cards/pricing catalogs are deferred. Tests use local fixtures; live MiniMax
+compatibility has not been validated.
 
 ## Tool-call history in OpenAI-compatible chat
 
