@@ -248,7 +248,12 @@ func (m *AnthropicChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts
 		return nil, fmt.Errorf("anthropic: %w", lastErr)
 	}
 
-	return parseAnthropicResponse(&parsed)
+	response, err := parseAnthropicResponse(&parsed)
+	if err != nil {
+		return nil, err
+	}
+	response.StopReason = normalizeStopReason(parsed.StopReason)
+	return response, nil
 }
 
 // ChatStream implements streaming chat via Anthropic's SSE event format.
