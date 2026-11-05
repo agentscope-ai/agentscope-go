@@ -1,0 +1,18 @@
+# Path-based pull request labels, consumed by actions/labeler in
+# .github/workflows/labeler.yml. The action runs with sync-labels off, so it
+# only ever adds labels and never removes ones a human set.
+
+# Deliberately scoped to docs/ and example READMEs: README.md and
+# CHANGELOG.md at the root change in most feature PRs, so labeling them
+# would put "documentation" on nearly every PR.
+documentation:
+  - changed-files:
+      - any-glob-to-any-file: ['docs/**', 'examples/**/*.md']
+
+github_actions:
+  - changed-files:
+      - any-glob-to-any-file: ['.github/workflows/**']
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file: ['go.mod', 'go.sum']

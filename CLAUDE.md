@@ -183,6 +183,16 @@ that releases the HTTP reader when processing ends. Positive thinking budgets
 are rejected. App credential registration is deferred; see
 [provider configuration](docs/model-providers.md#volcengine-ark).
 
+`model/minimax.go` provides direct MiniMax Messages construction, adaptive
+thinking, output effort and per-call output limits. `anthropic_internal.go`
+shares protocol-envelope construction and buffered parsing with Anthropic.
+MiniMax expands merged assistant/tool-result history into provider-role segments
+without mutating stored messages or changing the default Anthropic formatter.
+MiniMax selects an internal stream policy that ends at `message_stop`, retains
+reported zero/cache-only usage and optional final usage updates, and releases
+its HTTP reader through an owned child context. The default Anthropic path
+retains its existing behavior. See [MiniMax](docs/model-providers.md#minimax).
+
 The OpenAI-compatible formatter expands a merged agent message into ordered
 assistant/tool messages, keeping all calls in a round before their results.
 Its output count can exceed the input count. Multi-agent formatting assigns the

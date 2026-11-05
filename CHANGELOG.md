@@ -11,6 +11,17 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+- Fixed Anthropic buffered `Chat` responses dropping the normalized provider stop reason.
+
+### Added — MiniMax Messages adapter
+
+- `model.NewMiniMaxChatModel` supports direct text/tool calls, adaptive thinking,
+  output effort and streaming through MiniMax's Anthropic-compatible endpoint.
+  Per-call output limits, stop reasons, thinking signatures and cache usage
+  are retained. Positive thinking budgets are rejected. App credential/provider
+  registration remains deferred. See [provider configuration](docs/model-providers.md#minimax)
+  and the [example](examples/minimax/).
+
 ### Added — Volcengine Ark chat
 
 - `model.NewVolcengineChatModel` supports direct Ark Chat Completions calls,
