@@ -204,7 +204,10 @@ func (m *AnthropicChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts
 		opt(callOpts)
 	}
 
-	reqBody := m.request(msgs, callOpts)
+	reqBody, err := m.request(msgs, callOpts)
+	if err != nil {
+		return nil, err
+	}
 
 	// Retry loop
 	maxRetries := callOpts.MaxRetries
@@ -262,7 +265,10 @@ func (m *AnthropicChatModel) ChatStream(ctx context.Context, msgs []*message.Msg
 		opt(callOpts)
 	}
 
-	reqBody := m.request(msgs, callOpts)
+	reqBody, err := m.request(msgs, callOpts)
+	if err != nil {
+		return nil, err
+	}
 	reqBody.Stream = true
 
 	sseCh, err := httpx.DoSSERequest(

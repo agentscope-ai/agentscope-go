@@ -737,7 +737,7 @@ func TestAnthropicRequestCompatibility(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		miniMaxCall(t, m, stream, []*message.Msg{message.UserMsg("u", "hi")}, WithThinking(true, 3000), WithMaxTokens(77), WithReasoningEffort("low"))
+		miniMaxCall(t, m, stream, []*message.Msg{message.UserMsg("u", "hi")}, WithThinking(true, 3000), WithReasoningEffort("low"))
 		srv.Close()
 		body := <-captured
 		if body["max_tokens"] != float64(4024) || !reflect.DeepEqual(body["thinking"], map[string]any{"type": "enabled", "budget_tokens": float64(3000)}) {
