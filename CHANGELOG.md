@@ -11,6 +11,10 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — Anthropic buffered stop reason
+
+- Buffered `Chat` responses no longer drop the normalized provider stop reason.
+
 ### Added — MiniMax Messages adapter
 
 - `model.NewMiniMaxChatModel` supports direct text/tool calls, adaptive thinking,
