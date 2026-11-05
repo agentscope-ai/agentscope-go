@@ -102,10 +102,9 @@ func AnthropicHarness() Harness {
 		ExpectUsage:       &model.ChatUsage{InputTokens: 10, OutputTokens: 5, CacheCreationInputTokens: 2, CacheInputTokens: 3},
 		ExpectStreamText:  "hello contract",
 		ExpectStreamUsage: &model.ChatUsage{InputTokens: 8, OutputTokens: 4},
-		// MaxTokensKey intentionally unset: the Anthropic adapter always sends
-		// its configured default max_tokens and does not yet apply
-		// model.WithMaxTokens per call (a separate gap from agentscope-go#8,
-		// which covers the shared OpenAI-compatible request struct).
+		// MaxTokensKey is unset because the generic contract expects omission
+		// without a per-call limit. Anthropic requires a configured/default
+		// max_tokens instead; its overrides are covered by model wire tests.
 		DisableThinkingCheck: func(t *testing.T, body []byte) {
 			requireContains(t, body, `"thinking":{"type":"disabled"}`, "anthropic disable-thinking wire format")
 		},

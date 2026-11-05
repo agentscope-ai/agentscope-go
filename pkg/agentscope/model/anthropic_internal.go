@@ -21,14 +21,26 @@ func baseAnthropicRequest(model string, maxTokens int, msgs []*message.Msg, opts
 	return r
 }
 
-func (m *AnthropicChatModel) request(msgs []*message.Msg, opts *CallOptions) *anthropicRequest {
+func (m *AnthropicChatModel) request(msgs []*message.Msg, opts *CallOptions) (*anthropicRequest, error) {
 	r := baseAnthropicRequest(m.model, m.maxOutputTok, msgs, opts)
+	if opts.MaxTokens != nil {
+		if *opts.MaxTokens <= 0 {
+			return nil, fmt.Errorf("anthropic: max_tokens must be positive")
+		}
+		r.MaxTokens = *opts.MaxTokens
+	}
 	if opts.ThinkingEnable != nil && *opts.ThinkingEnable {
 		budget := r.MaxTokens / 2
 		if opts.ThinkingBudget != nil && *opts.ThinkingBudget > 0 {
 			budget = *opts.ThinkingBudget
+		} else if opts.MaxTokens != nil && budget < 1024 {
+			// Automatic manual-thinking budgets must fit the API minimum.
+			budget = 1024
 		}
 		if budget >= r.MaxTokens {
+			if opts.MaxTokens != nil {
+				return nil, fmt.Errorf("anthropic: thinking budget must be less than the per-call max_tokens limit")
+			}
 			r.MaxTokens = budget + 1024
 		}
 		r.Thinking = &anthropicThinking{Type: "enabled", BudgetTokens: budget}
@@ -37,7 +49,7 @@ func (m *AnthropicChatModel) request(msgs []*message.Msg, opts *CallOptions) *an
 	}
 	system, _ := r.System.(string)
 	r.System, r.Tools = m.applyPromptCaching(system, r.Tools)
-	return r
+	return r, nil
 }
 
 // parseAnthropicResponse retains the original Anthropic response semantics.
