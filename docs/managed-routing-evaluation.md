@@ -146,6 +146,31 @@ With a complete plan and credentials:
 go run ./examples/managed_routing_eval -live -config /absolute/path/live-plan.json > /tmp/routing-live.json
 ```
 
+To use a local System One classifier instead of hosted Jev, opt in with the
+same [local overrides](jev.md#local-system-one-configuration-w0):
+
+```bash
+SYSTEMONE_LOCAL_ENDPOINT=http://127.0.0.1:8080/v1/systemone \
+  SYSTEMONE_LOCAL_MODEL=YOUR_EXACT_SERVED_MODEL_NAME \
+  go run ./examples/managed_routing_eval -live -config /absolute/path/live-plan.json > /tmp/routing-live.json
+```
+
+These variables override only `Jev.Endpoint` and `Jev.Model`; the effective values
+are recorded in the report's experiment plan. The optional
+`SYSTEMONE_LOCAL_API_KEY` defaults to `local-systemone`, and hosted credentials
+are never reused for the local classifier. Keys are not written to the plan.
+The same overrides apply to `TestLiveExperiment` below. Offline mode ignores
+them and sends no requests to that destination. The original hosted validation
+remains the default with all `SYSTEMONE_LOCAL_*` variables unset.
+
+Generation candidates still require HTTPS destinations, credentials, pinned
+version evidence, certified context bounds and explicit evaluation isolation;
+the local override does not enable local generation or qualify a deployment.
+The router's Choice question has four options, satisfying Piccolo's minimum of
+two. The exact served model name and non-empty key requirements are documented
+in the linked guide. This prepares W1; local fixtures do not establish real
+Piccolo compatibility or quality.
+
 This makes billable classification and generation requests. The example permits
 three attempts per task (classification plus generation/fallback), one classifier
 attempt, ten-second task/arrival deadlines, 4096-byte requests, 128 output tokens,
