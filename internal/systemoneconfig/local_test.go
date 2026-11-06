@@ -18,6 +18,8 @@ func TestLocal(t *testing.T) {
 		{name: "key alone", key: "fixture-key", wantErr: true},
 		{name: "remote", endpoint: "http://example.com/v1/systemone", model: "Piccolo", wantErr: true},
 		{name: "remote TLS", endpoint: "https://example.com/v1/systemone", model: "Piccolo", wantErr: true},
+		{name: "private ipv4", endpoint: "http://192.168.1.1:8080/v1/systemone", model: "Piccolo", wantErr: true},
+		{name: "link-local metadata", endpoint: "http://169.254.169.254/v1/systemone", model: "Piccolo", wantErr: true},
 		{name: "lookalike", endpoint: "http://localhost.example.com/v1/systemone", model: "Piccolo", wantErr: true},
 		{name: "userinfo", endpoint: "http://user@localhost/v1/systemone", model: "Piccolo", wantErr: true},
 		{name: "query", endpoint: "http://localhost/v1/systemone?x=y", model: "Piccolo", wantErr: true},
