@@ -369,7 +369,7 @@ func processAnthropicStreamWithPolicy(ctx context.Context, sseCh <-chan httpx.SS
 		outputTokens             int
 		cacheCreationInputTokens int
 		cacheInputTokens         int
-		accBlocks                []anthropicAccBlock
+		accBlocks                []*anthropicAccBlock
 		sawMessageStop           bool
 		finishReason             string
 		// streamErr carries an Anthropic "error" SSE event, which arrives
@@ -455,21 +455,24 @@ func processAnthropicStreamWithPolicy(ctx context.Context, sseCh <-chan httpx.SS
 					streamErr = fmt.Errorf("anthropic: invalid content block start index %d", cbs.Index)
 					break
 				}
-				block := anthropicAccBlock{blockType: cbs.ContentBlock.Type, id: cbs.ContentBlock.ID, name: cbs.ContentBlock.Name, text: cbs.ContentBlock.Text, signature: cbs.ContentBlock.Signature}
+				block := &anthropicAccBlock{blockType: cbs.ContentBlock.Type, id: cbs.ContentBlock.ID, name: cbs.ContentBlock.Name}
+				initialText := cbs.ContentBlock.Text
+				block.signature.WriteString(cbs.ContentBlock.Signature)
 				var initial []message.ContentBlock
 				switch block.blockType {
 				case "text":
-					if block.text != "" {
-						initial = []message.ContentBlock{message.TextBlock{Type: "text", Text: block.text}}
+					if initialText != "" {
+						initial = []message.ContentBlock{message.TextBlock{Type: "text", Text: initialText}}
 					}
 				case "thinking":
-					block.text = cbs.ContentBlock.Thinking
-					if block.text != "" {
-						initial = []message.ContentBlock{message.ThinkingBlock{Type: "thinking", Thinking: block.text}}
+					initialText = cbs.ContentBlock.Thinking
+					if initialText != "" {
+						initial = []message.ContentBlock{message.ThinkingBlock{Type: "thinking", Thinking: initialText}}
 					}
 				case "tool_use":
-					block.text = string(cbs.ContentBlock.Input)
+					initialText = string(cbs.ContentBlock.Input)
 				}
+				block.text.WriteString(initialText)
 				accBlocks = append(accBlocks, block)
 				if len(initial) > 0 {
 					select {
@@ -496,7 +499,7 @@ func processAnthropicStreamWithPolicy(ctx context.Context, sseCh <-chan httpx.SS
 					}
 					switch cbd.Delta.Type {
 					case "text_delta":
-						accBlocks[idx].text += cbd.Delta.Text
+						accBlocks[idx].text.WriteString(cbd.Delta.Text)
 						// Emit delta
 						resp := ChatResponse{
 							Content: []message.ContentBlock{message.TextBlock{
@@ -513,7 +516,7 @@ func processAnthropicStreamWithPolicy(ctx context.Context, sseCh <-chan httpx.SS
 							return
 						}
 					case "thinking_delta":
-						accBlocks[idx].text += cbd.Delta.Thinking
+						accBlocks[idx].text.WriteString(cbd.Delta.Thinking)
 						resp := ChatResponse{
 							Content: []message.ContentBlock{message.ThinkingBlock{
 								Type:     "thinking",
@@ -530,12 +533,12 @@ func processAnthropicStreamWithPolicy(ctx context.Context, sseCh <-chan httpx.SS
 						}
 					case "input_json_delta":
 						if !accBlocks[idx].inputStarted {
-							accBlocks[idx].text = ""
+							accBlocks[idx].text.Reset()
 							accBlocks[idx].inputStarted = true
 						}
-						accBlocks[idx].text += cbd.Delta.PartialJSON
+						accBlocks[idx].text.WriteString(cbd.Delta.PartialJSON)
 					case "signature_delta":
-						accBlocks[idx].signature += cbd.Delta.Signature
+						accBlocks[idx].signature.WriteString(cbd.Delta.Signature)
 					}
 				}
 			}
@@ -625,16 +628,16 @@ func processAnthropicStreamWithPolicy(ctx context.Context, sseCh <-chan httpx.SS
 			finalContent = append(finalContent, message.TextBlock{
 				Type: "text",
 				ID:   fmt.Sprintf("text_%s", responseID),
-				Text: ab.text,
+				Text: ab.text.String(),
 			})
 		case "thinking":
 			tb := message.ThinkingBlock{
 				Type:     "thinking",
 				ID:       fmt.Sprintf("thinking_%s", responseID),
-				Thinking: ab.text,
+				Thinking: ab.text.String(),
 			}
-			if ab.signature != "" {
-				tb.Extra = map[string]any{"signature": ab.signature}
+			if ab.signature.Len() != 0 {
+				tb.Extra = map[string]any{"signature": ab.signature.String()}
 			}
 			finalContent = append(finalContent, tb)
 		case "tool_use":
@@ -642,7 +645,7 @@ func processAnthropicStreamWithPolicy(ctx context.Context, sseCh <-chan httpx.SS
 				Type:  "tool_call",
 				ID:    ab.id,
 				Name:  ab.name,
-				Input: ab.text,
+				Input: ab.text.String(),
 				State: message.ToolCallPending,
 			})
 		}
@@ -695,12 +698,14 @@ type anthropicStreamError struct {
 	} `json:"error"`
 }
 
+// Store accumulators by pointer: a non-zero strings.Builder must not be copied
+// when the block slice grows or when assembling the final response.
 type anthropicAccBlock struct {
 	blockType    string // "text", "thinking", "tool_use"
 	id           string
 	name         string
-	text         string
-	signature    string
+	text         strings.Builder
+	signature    strings.Builder
 	closed       bool
 	inputStarted bool
 }
