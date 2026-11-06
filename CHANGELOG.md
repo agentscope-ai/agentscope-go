@@ -11,6 +11,13 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Changed — Anthropic stream accumulation
+
+- Long, fragmented Anthropic-compatible streams (the parser is shared with MiniMax)
+  now accumulate text, thinking, tool input and signatures through per-block buffers
+  instead of repeated string copying. Incremental deltas and final responses are
+  unchanged.
+
 ### Fixed — Anthropic buffered stop reason
 
 - Buffered `Chat` responses no longer drop the normalized provider stop reason.
