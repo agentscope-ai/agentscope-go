@@ -121,7 +121,8 @@ go test -race -count=1 ./pkg/agentscope/classifier/jev
 Offline tests use local HTTP fixtures or custom transports. They establish wire
 conversion and failure behavior, not real service quality, cost or availability.
 The live contract test is explicitly opt-in, sends only synthetic test data to
-the default TypeSafe endpoint, and performs one potentially billable request:
+the default TypeSafe endpoint unless the local override below is enabled, and
+performs one potentially billable request:
 
 ```bash
 JEV_LIVE_TEST=1 JEV_LIVE_MODEL=jev-1.13.0 \
@@ -132,6 +133,45 @@ Set `TYPESAFE_API_KEY` securely in the environment first. Without opt-in or a ke
 the test reports **SKIP**, not live verification. It requires a fixed three-part
 model version, verifies the returned version, and logs requested/returned model
 identities. It checks the protocol, not semantic answer quality or savings.
+
+### Local System One configuration (W0)
+
+The same live contract test can target a loopback System One server through
+explicit environment overrides. Both `SYSTEMONE_LOCAL_ENDPOINT` (the full POST
+URL) and `SYSTEMONE_LOCAL_MODEL` (the exact served name) are required together:
+
+```bash
+JEV_LIVE_TEST=1 \
+  SYSTEMONE_LOCAL_ENDPOINT=http://127.0.0.1:8080/v1/systemone \
+  SYSTEMONE_LOCAL_MODEL=YOUR_EXACT_SERVED_MODEL_NAME \
+  go test -v -count=1 -run '^TestLiveContract$' ./pkg/agentscope/classifier/jev
+```
+
+Only HTTP(S) URLs using `localhost` or a loopback IP (including IPv6 `::1`)
+are accepted by this verification override. Userinfo, query strings and fragments
+are rejected. This URL check does not provide network isolation. An incomplete
+or invalid override fails before dispatch. With all `SYSTEMONE_LOCAL_*` variables
+unset, the hosted endpoint, pinned `JEV_LIVE_MODEL` validation and missing-key
+SKIP behavior above are unchanged. These variables configure the verification
+entry points; `jev.New` itself still does not read the environment.
+
+The local path uses `SYSTEMONE_LOCAL_API_KEY` when set, or the dummy value
+`local-systemone` otherwise, because `jev.New` requires a non-empty key even
+for unauthenticated servers. It never falls back to `TYPESAFE_API_KEY`. Treat
+this optional key as a secret and supply it securely through the environment.
+
+For [Piccolo](https://github.com/agentscope-ai/Piccolo), the proposed text
+integration reuses `/v1/systemone`; it is not a `ChatModel` adapter. The server
+must already be running. Match the served model name exactly: SGLang returns
+HTTP 400 on a mismatch. Choice questions must have at least two candidates
+(Piccolo rejects one with HTTP 422, although Jev accepts one); the contract
+fixture uses two. These are compatibility notes from
+[RFC #109](https://github.com/agentscope-ai/agentscope-go/issues/109), not a
+live verification result. W0's HTTP fixtures verify configuration and model-name
+propagation only. W1 must verify the actual Piccolo runtime/protocol; no live
+Piccolo compatibility, quality, latency or cost result is claimed here. The
+vision `/v1/decisions` endpoint and permission/compaction integration are outside
+this configuration change.
 
 ## Python mapping
 

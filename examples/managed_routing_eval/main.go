@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/classifier"
-	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/classifier/jev"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/managedtask"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/replay/evalkit"
 )
@@ -63,16 +62,9 @@ func run(ctx context.Context, live bool, path, split, revision string, w io.Writ
 	}
 	var cl classifier.DispatchClassifier
 	if live {
-		if err := validateLive(&p, version, samples); err != nil {
-			return err
-		}
-		key := os.Getenv("TYPESAFE_API_KEY")
-		if key == "" {
-			return fmt.Errorf("TYPESAFE_API_KEY is required for live execution")
-		}
-		cl, err = jev.New(jev.Config{APIKey: key, Model: p.Jev.Model, Endpoint: p.Jev.Endpoint})
+		cl, err = liveClassifier(&p, version, samples, os.Getenv)
 		if err != nil {
-			return fmt.Errorf("invalid Jev client configuration")
+			return err
 		}
 	} else {
 		baseline := fixtureServer(samples, false)

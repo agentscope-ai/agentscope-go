@@ -2,11 +2,13 @@ package jev_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"regexp"
 	"testing"
 	"time"
 
+	"github.com/agentscope-ai/agentscope-go/v2/internal/systemoneconfig"
 	c "github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/classifier"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/classifier/jev"
 )
@@ -16,15 +18,15 @@ func TestLiveContract(t *testing.T) {
 	if os.Getenv("JEV_LIVE_TEST") != "1" {
 		t.Skip("set JEV_LIVE_TEST=1 to enable a real, billable TypeSafe request")
 	}
-	key := os.Getenv("TYPESAFE_API_KEY")
-	if key == "" {
+	cfg, err := liveContractConfig(os.Getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg == nil {
 		t.Skip("TYPESAFE_API_KEY is missing; live contract not tested")
 	}
-	model := os.Getenv("JEV_LIVE_MODEL")
-	if !regexp.MustCompile(`^jev-[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(model) {
-		t.Fatal("JEV_LIVE_MODEL must be a pinned version, for example jev-1.13.0")
-	}
-	cl, err := jev.New(jev.Config{APIKey: key, Model: model})
+	model := cfg.Model
+	cl, err := jev.New(*cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,4 +43,22 @@ func TestLiveContract(t *testing.T) {
 		t.Fatal("unexpected attempt count or resolved model")
 	}
 	t.Logf("live protocol verified: requested=%s returned=%s; no quality or cost claim", model, out.Model)
+}
+
+// The default branch retains the hosted key/validation order. Local overrides
+// are read only after TestLiveContract's explicit live opt-in.
+func liveContractConfig(getenv func(string) string) (*jev.Config, error) {
+	cfg, err := systemoneconfig.Local(getenv)
+	if err != nil || cfg != nil {
+		return cfg, err
+	}
+	key := getenv("TYPESAFE_API_KEY")
+	if key == "" {
+		return nil, nil
+	}
+	model := getenv("JEV_LIVE_MODEL")
+	if !regexp.MustCompile(`^jev-[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(model) {
+		return nil, fmt.Errorf("JEV_LIVE_MODEL must be a pinned version, for example jev-1.13.0")
+	}
+	return &jev.Config{APIKey: key, Model: model}, nil
 }

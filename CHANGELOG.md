@@ -20,6 +20,14 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 - Per-call `WithMaxTokens` is now honored by `Chat` and `ChatStream`; thinking
   budgets conflicting with an explicit per-call cap are rejected before dispatch.
 
+### Added — opt-in local System One verification
+
+- Jev's live contract test and the managed routing evaluation example accept
+  explicit loopback endpoint/served-model overrides via `SYSTEMONE_LOCAL_*`.
+  Hosted defaults and generation endpoint validation remain unchanged. Local
+  HTTP fixtures cover configuration plumbing; live Piccolo verification remains
+  separate. See [local verification](docs/jev.md#local-system-one-configuration-w0).
+
 ### Added — MiniMax Messages adapter
 
 - `model.NewMiniMaxChatModel` supports direct text/tool calls, adaptive thinking,

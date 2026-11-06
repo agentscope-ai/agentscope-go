@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agentscope-ai/agentscope-go/v2/internal/systemoneconfig"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/classifier"
+	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/classifier/jev"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/managedtask"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/model"
 )
@@ -43,14 +45,21 @@ type experimentPlan struct {
 }
 
 func validateLive(p *experimentPlan, version string, samples []sample) error {
+	return validatePlan(p, version, samples, false)
+}
+
+func validatePlan(p *experimentPlan, version string, samples []sample, local bool) error {
 	if p.Version != 1 || p.SourceRevision == "" || p.DatasetVersion != version || p.RubricVersion != "managed-text-rubric-v1" || p.SampleSize != len(samples) || !p.ConfirmEvaluationIsolation {
 		return fmt.Errorf("live plan requires version/revision/dataset/rubric/sample size and explicit evaluation isolation")
 	}
 	if math.IsNaN(p.MaxQualityLoss) || p.MaxQualityLoss < 0 || p.MaxQualityLoss > 1 || p.MaxP95LatencyMS <= 0 || int64(p.MaxP95LatencyMS) > math.MaxInt64/int64(time.Millisecond) || !(p.Jev.MinConfidence > 0 && p.Jev.MinConfidence <= 1) {
 		return fmt.Errorf("live plan requires quality, latency and classifier margins")
 	}
-	if len(p.Candidates) < 2 || !regexp.MustCompile(`^jev-[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(p.Jev.Model) || !httpsURL(p.Jev.Endpoint) {
+	if !local && (len(p.Candidates) < 2 || !regexp.MustCompile(`^jev-[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(p.Jev.Model) || !httpsURL(p.Jev.Endpoint)) {
 		return fmt.Errorf("live plan requires at least two candidates and explicit HTTPS Jev destination/pinned version")
+	}
+	if local && len(p.Candidates) < 2 {
+		return fmt.Errorf("live plan requires at least two candidates")
 	}
 	ids := map[string]bool{}
 	for _, c := range p.Candidates {
@@ -202,4 +211,32 @@ func experimentLimits() managedtask.Limits {
 	l.MaxOutputTokens = 128
 	l.TaskTimeout = 10 * time.Second
 	return l
+}
+
+// liveClassifier is used only after -live. Effective destination/model are
+// recorded in the plan; credentials are never stored in the report.
+func liveClassifier(p *experimentPlan, version string, samples []sample, getenv func(string) string) (*jev.Client, error) {
+	local, err := systemoneconfig.Local(getenv)
+	if err != nil {
+		return nil, err
+	}
+	if local != nil {
+		p.Jev.Endpoint, p.Jev.Model = local.Endpoint, local.Model
+		if err := validatePlan(p, version, samples, true); err != nil {
+			return nil, err
+		}
+		return jev.New(*local)
+	}
+	if err := validateLive(p, version, samples); err != nil {
+		return nil, err
+	}
+	key := getenv("TYPESAFE_API_KEY")
+	if key == "" {
+		return nil, fmt.Errorf("TYPESAFE_API_KEY is required for live execution")
+	}
+	cl, err := jev.New(jev.Config{APIKey: key, Model: p.Jev.Model, Endpoint: p.Jev.Endpoint})
+	if err != nil {
+		return nil, fmt.Errorf("invalid Jev client configuration")
+	}
+	return cl, nil
 }
