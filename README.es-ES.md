@@ -171,6 +171,7 @@ necesarios.
 | [embodied_demo](examples/embodied_demo/) | Observación, planificación local/nube y ciclo de acciones simuladas en un dispositivo |
 | [managed_task](examples/managed_task/) | Ejecución de texto con modelo fijo y servidor HTTP local de prueba |
 | [classifier](examples/classifier/) | Clasificación tipada con resultados simulados y registro de intentos |
+| [piccolo](examples/piccolo/) | Decisiones de texto con Piccolo local, servidor simulado y modo real opcional |
 | [model_call](examples/model_call/) | Streaming del modelo, herramientas y salida estructurada |
 | [volcengine](examples/volcengine/) | Streaming directo de Ark con autenticación por clave de API |
 | [minimax](examples/minimax/) | Herramientas de MiniMax con razonamiento conservado y respuesta posterior en streaming |
