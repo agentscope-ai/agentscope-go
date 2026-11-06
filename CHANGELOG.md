@@ -11,6 +11,13 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Added — local Piccolo example
+
+- `examples/piccolo` demonstrates Binary, Choice and Score decisions through the
+  existing Jev adapter, using synthetic HTTP fixtures by default and an explicit
+  local live opt-in. The [guide](docs/piccolo.md) pins the W1-tested CPU setup and
+  records runtime-specific HTTP behavior and the observed Metal startup failure.
+
 ### Changed — Anthropic stream accumulation
 
 - Long, fragmented Anthropic-compatible streams (the parser is shared with MiniMax)
