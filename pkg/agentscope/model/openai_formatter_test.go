@@ -12,7 +12,7 @@ import (
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/message"
 )
 
-// OpenAIConfig.Formatter is honoured: the DeepSeek formatter replays ThinkingBlock as reasoning_content.
+// OpenAIConfig.Formatter is honored: the DeepSeek formatter replays ThinkingBlock as reasoning_content.
 func TestOpenAIFormatterInjectionReplaysReasoning(t *testing.T) {
 	var got map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +65,7 @@ func TestOpenAIFormatterInjectionReplaysReasoning(t *testing.T) {
 	}
 }
 
-// Without Formatter the previous behaviour is kept: no reasoning_content is sent, so providers that do not understand the field are unaffected.
+// Without Formatter the previous behavior is kept: no reasoning_content is sent, so providers that do not understand the field are unaffected.
 func TestOpenAIDefaultFormatterOmitsReasoning(t *testing.T) {
 	var got map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
