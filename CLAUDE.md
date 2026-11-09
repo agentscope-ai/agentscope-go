@@ -327,7 +327,8 @@ overview head and next-steps tail survive.
 moves summarization latency off the reply's critical path: crossing the lower
 ratio starts a background generation from a context snapshot
 ([precompress.go](pkg/agentscope/agent/precompress.go)), and the hard trigger
-applies a still-valid result without a blocking model call. Validity is
+applies a still-valid result without a blocking model call (and still
+compresses synchronously when the context stays at the threshold). Validity is
 structural — same base summary plus the snapshot's boundary message identity
 — so checkpoint rollbacks and interleaved compactions safely discard it; the
 reserved suffix keeps the LIVE message versions so in-place truncation from

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 
@@ -119,6 +120,13 @@ func (a *UnifiedAgent) runPrecompress(ctx context.Context, cfg *ContextConfig, c
 	newSummary, err := formatSummary(cfg.SummaryTemplate, result)
 	if err != nil {
 		logrus.WithError(err).WithField("agent", a.name).Warn("background pre-compression formatting failed")
+		return
+	}
+	// A blank summary (a custom template over empty fields) would empty the
+	// history if applied; it is discarded like a failed generation, so the
+	// next round may try again and the hard trigger compresses synchronously.
+	if strings.TrimSpace(newSummary) == "" {
+		logrus.WithField("agent", a.name).Warn("background pre-compression produced an empty summary")
 		return
 	}
 	if budget := summaryMaxTokens(cfg, ctxSize); budget > 0 {

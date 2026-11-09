@@ -30,14 +30,23 @@ crosses `ContextSize*PrecompressRatio`, the agent generates the compaction
 summary in a background goroutine from a context snapshot. When the hard
 trigger later fires — or the host calls `Compact` — a still-valid result
 applies instantly; stale results (checkpoint rollback, an interleaved
-compaction) are discarded and the synchronous path runs as before.
+compaction) are discarded and the synchronous path runs as before. At the
+automatic trigger, and when the `compress_context` tool compresses at its
+lower threshold, the synchronous path also runs when the context is still at
+that threshold after the result went in. Forced compactions (`Compact` and
+the compaction of context-overflow recovery) apply the result alone.
 
 The summary covers the snapshot prefix: messages appended since the snapshot
 stay raw, so the window refills somewhat sooner after an applied
 pre-compression than after a synchronous one. Background generations burn
 tokens and are accounted like synchronous ones (per-reply usage and a
-model-call-end event). A failed background generation is discarded without
-retry — the synchronous path owns retries and the truncation fallback.
+model-call-end event). A failed background generation, or one that formats
+to a blank summary, is discarded without an immediate retry — the
+synchronous path owns retries and the truncation fallback. Each later round
+past the precompress ratio starts a new generation, so a model that keeps
+failing or returning blank fields costs one background call per round. The
+synchronous path does not reject a blank summary: such a model still ends
+with one at the trigger.
 Pre-compression is unavailable with `WithContentBlockCompaction`.
 
 ## Retention policy
