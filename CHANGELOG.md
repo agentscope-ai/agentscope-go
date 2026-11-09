@@ -11,6 +11,17 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — CI API compatibility gate
+
+- The `api-compat` workflow now fails pull requests on incompatible changes to
+  Stable-tier APIs; the pinned apidiff exits 0 when it reports them, so the check
+  had failed only on package-load errors (#118). A pull request fails only for
+  changes since the latest v2 tag that its base does not already have, unless
+  it carries the `breaking-change` label; pushes to `main` still only report.
+  Any apidiff failure now fails the run after every package is checked,
+  including labeled pull requests and pushes. The check runs locally with
+  `bash .github/scripts/api-compat.sh origin/main`.
+
 ### Changed — Anthropic stream accumulation
 
 - Long, fragmented Anthropic-compatible streams (the parser is shared with MiniMax)
