@@ -25,7 +25,47 @@ Additionally, `ListTools()` lets middleware provide extra tools to the agent.
 
 ### OnCheckPermission
 
-Defines a wrapper for permission checks. The current UnifiedAgent and loop bridge call the permission engine directly, so adding this middleware with `WithMiddlewares` alone does not intercept their checks. An executor integration must explicitly invoke `middleware.BuildCheckPermissionChain`. The wrapper below is suitable for that integration:
+`UnifiedAgent.ReplyStream` now invokes this chain for newly generated, sequential,
+non-external tool calls when a permission engine is configured. Fresh
+`Conversation.Submit` turns use that same path. The existing engine is the core
+handler: `next(ctx, input)` performs deterministic evaluation, and the hook runs
+outside the engine lock. With middleware registered as outer then inner, the
+order is outer-before, inner-before, engine, inner-after, outer-after.
+
+**Behavior change:** a host's previously registered `OnCheckPermission` hook now
+runs on these paths, where it was previously ignored. `BaseMiddleware` remains
+pass-through, and without middleware the engine's behavior is unchanged.
+Middleware is trusted host policy: it can short-circuit or replace a decision;
+this is not a classifier approval policy and adds no model calls, thresholds,
+automatic approval rules or durable grants. A future classifier reviewer must
+separately preserve explicit denies, forced asks and tool safety decisions.
+
+The initial scope deliberately excludes buffered `Reply`, the whole
+`ResumeReplyStream` invocation (including newly generated calls), restored
+pending/allowed/asking/submitted calls, external tools, concurrent-dispatch batches,
+and loop-bridge/direct orchestrator calls. They retain their existing permission
+behavior with no automatic invocation of this hook. A concurrency-safe single
+call still executes sequentially and is eligible, including with the bounded
+dispatch option; concurrent-dispatch batches remain excluded, even a multi-call bounded batch
+with worker width one. Batch/HITL preflight
+checks are engine-only and do not invoke middleware. Use `ReplyStream` and
+consume confirmation events when a hook can return Ask; an unconsumed Ask is
+not an approval.
+
+Hook inputs are detached JSON snapshots of the invocation. Parsed `ToolInput`
+numbers retain the usual `ParseInput` float64 representation; opaque call
+metadata uses `json.Number` to preserve large integers. Non-JSON metadata fails
+closed. They are read-only:
+rewriting arguments, call identity or metadata, or passing a different invocation
+to `next`, is rejected. The core always checks the original tool and arguments.
+`Decision.UpdatedInput` is not applied by this integration, preserving its existing
+behavior; use an explicitly designed execution layer for input transformations.
+A hook error, nil decision, unknown behavior or parent cancellation fails closed
+before tool execution. Ask and Passthrough retain the existing confirmation path.
+The hook may perform bounded context-aware work, but must return on cancellation;
+the framework cannot forcibly stop a host hook that ignores its context.
+
+An observation-only host middleware can delegate and inspect the result:
 
 ```go
 type AuditPermissionMiddleware struct {
@@ -57,7 +97,7 @@ OnCheckPermission(ctx context.Context, input *CheckPermissionInput, next CheckPe
 |-------|------|-------------|
 | `AgentName` | `string` | Name of the agent requesting permission |
 | `ToolCall` | `message.ToolCallBlock` | The tool call being checked |
-| `ToolInput` | `map[string]any` | Parsed input arguments |
+| `ToolInput` | `map[string]any` | Read-only snapshot of parsed input arguments |
 
 ### OnReasoning
 

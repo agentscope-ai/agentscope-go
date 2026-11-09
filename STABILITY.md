@@ -87,6 +87,11 @@ ports and deferred work, including realtime/TUI, SOP and model-context wiring.
 
 ## Unreleased execution and retrieval behavior
 
+- **Permission middleware behavior change:** existing host `OnCheckPermission`
+  implementations now run on eligible fresh interactive UnifiedAgent tool calls.
+  Defaults without middleware remain unchanged. See [middleware coverage](docs/middleware.md#oncheckpermission)
+  for the exact included/excluded paths, read-only input contract and failure behavior.
+
 - Experimental `service.NewScoped` requires both an owner-scope resolver and a
   context-aware factory; `New`, `Config` and `AgentFactory` remain compatible.
   Owner metadata and pending confirmations are in memory only. Host
@@ -667,7 +672,7 @@ work; revisit only with a concrete portability or contract argument.
 | Codex mechanism | Why agentscope-go does not adopt it |
 |---|---|
 | OS-level command sandbox (seatbelt/Landlock) | A library cannot confine its host process, and per-process syscall policy is a deployment concern. Isolation lives at the layers a library can own: the permission engine gates every tool call (conjunctive subcommand matching, persistent learned rules), `LocalWorkspace`/`BubblewrapWorkspace` provide path jails and container-grade isolation, and MCP subprocesses start with a minimal environment. Hosts needing kernel confinement should run the agent process itself inside a container or seatbelt wrapper. |
-| Guardian (secondary-model action review) | A fixed guardian policy would hard-code model, prompt and UX choices that hosts legitimately differ on. The interception point already exists: a host middleware implementing `OnActing`/`OnCheckPermission` can route any tool call through its own reviewer model before returning a decision. |
+| Guardian (secondary-model action review) | A fixed guardian policy would hard-code model, prompt and UX choices that hosts legitimately differ on. Host policy remains optional. `OnActing` wraps execution; `OnCheckPermission` is wired only for fresh sequential non-external `ReplyStream`/Conversation calls with an engine. Buffered Reply, resume/recovery, external tools, concurrent-dispatch batches and loop/orchestrator permission paths are not covered. See [middleware coverage](docs/middleware.md#oncheckpermission). This hook wiring supplies no classifier policy or automatic approvals. |
 | Blocking config-time hooks | Constructors are pure and panic only on programmer error (see "Construction contract"); `LoadProjectConfig` reads project instruction and settings files without executing anything. Running host commands at construction or config load would invert that contract and put unobservable side effects outside the permission engine. Lifecycle interception belongs to middleware, which runs inside the reply loop with event visibility. |
 
 ## Open hardening work

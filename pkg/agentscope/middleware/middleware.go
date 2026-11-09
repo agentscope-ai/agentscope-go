@@ -59,7 +59,9 @@ type CompressInput struct {
 	ReserveRatio float64
 }
 
-// CheckPermissionInput is passed to OnCheckPermission hooks.
+// CheckPermissionInput is passed to OnCheckPermission hooks. In the UnifiedAgent
+// integration it is a detached, read-only JSON snapshot; invocation rewrites
+// are rejected. See docs/middleware.md for execution-path coverage.
 type CheckPermissionInput struct {
 	AgentName string
 	ToolCall  message.ToolCallBlock
@@ -105,7 +107,10 @@ type Middleware interface {
 	// OnCompressContext wraps context compression.
 	OnCompressContext(ctx context.Context, input CompressInput, next CompressHandler) error
 
-	// OnCheckPermission wraps the permission check for a tool call.
+	// OnCheckPermission wraps eligible fresh sequential interactive UnifiedAgent
+	// permission checks when an engine is configured. Other execution paths do
+	// not invoke it automatically; see docs/middleware.md. Middleware is trusted
+	// host policy and may short-circuit or replace a decision.
 	OnCheckPermission(ctx context.Context, input *CheckPermissionInput, next CheckPermissionHandler) (*permission.Decision, error)
 
 	// ListTools returns additional tools provided by this middleware.

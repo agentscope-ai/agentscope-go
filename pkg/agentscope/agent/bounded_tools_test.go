@@ -520,7 +520,7 @@ func TestBoundedDispatchEmptyAndAlreadyCanceled(t *testing.T) {
 	f.a.executeBoundedToolStep(ctx, nil, "canceled", calls, func(context.Context, *middleware.ActingInput) (*tool.ToolResponse, error) {
 		t.Error("already canceled call reached acting")
 		return nil, nil
-	}, loop.NewHookRunner(f.hook), protocol.StateAct, 0)
+	}, loop.NewHookRunner(f.hook), protocol.StateAct, 0, false)
 	last := f.a.state.Context[len(f.a.state.Context)-1]
 	results := last.GetContentBlocks(message.ContentBlockToolResult)
 	if len(results) != 1 || results[0].(message.ToolResultBlock).State != message.ToolResultInterrupted || f.hook.before.Load() != 0 {

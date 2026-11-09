@@ -116,9 +116,13 @@ have their own handler contracts. In particular:
 - `OnReply` may consume a non-interrupted `ReplyEndEvent` to request another
   round. Interrupted ends must propagate. Forward `CustomEvent` values whose
   names start with `agentscope.`; these carry internal round-boundary signals.
-- `OnCheckPermission` and its chain builder exist, but the current unified-agent
-  and loop bridge paths do not automatically invoke that middleware hook.
-  Follow the actual permission-engine calls when changing enforcement.
+- `OnCheckPermission` runs around engine checks for newly generated sequential
+  non-external calls in fresh `ReplyStream`/Conversation turns with an engine.
+  Buffered `Reply`, resumed/restored calls, external tools, concurrent-dispatch
+  batches, preflight and loop/orchestrator checks remain engine-only. Eligibility
+  is passed explicitly, not inferred from middleware context. Hook inputs are
+  read-only detached snapshots; nil/unknown decisions, errors and cancellation
+  fail closed. See [the coverage and behavior-change note](docs/middleware.md#oncheckpermission).
 - The loop bridge cannot carry interactive approval or external-tool events;
   use `UnifiedAgent.ReplyStream` for that workflow. Do not silently approve a
   tool because an execution path cannot request confirmation.

@@ -42,7 +42,7 @@ const undispatchedToolResult = "Tool call was not dispatched because the reply c
 func (a *UnifiedAgent) executeBoundedToolStep(
 	ctx context.Context, ch chan<- event.Event, replyID string,
 	calls []message.ToolCallBlock, acting middleware.ActingHandler,
-	hooks *loop.HookRunner, state protocol.LoopState, iter int,
+	hooks *loop.HookRunner, state protocol.LoopState, iter int, permissionHooks bool,
 ) {
 	if ctx.Err() != nil {
 		a.recordUndispatchedCalls(ctx, ch, replyID, calls)
@@ -64,7 +64,7 @@ func (a *UnifiedAgent) executeBoundedToolStep(
 			}
 			a.recordToolCalls(1)
 			hooks.BeforeToolExec(state, iter, tc.Name)
-			a.executeAndRecord(ctx, ch, replyID, &tc, acting)
+			a.executeAndRecord(ctx, ch, replyID, &tc, acting, permissionHooks)
 			hooks.AfterToolExec(state, iter, tc.Name, nil)
 		}
 	}
@@ -92,7 +92,7 @@ func (a *UnifiedAgent) executeBoundedBatch(
 				// callback before execution without running hooks concurrently.
 				<-job.start
 				tc := calls[job.index]
-				outcome := a.executeToolCallWithPermission(ctx, nil, replyID, &tc, acting)
+				outcome := a.executeToolCallWithPermission(ctx, nil, replyID, &tc, acting, false)
 				results[job.index] = toolResult{index: job.index, state: outcome.state, text: outcome.text, extra: outcome.extra, metadata: outcome.metadata}
 			}
 		}()

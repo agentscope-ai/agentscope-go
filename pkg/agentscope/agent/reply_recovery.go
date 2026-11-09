@@ -37,7 +37,7 @@ func (a *UnifiedAgent) ResumeReplyStream(ctx context.Context) (<-chan event.Even
 	if !a.replyRecovery {
 		return nil, fmt.Errorf("agent: reply recovery is not enabled")
 	}
-	return a.replyStream(ctx, "", true)
+	return a.replyStream(ctx, "", true, false)
 }
 
 type recoveryKey struct{}

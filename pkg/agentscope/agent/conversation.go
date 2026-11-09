@@ -405,7 +405,7 @@ func (c *Conversation) runTurn(input string) {
 	c.turn = th
 	c.mu.Unlock()
 
-	ch, err := c.agent.replyStream(turnCtx, input, false)
+	ch, err := c.agent.replyStream(turnCtx, input, false, true)
 	if err != nil {
 		cancel()
 		c.mu.Lock()

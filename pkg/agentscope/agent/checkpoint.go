@@ -233,7 +233,7 @@ func (a *UnifiedAgent) repromptAwaitingCalls(ctx context.Context, ch chan<- even
 		// back, so force the allowed state first.
 		resultTC.State = message.ToolCallAllowed
 		a.replaceToolCallInContext(tc.ID, &resultTC)
-		a.executeAndRecord(ctx, ch, replyID, &resultTC, actingHandler)
+		a.executeAndRecord(ctx, ch, replyID, &resultTC, actingHandler, false)
 		handled = true
 	}
 
@@ -241,7 +241,7 @@ func (a *UnifiedAgent) repromptAwaitingCalls(ctx context.Context, ch chan<- even
 		tc := submitted[i]
 		// A restored call must honor the current toolkit, permissions and
 		// validators. Reuse normal recording and event assembly as well.
-		a.executeAndRecord(ctx, ch, replyID, &tc, actingHandler)
+		a.executeAndRecord(ctx, ch, replyID, &tc, actingHandler, false)
 		handled = true
 	}
 

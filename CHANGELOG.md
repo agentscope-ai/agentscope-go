@@ -11,6 +11,17 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — UnifiedAgent permission middleware wiring
+
+- **Behavior change:** registered `OnCheckPermission` hooks now wrap deterministic
+  engine checks for fresh sequential non-external `ReplyStream`/Conversation
+  tool calls. Previously these hooks were ignored. No-middleware defaults are
+  unchanged. Buffered Reply, resumed/restored work, external tools, concurrent-dispatch
+  batches and loop/orchestrator checks retain their prior behavior. Hook input
+  snapshots are read-only and errors, cancellation and invalid decisions prevent
+  execution. This adds no classifier or automatic-approval policy; see the
+  [coverage contract](docs/middleware.md#oncheckpermission).
+
 ### Changed — Anthropic stream accumulation
 
 - Long, fragmented Anthropic-compatible streams (the parser is shared with MiniMax)

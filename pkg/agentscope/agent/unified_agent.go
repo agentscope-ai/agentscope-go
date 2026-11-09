@@ -387,7 +387,7 @@ func (a *UnifiedAgent) Name() string { return a.name }
 // returning success, including when a terminal event was already received.
 // On cancellation the return message is nil; recorded partial state is retained.
 func (a *UnifiedAgent) Reply(ctx context.Context, input string) (*message.Msg, error) {
-	ch, err := a.ReplyStream(ctx, input)
+	ch, err := a.replyStream(ctx, input, false, false)
 	if err != nil {
 		return nil, err
 	}
@@ -433,10 +433,10 @@ func (a *UnifiedAgent) Reply(ctx context.Context, input string) (*message.Msg, e
 // abandoned stream wedges the forwarder and keeps the agent's in-flight
 // reply slot held, which also blocks NewConversation.
 func (a *UnifiedAgent) ReplyStream(ctx context.Context, input string) (<-chan event.Event, error) {
-	return a.replyStream(ctx, input, false)
+	return a.replyStream(ctx, input, false, true)
 }
 
-func (a *UnifiedAgent) replyStream(ctx context.Context, input string, resume bool) (<-chan event.Event, error) {
+func (a *UnifiedAgent) replyStream(ctx context.Context, input string, resume, permissionHooks bool) (<-chan event.Event, error) {
 	if input == "" && !resume {
 		return nil, fmt.Errorf("agent %s: empty input", a.name)
 	}
@@ -493,7 +493,7 @@ func (a *UnifiedAgent) replyStream(ctx context.Context, input string, resume boo
 		}
 		go func() {
 			defer release()
-			a.replyLoop(ctx, ri.UserInput, ch, verdict)
+			a.replyLoop(ctx, ri.UserInput, ch, verdict, permissionHooks && !resume)
 		}()
 		return ch
 	}
@@ -638,7 +638,7 @@ func (a *UnifiedAgent) ReadCache() *tool.ReadCache {
 // reply context ends.
 const roundBoundSentinel = "agentscope.round_bound"
 
-func (a *UnifiedAgent) replyLoop(ctx context.Context, input string, ch chan<- event.Event, verdict <-chan bool) {
+func (a *UnifiedAgent) replyLoop(ctx context.Context, input string, ch chan<- event.Event, verdict <-chan bool, permissionHooks bool) {
 	defer close(ch)
 
 	// Conversation turns emit terminal events on the session context:
@@ -717,7 +717,7 @@ func (a *UnifiedAgent) replyLoop(ctx context.Context, input string, ch chan<- ev
 	// exceed-max-iters end. Interrupted ends cannot be swallowed.
 	madeProgress := true
 	for {
-		reason, progress, errInfo := a.reactRound(ctx, ch, replyID, hooks, modelCallHandler, actingHandler)
+		reason, progress, errInfo := a.reactRound(ctx, ch, replyID, hooks, modelCallHandler, actingHandler, permissionHooks)
 		if run != nil && run.err() != nil {
 			a.emitTurnStats(endCtx, ch, replyID)
 			emit(endCtx, ch, event.NewReplyEndEventWithError(a.state.SessionID, replyID, types.ErrorInternal, checkpointError(run.err()).Message))
@@ -783,6 +783,7 @@ func (a *UnifiedAgent) reactRound(
 	hooks *loop.HookRunner,
 	modelCallHandler middleware.ModelCallHandler,
 	actingHandler middleware.ActingHandler,
+	permissionHooks bool,
 ) (reason types.ReplyFinishedReason, madeProgress bool, errInfo *types.ReplyErrorInfo) {
 	curState := protocol.StateReason
 	finishedNormally := false
@@ -847,7 +848,7 @@ reactLoop:
 			// Execute pending tool calls from prior iteration
 			toolCalls := a.getExecutableToolCalls()
 			if a.toolConcurrencyLimit > 0 {
-				a.executeBoundedToolStep(ctx, ch, replyID, toolCalls, actingHandler, hooks, curState, iter)
+				a.executeBoundedToolStep(ctx, ch, replyID, toolCalls, actingHandler, hooks, curState, iter, false)
 			} else {
 				a.recordToolCalls(len(toolCalls))
 				batches := batchToolCalls(toolCalls, a.toolkit, a.wouldRequireHITL)
@@ -863,7 +864,7 @@ reactLoop:
 					} else {
 						for _, tc := range batch.calls {
 							hooks.BeforeToolExec(curState, iter, tc.Name)
-							a.executeAndRecord(ctx, ch, replyID, &tc, actingHandler)
+							a.executeAndRecord(ctx, ch, replyID, &tc, actingHandler, false)
 							hooks.AfterToolExec(curState, iter, tc.Name, nil)
 						}
 					}
@@ -1037,7 +1038,7 @@ reactLoop:
 
 			// Execute tool calls
 			if a.toolConcurrencyLimit > 0 {
-				a.executeBoundedToolStep(ctx, ch, replyID, toolCalls, actingHandler, hooks, curState, iter)
+				a.executeBoundedToolStep(ctx, ch, replyID, toolCalls, actingHandler, hooks, curState, iter, permissionHooks)
 			} else {
 				a.recordToolCalls(len(toolCalls))
 				batches := batchToolCalls(toolCalls, a.toolkit, a.wouldRequireHITL)
@@ -1053,7 +1054,7 @@ reactLoop:
 					} else {
 						for _, tc := range batch.calls {
 							hooks.BeforeToolExec(curState, iter, tc.Name)
-							a.executeAndRecord(ctx, ch, replyID, &tc, actingHandler)
+							a.executeAndRecord(ctx, ch, replyID, &tc, actingHandler, permissionHooks)
 							hooks.AfterToolExec(curState, iter, tc.Name, nil)
 						}
 					}
@@ -1181,6 +1182,7 @@ func (a *UnifiedAgent) executeToolCallWithPermission(
 	replyID string,
 	tc *message.ToolCallBlock,
 	actingHandler middleware.ActingHandler,
+	permissionHooks bool,
 ) toolOutcome {
 	wasSubmitted := tc.State == message.ToolCallSubmitted
 	if t := a.toolkit.Get(tc.Name); wasSubmitted && (t == nil || !t.IsExternalTool()) {
@@ -1200,13 +1202,8 @@ func (a *UnifiedAgent) executeToolCallWithPermission(
 				fmt.Sprintf("parse tool input: %v", err))
 		}
 
-		var decision permission.Decision
-		var permErr error
-		if pctx := tool.BackendPermissionContext(ctx, a.engine.Context); pctx != nil {
-			decision, permErr = a.engine.CheckPermissionInContext(t, input, pctx)
-		} else {
-			decision, permErr = a.engine.CheckPermission(t, input)
-		}
+		decision, permErr := a.checkToolPermission(ctx, t, tc, input,
+			permissionHooks && ch != nil && !t.IsExternalTool())
 		if permErr != nil {
 			return a.emitToolResult(ctx, ch, replyID, tc, message.ToolResultError,
 				fmt.Sprintf("permission check error: %v", permErr))
@@ -1886,8 +1883,9 @@ func toolResultOutput(text string, extra []message.ContentBlock) any {
 
 // wouldRequireHITL reports whether executing tc would block for human-in-the-loop
 // confirmation or external execution — in which case it must not run in a
-// concurrent batch (see batchToolCalls). It mirrors the permission decision made
-// in executeToolCallWithPermission.
+// concurrent batch (see batchToolCalls). This preflight is engine-only and must
+// not invoke permission middleware: it may run more than once, and concurrent
+// dispatch batches are outside the hook integration's initial scope.
 func (a *UnifiedAgent) wouldRequireHITL(tc *message.ToolCallBlock) bool {
 	t := a.toolkit.Get(tc.Name)
 	if t == nil {
@@ -1962,13 +1960,14 @@ func (a *UnifiedAgent) executeAndRecord(
 	replyID string,
 	tc *message.ToolCallBlock,
 	actingHandler middleware.ActingHandler,
+	permissionHooks bool,
 ) {
 	start := event.NewToolCallStartEvent(replyID, tc.ID, tc.Name)
 	start.ToolCallInput = tc.Input
 	emit(ctx, ch, start)
 	emit(ctx, ch, event.NewToolCallEndEvent(replyID, tc.ID))
 
-	outcome := a.executeToolCallWithPermission(ctx, ch, replyID, tc, actingHandler)
+	outcome := a.executeToolCallWithPermission(ctx, ch, replyID, tc, actingHandler, permissionHooks)
 
 	resultBlock := message.ToolResultBlock{
 		Type:     "tool_result",
@@ -2001,7 +2000,7 @@ func (a *UnifiedAgent) executeConcurrentBatch(
 	for i, tc := range calls {
 		go func(idx int, tc *message.ToolCallBlock) {
 			defer wg.Done()
-			outcome := a.executeToolCallWithPermission(ctx, nil, replyID, tc, actingHandler)
+			outcome := a.executeToolCallWithPermission(ctx, nil, replyID, tc, actingHandler, false)
 			results[idx] = toolResult{index: idx, state: outcome.state, text: outcome.text, extra: outcome.extra, metadata: outcome.metadata}
 		}(i, &tc)
 	}
