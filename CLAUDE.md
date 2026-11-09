@@ -154,6 +154,13 @@ missing or no-longer-external tools must be rejected before asking permission.
 External metadata flows through recorded results, `ToolResultEndEvent` and
 `Msg.AppendEvent`. Preserve complete external block output in state and the order
 of supported text/data events; event data-size limits still apply.
+Confirmation and external-result waiters match answers by reply ID as well as
+tool-call ID, since tool-call IDs can repeat across replies: an answer naming
+another reply is dropped before any batched entry is stashed, stashed entries
+keep their reply ID for the taker to check, an empty `ReplyID` matches by call
+ID, and a call re-asked after a plain checkpoint resume also accepts the
+checkpoint's reply ID (`priorReplyID`). A waiter checks its context before
+each read.
 
 `console.Launch` returns the caller's context error at prompts, confirmations and
 active replies. SIGINT during a reply cancels only that reply. The caller owns

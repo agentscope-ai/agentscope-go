@@ -11,6 +11,26 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — host answers matched by reply ID
+
+- `UnifiedAgent` drops an external result or a user confirmation whose
+  `ReplyID` names a reply other than the waiting one, and the call keeps
+  waiting for its own answer. Tool-call IDs can repeat across replies (Gemini
+  numbers them per response), so a late answer to a canceled reply could
+  answer, or approve, a later reply's call with the same ID. An empty `ReplyID`
+  still matches, so hosts that leave it empty keep tool-call-ID matching, and
+  with it this exposure; in this repository, the `app` confirm handler and the
+  legacy `service` confirm endpoint send none. A call that a reply resumed
+  from a plain checkpoint asks again also accepts the reply ID the checkpoint
+  held, so an answer to the request seen before the restart still reaches it;
+  entries of such a batch parked for other calls answer only calls that accept
+  the same reply ID. Hosts must set `ReplyID` to the request event's `ReplyID`
+  or leave it empty: an answer carrying any other value is now dropped.
+- A waiter whose reply context ended before it reads no longer takes a queued
+  answer. Before, a canceled reply could take one at random, running an
+  approved tool after cancellation or, while its core outlived its stream,
+  consuming an answer meant for the next reply.
+
 ### Changed — Anthropic stream accumulation
 
 - Long, fragmented Anthropic-compatible streams (the parser is shared with MiniMax)

@@ -213,7 +213,7 @@ func (a *UnifiedAgent) repromptAwaitingCalls(ctx context.Context, ch chan<- even
 	for i := range asking {
 		tc := asking[i]
 		emit(ctx, ch, event.NewRequireUserConfirmEvent(replyID, []message.ToolCallBlock{tc}))
-		confirmed, resultTC := a.waitForConfirmation(ctx, tc.ID)
+		confirmed, resultTC := a.waitForConfirmation(ctx, a.resumedAnswerIDs(replyID), tc.ID)
 		if !confirmed {
 			a.saveToContext([]message.ContentBlock{message.ToolResultBlock{
 				Type:   "tool_result",
