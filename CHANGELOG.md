@@ -11,6 +11,16 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — loop hooks around resumed tool calls
+
+- The loop hooks' `BeforeToolExec` and `AfterToolExec` (`agent.WithLoopHooks`)
+  now also run around the awaiting calls a reply re-prompts after a restore:
+  asking or submitted calls restored with `WithState`, picked up by the next
+  reply or, for submitted calls, by `ResumeReplyStream`. As on the ordinary tool
+  path, they bracket the confirmation wait or external handshake and a denied
+  outcome, and receive `StateAct`; no transition to `StateAct` is reported for
+  these calls. `MetricsHook` and `TracingHook` now count and trace them.
+
 ### Changed — Anthropic stream accumulation
 
 - Long, fragmented Anthropic-compatible streams (the parser is shared with MiniMax)

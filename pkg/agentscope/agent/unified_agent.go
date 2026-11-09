@@ -312,6 +312,16 @@ func WithOffloader(o Offloader) AgentOption {
 // notifications (model calls, tool executions, state transitions) from
 // within the agent's replyLoop. This enables MetricsHook and TracingHook
 // integration without changing the agent's internal control flow.
+//
+// BeforeToolExec and AfterToolExec receive protocol.StateAct and bracket the
+// handling of a tool call, including any confirmation wait or external
+// handshake and a denied outcome (with WithToolConcurrencyLimit, calls never
+// admitted get none). Awaiting (asking or submitted) calls restored with
+// WithState are bracketed the same way when the next reply re-prompts them,
+// one at a time and without that admission. No transition to StateAct is
+// reported for them: the loop's reported state stays StateWait.
+// ResumeReplyStream returns restored asking calls to pending, so they take
+// the ordinary path.
 func WithLoopHooks(hooks ...loop.Hook) AgentOption {
 	return func(a *UnifiedAgent) { a.hookRunner = loop.NewHookRunner(hooks...) }
 }
@@ -822,7 +832,7 @@ reactLoop:
 			if err := a.checkpointBoundary(ctx); err != nil {
 				return types.ReplyError, madeProgress, checkpointError(err)
 			}
-			if a.repromptAwaitingCalls(ctx, ch, replyID, actingHandler) {
+			if a.repromptAwaitingCalls(ctx, ch, replyID, actingHandler, hooks, iter) {
 				// Checkpoint again after the inline execution of resumed
 				// calls: the pre-reprompt snapshot still holds the
 				// ASKING/SUBMITTED call, and a crash before the next
