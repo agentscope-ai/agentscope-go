@@ -11,6 +11,20 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — background precompression
+
+- With `ContextConfig.PrecompressRatio` set, a context that is still at the
+  compression trigger after a ready background summary is applied now also
+  compresses synchronously, instead of continuing above the trigger. This
+  applies to the automatic trigger and to the `compress_context` tool at its
+  lower threshold; `Compact` and context-overflow recovery still apply the
+  ready summary alone.
+- A blank (whitespace-only) background summary is discarded like a failed
+  generation instead of replacing the summarized history; the trigger then
+  compresses synchronously. As after a failure, the next round starts a new
+  background generation. The synchronous path still accepts a blank summary,
+  so a model that always returns blank fields still ends with one.
+
 ### Changed — OpenAI Responses status
 
 - The OpenAI Responses adapter now sets `ChatResponse.Error` when a response's

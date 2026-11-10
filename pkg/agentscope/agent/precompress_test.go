@@ -156,6 +156,185 @@ func TestPrecompress_AppliesAtHardTrigger(t *testing.T) {
 	}
 }
 
+// TestPrecompress_StillOverAfterApplyCompresses: messages appended since the
+// snapshot can keep the context at the threshold after the ready summary is
+// applied; the trigger then also runs the synchronous compression instead of
+// letting the reply send an over-threshold request.
+func TestPrecompress_StillOverAfterApplyCompresses(t *testing.T) {
+	mock := &precompressMockModel{contextSize: 1000, perMessageTokens: 100}
+	a := newPrecompressAgent(mock, &ContextConfig{
+		ContextSize: 1000, TriggerRatio: 0.8, ReserveRatio: 0.3, PrecompressRatio: 0.5,
+	})
+	seedContext(a, 4)
+	if err := a.compressContext(context.Background()); err != nil {
+		t.Fatalf("compressContext: %v", err)
+	}
+	if waitPrecompress(t, a) == nil {
+		t.Fatal("expected a pending pre-compression result")
+	}
+
+	// Twelve context messages. The ready summary replaces three of them, which
+	// leaves system + summary + 9 messages = 1100 tokens, still >= 800.
+	seedContext(a, 8)
+	if err := a.compressContext(context.Background()); err != nil {
+		t.Fatalf("compressContext at trigger: %v", err)
+	}
+	if got := mock.chatCalls.Load(); got != 2 {
+		t.Fatalf("chat calls = %d, want 2: the synchronous compression must follow the applied result", got)
+	}
+	if est := mock.CountTokens(a.prepareModelInput(context.Background()), nil); est >= 800 {
+		t.Errorf("estimate after compression = %d, want < 800", est)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.pendingPrecompress != nil {
+		t.Error("pending result must be consumed by the apply")
+	}
+	if len(a.state.Context) >= 9 {
+		t.Fatalf("context len = %d: the context was not compressed past the ready result", len(a.state.Context))
+	}
+}
+
+// TestPrecompress_CompactAppliesReadyResultOnly: Compact asks for one
+// compaction, so a ready result satisfies it even when the context stays
+// over the threshold; only the automatic trigger compresses further.
+func TestPrecompress_CompactAppliesReadyResultOnly(t *testing.T) {
+	mock := &precompressMockModel{contextSize: 1000, perMessageTokens: 100}
+	a := newPrecompressAgent(mock, &ContextConfig{
+		ContextSize: 1000, TriggerRatio: 0.8, ReserveRatio: 0.3, PrecompressRatio: 0.5,
+	})
+	seedContext(a, 4)
+	if err := a.compressContext(context.Background()); err != nil {
+		t.Fatalf("compressContext: %v", err)
+	}
+	if waitPrecompress(t, a) == nil {
+		t.Fatal("expected a pending pre-compression result")
+	}
+	seedContext(a, 8)
+	compressed, err := a.Compact(context.Background())
+	if err != nil || !compressed {
+		t.Fatalf("Compact = %v, %v; want true, nil", compressed, err)
+	}
+	if got := mock.chatCalls.Load(); got != 1 {
+		t.Errorf("chat calls = %d, want 1: Compact applies the ready result without another call", got)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.state.Context) != 9 {
+		t.Errorf("context len = %d, want 9 (1 reserved + 8 appended)", len(a.state.Context))
+	}
+}
+
+// TestPrecompress_ToolTriggerCompressesPastReadyResult: the compress_context
+// tool compresses at its own lower threshold, and it too compresses further
+// when the ready result leaves the context at that threshold.
+func TestPrecompress_ToolTriggerCompressesPastReadyResult(t *testing.T) {
+	mock := &precompressMockModel{contextSize: 1000, perMessageTokens: 100}
+	// Automatic trigger 800, tool threshold 400 (TriggerRatio/2), arm line 300.
+	a := newPrecompressAgent(mock, &ContextConfig{
+		ContextSize: 1000, TriggerRatio: 0.8, ReserveRatio: 0.1, PrecompressRatio: 0.3,
+	})
+	seedContext(a, 2)
+	if err := a.compressContext(context.Background()); err != nil {
+		t.Fatalf("compressContext: %v", err)
+	}
+	if waitPrecompress(t, a) == nil {
+		t.Fatal("expected a pending pre-compression result")
+	}
+
+	// Five context messages; the ready summary replaces one, which leaves
+	// system + summary + 4 messages = 600 tokens, still >= 400.
+	seedContext(a, 3)
+	res, err := a.compressContextForTool(context.Background())
+	if err != nil || !res.Compressed {
+		t.Fatalf("compressContextForTool = %+v, %v; want compressed", res, err)
+	}
+	if got := mock.chatCalls.Load(); got != 2 {
+		t.Fatalf("chat calls = %d, want 2: the synchronous compression must follow the applied result", got)
+	}
+	if est := mock.CountTokens(a.prepareModelInput(context.Background()), nil); est >= 400 {
+		t.Errorf("estimate after compression = %d, want < 400", est)
+	}
+}
+
+// TestPrecompress_StillOverWithEmptyContextStops: when the applied result
+// leaves no message to summarize, the trigger stops after the apply instead
+// of running the synchronous compression over an empty context.
+func TestPrecompress_StillOverWithEmptyContextStops(t *testing.T) {
+	mock := &precompressMockModel{contextSize: 1000, perMessageTokens: 100}
+	// Threshold 150: system + summary alone (200) stay over it.
+	a := newPrecompressAgent(mock, &ContextConfig{ContextSize: 1000, TriggerRatio: 0.15, ReserveRatio: 0.1})
+	seedContext(a, 2)
+	a.mu.Lock()
+	last := a.state.Context[1]
+	a.pendingPrecompress = &precompressResult{summary: "covers everything", snapshotLen: 2, lastMsg: last, lastMsgID: last.ID}
+	a.mu.Unlock()
+
+	if err := a.compressContext(context.Background()); err != nil {
+		t.Fatalf("compressContext: %v", err)
+	}
+	if got := mock.chatCalls.Load(); got != 0 {
+		t.Errorf("chat calls = %d, want 0: nothing is left to summarize", got)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.state.Summary != "covers everything" || len(a.state.Context) != 0 {
+		t.Errorf("summary %q with %d messages, want the ready result applied", a.state.Summary, len(a.state.Context))
+	}
+}
+
+// blankFirstSummaryModel answers the first compression call with blank
+// summary fields and every later call with the regular summary.
+type blankFirstSummaryModel struct {
+	precompressMockModel
+}
+
+func (m *blankFirstSummaryModel) Chat(_ context.Context, _ []*message.Msg, _ ...model.CallOption) (*model.ChatResponse, error) {
+	resp := summaryToolCallResponse(nil)
+	if m.chatCalls.Add(1) == 1 {
+		resp.Content = []message.ContentBlock{message.ToolCallBlock{
+			Type:  "tool_call",
+			ID:    "tc_summary",
+			Name:  "generate_structured_output",
+			Input: `{"task_overview":"  "}`,
+			State: message.ToolCallPending,
+		}}
+	}
+	return resp, nil
+}
+
+// TestPrecompress_BlankSummaryDiscarded: a background generation that formats
+// to a blank summary (a custom template over empty fields) is discarded like
+// a failed one, so it cannot replace the history with nothing; the trigger
+// then compresses synchronously.
+func TestPrecompress_BlankSummaryDiscarded(t *testing.T) {
+	mock := &blankFirstSummaryModel{precompressMockModel{contextSize: 1000, perMessageTokens: 100}}
+	a := NewUnifiedAgent("t", "sys", mock, WithContextConfig(&ContextConfig{
+		ContextSize: 1000, TriggerRatio: 0.8, ReserveRatio: 0.3, PrecompressRatio: 0.5,
+		SummaryTemplate: "{task_overview}",
+	}))
+	seedContext(a, 4)
+	if err := a.compressContext(context.Background()); err != nil {
+		t.Fatalf("compressContext: %v", err)
+	}
+	if p := waitPrecompress(t, a); p != nil {
+		t.Fatalf("a blank background summary must leave no pending result, got %q", p.summary)
+	}
+
+	seedContext(a, 4) // 8 context + system = 900 >= 800
+	if err := a.compressContext(context.Background()); err != nil {
+		t.Fatalf("compressContext at trigger: %v", err)
+	}
+	if got := mock.chatCalls.Load(); got != 2 {
+		t.Errorf("chat calls = %d, want 2: the trigger must compress synchronously", got)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.state.Summary != "T" {
+		t.Errorf("summary = %q, want the synchronous summary", a.state.Summary)
+	}
+}
+
 func TestPrecompress_BelowRatioDoesNotArm(t *testing.T) {
 	mock := &precompressMockModel{contextSize: 1000, perMessageTokens: 100}
 	a := newPrecompressAgent(mock, &ContextConfig{
@@ -347,5 +526,43 @@ func TestEmitTurnStats_DrainsCompressionUsage(t *testing.T) {
 	}
 	if a.takeCompressionUsage() != nil {
 		t.Error("drain must clear the accumulator")
+	}
+}
+
+// TestPrecompress_ResultDroppedWhenContextShrinks: a checkpoint rollback that
+// leaves fewer messages than the snapshot held invalidates the ready result,
+// and the compaction runs synchronously instead.
+func TestPrecompress_ResultDroppedWhenContextShrinks(t *testing.T) {
+	mock := &precompressMockModel{contextSize: 1000, perMessageTokens: 100}
+	a := newPrecompressAgent(mock, &ContextConfig{
+		ContextSize: 1000, TriggerRatio: 0.8, ReserveRatio: 0.3, PrecompressRatio: 0.5,
+	})
+	seedContext(a, 4)
+	if err := a.compressContext(context.Background()); err != nil {
+		t.Fatalf("compressContext: %v", err)
+	}
+	if waitPrecompress(t, a) == nil {
+		t.Fatal("expected a pending pre-compression result")
+	}
+
+	// Simulate a rollback to a checkpoint that held two of the four messages.
+	a.mu.Lock()
+	a.state.Context = a.state.Context[:2]
+	a.mu.Unlock()
+
+	compressed, err := a.Compact(context.Background())
+	if err != nil || !compressed {
+		t.Fatalf("Compact = %v, %v; want true, nil", compressed, err)
+	}
+	if got := mock.chatCalls.Load(); got != 2 {
+		t.Errorf("chat calls = %d, want 2: the stale result must fall back to a synchronous call", got)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.pendingPrecompress != nil {
+		t.Error("stale result must be discarded")
+	}
+	if len(a.state.Context) != 1 || !strings.Contains(a.state.Summary, "T") {
+		t.Errorf("summary %q with %d messages, want the synchronous compaction", a.state.Summary, len(a.state.Context))
 	}
 }

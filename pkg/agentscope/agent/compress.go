@@ -137,15 +137,18 @@ type ContextConfig struct {
 	// hard threshold (TriggerRatio) later triggers — or Compact is called —
 	// a still-valid snapshot result is applied instantly instead of blocking
 	// the reply on a summarization call; a stale or missing result falls
-	// back to the synchronous path. The applied summary covers the snapshot
-	// prefix, so messages appended since the snapshot stay raw: precompression
-	// trades a slightly earlier next compaction for hiding the latency.
+	// back to the synchronous path, and so does a non-forced trigger (the
+	// automatic one, or the compress_context tool at its own threshold) whose
+	// context is still at the threshold after the result went in. The
+	// applied summary covers the snapshot prefix, so messages appended since
+	// the snapshot stay raw: precompression trades a slightly earlier next
+	// compaction for hiding the latency.
 	//
 	// 0 (the default) disables precompression; values >= TriggerRatio are
 	// normalized to 0 by withDefaults. Precompression is unavailable with
 	// WithContentBlockCompaction (the block-level splitter has different
 	// granularity) and never runs the overflow retry or truncation fallback —
-	// a failed background generation is simply discarded.
+	// a failed or blank background generation is simply discarded.
 	PrecompressRatio float64
 }
 
@@ -372,9 +375,25 @@ func (a *UnifiedAgent) compressContextImpl(ctx context.Context, cfg *ContextConf
 	// A background pre-compression (PrecompressRatio) that already finished
 	// against a still-valid snapshot applies instantly, skipping the blocking
 	// summarization call. Stale or missing results fall through to the
-	// synchronous path.
+	// synchronous path, and so does a non-forced trigger (automatic, or the
+	// compress_context tool at its own threshold) whose context is still at
+	// the threshold after the result went in. Forced compactions (Compact,
+	// overflow recovery) apply the result alone.
 	if a.applyReadyPrecompress(ctx) {
-		return nil
+		if force || a.model.CountTokens(a.prepareModelInput(ctx), toolSchemas) < threshold {
+			return nil
+		}
+		a.mu.Lock()
+		remaining := len(a.state.Context)
+		a.mu.Unlock()
+		if remaining == 0 {
+			// The result kept no message: the system prompt, summary and
+			// plan alone are at the threshold and nothing is left to
+			// summarize, so the result stands as it did before this check.
+			logrus.WithField("agent", a.name).Warn("context still at the threshold after the ready summary, with no message left to compress")
+			return nil
+		}
+		logrus.WithField("agent", a.name).Info("context still at the threshold after the ready summary; compressing")
 	}
 
 	reserveTokens := int(float64(ctxSize) * cfg.ReserveRatio)
