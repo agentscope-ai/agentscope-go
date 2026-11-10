@@ -27,6 +27,17 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   middleware installed) such a response now emits `model_partial_response`, so
   `TeamRun` and the goal pipeline fail a partial answer they used to accept.
 
+### Added — `OpenAIConfig.Formatter`
+
+- `OpenAIChatModel` now accepts an optional `Formatter` (defaults to
+  `formatter.NewOpenAIFormatter()`, so existing callers are unaffected).
+- Motivation: thinking models such as DeepSeek require the previous turn's
+  `reasoning_content` to be passed back. The default formatter has
+  `SupportsThinking == false` and never emits the field, so multi-turn tool calling
+  fails with `The reasoning_content in the thinking mode must be passed back to the API.`
+  Passing `formatter.NewDeepSeekFormatter()` fixes it. Response parsing already turned
+  `reasoning_content` into a `ThinkingBlock`; only the request side was missing a hook.
+
 ### Changed — Anthropic stream accumulation
 
 - Long, fragmented Anthropic-compatible streams (the parser is shared with MiniMax)
