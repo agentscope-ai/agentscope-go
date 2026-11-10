@@ -76,7 +76,7 @@ func TestReplyLocalConfirmationDoesNotOverrideAnotherAgent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(confirmation.WithInput(context.Background(), a, input), 5*time.Second)
 	defer cancel()
 	b.SubmitUserConfirm(&event.UserConfirmResultEvent{ConfirmResults: []event.ConfirmResult{{Confirmed: true, ToolCall: message.ToolCallBlock{ID: "same", Name: "child-tool"}}}})
-	ok, tc := b.waitForConfirmation(ctx, "same")
+	ok, tc := b.waitForConfirmation(ctx, answerIDs{reply: "child-reply"}, "same")
 	if !ok || tc.Name != "child-tool" || len(input) != 1 {
 		t.Fatalf("child consumed parent source: ok=%v call=%+v remaining=%d", ok, tc, len(input))
 	}
@@ -88,7 +88,7 @@ func TestReplyLocalClosedConfirmationSourceDenies(t *testing.T) {
 	close(input)
 	ctx, cancel := context.WithTimeout(confirmation.WithInput(context.Background(), a, input), time.Second)
 	defer cancel()
-	ok, _ := a.waitForConfirmation(ctx, "call")
+	ok, _ := a.waitForConfirmation(ctx, answerIDs{reply: "owned-reply"}, "call")
 	if ok || ctx.Err() != nil {
 		t.Fatalf("closed source did not deny promptly: ok=%v ctx=%v", ok, ctx.Err())
 	}

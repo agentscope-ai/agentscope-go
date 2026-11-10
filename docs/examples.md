@@ -46,6 +46,7 @@ contracts; no real identity-provider or model integration is claimed.
 | [embodied_demo](../examples/embodied_demo/) | Single-device observation, planning and simulated actions; see the [demo guide](embodied-demo.md) and [contracts](embodied-contracts.md) |
 | [managed_task](../examples/managed_task/) | Fixed-model managed text execution with a local HTTP fixture |
 | [classifier](../examples/classifier/) | Typed classification with offline fake results and attempt accounting |
+| [piccolo](../examples/piccolo/) | Local Piccolo text decisions with offline fixtures and explicit live configuration |
 | [model_call](../examples/model_call/) | Direct model streaming, tool calls and structured output |
 | [structured_output](../examples/structured_output/) | Structured output through tool calling |
 | [multi_provider](../examples/multi_provider/) | Provider configuration and model cards |

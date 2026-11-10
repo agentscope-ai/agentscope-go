@@ -149,8 +149,12 @@ establish that the other jobs pass.
 Further workflows: `security.yml` runs an advisory `govulncheck` scan (a
 blocking dependency-review gate is planned once the dependency graph is enabled
 for the repository);
-`api-compat.yml` compares Stable-tier package APIs against the latest v2 tag
-and fails unlabeled breaking changes in pull requests; `docs.yml` checks
+`api-compat.yml` compares Stable-tier package APIs against the latest v2 tag:
+a pull request without the `breaking-change` label fails when it adds an
+incompatible change that its base does not already have, pushes to `main` only
+report, and a package that apidiff cannot load fails either run (check a branch
+locally with the workflow's pinned apidiff and
+`bash .github/scripts/api-compat.sh origin/main`); `docs.yml` checks
 markdown links and runs the offline examples; `codeql.yml` and
 `scorecard.yml` provide pull-request static analysis and a scheduled hygiene
 scorecard.

@@ -185,6 +185,16 @@ ports and deferred work, including realtime/TUI, SOP and model-context wiring.
   before tool execution, and `Reply` returns terminal reply errors. See
   [streaming contracts](docs/streaming.md) for provider and helper-path limits.
 
+- `UnifiedAgent` matches host answers by reply ID as well as tool-call ID. A
+  confirmation or external result whose `ReplyID` names another reply is
+  dropped, and the call keeps waiting; `SubmitUserConfirm` and
+  `SubmitExternalResult` still return no error. Set `ReplyID` to the request
+  event's `ReplyID`. An empty `ReplyID` matches by tool-call ID only, without
+  protection against IDs repeated across replies (the `app` and legacy
+  `service` confirm endpoints send none). A call asked again after a plain
+  checkpoint resume also accepts the checkpoint's reply ID. Calls within one
+  reply are still told apart by tool-call ID alone. A waiter whose reply
+  context ended before it reads takes no queued answer.
 - Synchronous `Reply` checks caller cancellation after draining events and again
   before returning state, and only selects the current reply ID. Cancellation
   returns a nil message and a recognizable context error; earlier replies are

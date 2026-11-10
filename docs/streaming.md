@@ -49,6 +49,12 @@ buffered option; arbitrary HTTP or parsing errors do not imply lack of streaming
 support. Custom models must implement `ChatStream` or explicitly return the
 unsupported sentinel; embedding a nil model interface is not an implementation.
 
+On the buffered path, a response that carries `ChatResponse.Error` (for example
+an OpenAI Responses answer cut at `max_output_tokens`) is kept in history and
+the reply continues, emitting a `model_partial_response` custom event.
+`TeamPipeline` reports a member whose final model round carried that event as
+an error result, and the goal pipeline's agent adapters fail the step.
+
 The loop bridge, compression and structured-output helper calls retain their
 existing buffered paths. A stream-aware middleware API is separate future work.
 
@@ -63,6 +69,9 @@ retracted and must be treated as incomplete when `ReplyEndEvent` reports failure
 
 OpenAI-compatible providers must send `[DONE]` or a nonempty `finish_reason`;
 clean EOF without either and malformed JSON chunks are reported as failures.
+OpenAI Responses streams end at `response.completed`, `response.incomplete` or
+`response.failed`; a status other than `completed` is reported as the stream's
+error.
 Gemini final responses retain tool calls and require a completion reason;
 Anthropic stop reasons are propagated. Custom providers remain responsible for
 honest terminal `IsLast` and `Error` values.

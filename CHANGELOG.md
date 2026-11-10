@@ -11,6 +11,95 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — background precompression
+
+- With `ContextConfig.PrecompressRatio` set, a context that is still at the
+  compression trigger after a ready background summary is applied now also
+  compresses synchronously, instead of continuing above the trigger. This
+  applies to the automatic trigger and to the `compress_context` tool at its
+  lower threshold; `Compact` and context-overflow recovery still apply the
+  ready summary alone.
+- A blank (whitespace-only) background summary is discarded like a failed
+  generation instead of replacing the summarized history; the trigger then
+  compresses synchronously. As after a failure, the next round starts a new
+  background generation. The synchronous path still accepts a blank summary,
+  so a model that always returns blank fields still ends with one.
+
+### Fixed — CI API compatibility gate
+
+- The `api-compat` workflow now fails pull requests on incompatible changes to
+  Stable-tier APIs; the pinned apidiff exits 0 when it reports them, so the check
+  had failed only on package-load errors (#118). A pull request fails only for
+  changes since the latest v2 tag that its base does not already have, unless
+  it carries the `breaking-change` label; pushes to `main` still only report.
+  Any apidiff failure now fails the run after every package is checked,
+  including labeled pull requests and pushes. The check runs locally with
+  `bash .github/scripts/api-compat.sh origin/main`.
+
+### Changed — OpenAI Responses status
+
+- The OpenAI Responses adapter now sets `ChatResponse.Error` when a response's
+  `status` is present and not `completed` (for example cut at
+  `max_output_tokens`), in `Chat` and in the final `ChatStream` response;
+  `response.incomplete` and `response.failed` stream events end the stream.
+  Content, response ID and usage are kept; the error names the status and the
+  incomplete reason or the error code and message, so a `response.failed` with
+  `context_length_exceeded` is recognized by `model.IsContextLimitExceeded`.
+  Before, a buffered `Chat` response, or a `response.completed` event reporting
+  another status, looked complete; a stream ending in `response.incomplete` or
+  `response.failed` already failed, with a generic truncation error and without
+  usage. On the buffered agent path (`agent.WithModelStreaming(false)` or any
+  middleware installed) such a response now emits `model_partial_response`, so
+  `TeamRun` and the goal pipeline fail a partial answer they used to accept.
+
+### Fixed — host answers matched by reply ID
+
+- `UnifiedAgent` drops an external result or a user confirmation whose
+  `ReplyID` names a reply other than the waiting one, and the call keeps
+  waiting for its own answer. Tool-call IDs can repeat across replies (Gemini
+  numbers them per response), so a late answer to a canceled reply could
+  answer, or approve, a later reply's call with the same ID. An empty `ReplyID`
+  still matches, so hosts that leave it empty keep tool-call-ID matching, and
+  with it this exposure; in this repository, the `app` confirm handler and the
+  legacy `service` confirm endpoint send none. A call that a reply resumed
+  from a plain checkpoint asks again also accepts the reply ID the checkpoint
+  held, so an answer to the request seen before the restart still reaches it;
+  entries of such a batch parked for other calls answer only calls that accept
+  the same reply ID. Hosts must set `ReplyID` to the request event's `ReplyID`
+  or leave it empty: an answer carrying any other value is now dropped.
+- A waiter whose reply context ended before it reads no longer takes a queued
+  answer. Before, a canceled reply could take one at random, running an
+  approved tool after cancellation or, while its core outlived its stream,
+  consuming an answer meant for the next reply.
+
+### Fixed — loop hooks around resumed tool calls
+
+- The loop hooks' `BeforeToolExec` and `AfterToolExec` (`agent.WithLoopHooks`)
+  now also run around the awaiting calls a reply re-prompts after a restore:
+  asking or submitted calls restored with `WithState`, picked up by the next
+  reply or, for submitted calls, by `ResumeReplyStream`. As on the ordinary tool
+  path, they bracket the confirmation wait or external handshake and a denied
+  outcome, and receive `StateAct`; no transition to `StateAct` is reported for
+  these calls. `MetricsHook` and `TracingHook` now count and trace them.
+
+### Added — `OpenAIConfig.Formatter`
+
+- `OpenAIChatModel` now accepts an optional `Formatter` (defaults to
+  `formatter.NewOpenAIFormatter()`, so existing callers are unaffected).
+- Motivation: thinking models such as DeepSeek require the previous turn's
+  `reasoning_content` to be passed back. The default formatter has
+  `SupportsThinking == false` and never emits the field, so multi-turn tool calling
+  fails with `The reasoning_content in the thinking mode must be passed back to the API.`
+  Passing `formatter.NewDeepSeekFormatter()` fixes it. Response parsing already turned
+  `reasoning_content` into a `ThinkingBlock`; only the request side was missing a hook.
+
+### Added — local Piccolo example
+
+- `examples/piccolo` demonstrates Binary, Choice and Score decisions through the
+  existing Jev adapter, using synthetic HTTP fixtures by default and an explicit
+  local live opt-in. The [guide](docs/piccolo.md) pins the W1-tested CPU setup and
+  records runtime-specific HTTP behavior and the observed Metal startup failure.
+
 ### Fixed — UnifiedAgent permission middleware wiring
 
 - **Behavior change:** registered `OnCheckPermission` hooks now wrap deterministic

@@ -31,6 +31,13 @@ These routes belong to `service.Service`. The separate `app` package has its own
 | POST | `/api/confirm` | HITL confirmation; JSON body includes `session_id` and `tool_calls` |
 | GET | `/api/models` | List available models |
 
+The `/api/confirm` body, like the body of the `app` package's
+`POST /api/chat/{sessionID}/confirm`, carries no reply ID, so the agent matches
+the answer by tool-call ID alone. A confirmation posted after its reply was
+canceled can therefore still answer a later reply's call that reuses the same
+ID. [`service.NewScoped`](scoped-service.md) binds confirmations to the reply
+that asked.
+
 ### Full Application
 
 For production deployments with multi-session management, credentials, scheduling, and workspace isolation:
