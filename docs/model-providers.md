@@ -45,6 +45,12 @@ cm, _ := model.NewOpenAIResponseModel(&model.OpenAIResponseConfig{
 
 Uses the Responses API (`/v1/responses`) instead of Chat Completions. Default timeout is 5 minutes for long reasoning tasks.
 
+A response whose `status` is not `completed` (for example `incomplete` at
+`max_output_tokens`, or `failed`) keeps its content, ID and usage and reports
+the status on `ChatResponse.Error`, from `Chat` and on the final `ChatStream`
+response. A stream ends at `response.completed`, `response.incomplete` or
+`response.failed`. A response without a `status` is treated as complete.
+
 ### Anthropic
 
 ```go

@@ -11,6 +11,22 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Changed — OpenAI Responses status
+
+- The OpenAI Responses adapter now sets `ChatResponse.Error` when a response's
+  `status` is present and not `completed` (for example cut at
+  `max_output_tokens`), in `Chat` and in the final `ChatStream` response;
+  `response.incomplete` and `response.failed` stream events end the stream.
+  Content, response ID and usage are kept; the error names the status and the
+  incomplete reason or the error code and message, so a `response.failed` with
+  `context_length_exceeded` is recognized by `model.IsContextLimitExceeded`.
+  Before, a buffered `Chat` response, or a `response.completed` event reporting
+  another status, looked complete; a stream ending in `response.incomplete` or
+  `response.failed` already failed, with a generic truncation error and without
+  usage. On the buffered agent path (`agent.WithModelStreaming(false)` or any
+  middleware installed) such a response now emits `model_partial_response`, so
+  `TeamRun` and the goal pipeline fail a partial answer they used to accept.
+
 ### Added — `OpenAIConfig.Formatter`
 
 - `OpenAIChatModel` now accepts an optional `Formatter` (defaults to
