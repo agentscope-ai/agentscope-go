@@ -120,6 +120,12 @@ interrupted results do not require answers. `SubmitExternalResult` returns no
 error: observe `ToolResultEndEvent` for the outcome. Submission transfers ownership
 of the result and its nested values; do not mutate them afterward.
 
+Set the submitted event's `ReplyID` to the request event's `ReplyID`, for
+`SubmitExternalResult` and `SubmitUserConfirm` alike. Providers may repeat
+tool-call IDs across replies, so a waiting reply drops an answer that names
+another reply, such as a late answer to a canceled reply, and keeps waiting
+for its own. An empty `ReplyID` matches by tool-call ID only.
+
 AskUser allows the question interaction at the tool level in normal permission
 modes. Explicit deny/ask rules still apply; `ModeDontAsk` denies the tool. Asking
 or answering a question does not authorize another tool action. The host remains
@@ -127,8 +133,12 @@ responsible for collecting a real response and applying its own access controls.
 
 Checkpoint resume checks that a submitted call still names an active external
 tool and honors current permissions and validation before requesting execution.
-Missing, inactive or no-longer-external tools produce error results. Validated
-metadata survives recorded results, terminal events and `Msg.AppendEvent`.
+Missing, inactive or no-longer-external tools produce error results. After a
+plain restore (`WithState`, then `Reply` or `ReplyStream`), the next reply gets a
+new reply ID; the calls it asks again also accept the reply ID the checkpoint
+held, so an answer to the request the host saw before the restart still reaches
+them. `ResumeReplyStream` keeps the checkpoint's reply ID. Validated metadata
+survives recorded results, terminal events and `Msg.AppendEvent`.
 Multi-block external output is retained in state, with supported text/data events
 emitted in order subject to the existing event data-size cap. Reading all text
 from a block list requires inspecting `Output`; `GetOutputText()` returns only
@@ -639,6 +649,11 @@ a := agent.NewUnifiedAgent("bot", "...", cm,
     agent.WithPermissionContext(permCtx),
 )
 ```
+
+When a call needs confirmation, `ReplyStream` emits a `RequireUserConfirmEvent`;
+answer it with `SubmitUserConfirm`, setting `ReplyID` to the event's `ReplyID`.
+An answer naming another reply is dropped, as described for
+[external results](#validation-permissions-and-recovery).
 
 ## Tool-level Middleware
 
