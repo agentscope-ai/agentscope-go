@@ -137,7 +137,7 @@ func (t *editTool) Execute(ctx context.Context, args map[string]any) (*ToolRespo
 		return NewErrorResponse(fmt.Errorf("write file: %w", err)), nil
 	}
 	if rc := GetReadCache(ctx); rc != nil && rc.RejectsStaleWrites() {
-		rc.noteOwnEdit(abs, data, []byte(newContent), hostMtime(abs))
+		rc.noteOwnEdit(abs, data, []byte(newContent), nil)
 	}
 
 	resp := NewTextResponse(fmt.Sprintf("Replaced %d occurrence(s) in %s", count, abs))

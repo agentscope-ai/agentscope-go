@@ -187,6 +187,54 @@ func TestOwnEditsKeepTheVersionKnown(t *testing.T) {
 	}
 }
 
+// TestOwnEditIsNotServedAfterTheCheckIsOff: a host edit records no mtime, so
+// once the check is turned off Read does not serve the edited copy, even when
+// another change kept the file's time.
+func TestOwnEditIsNotServedAfterTheCheckIsOff(t *testing.T) {
+	edits := map[string]func(a *sharedAgent, f string) *ToolResponse{
+		"edit": func(a *sharedAgent, f string) *ToolResponse { return a.edit(f, "alpha", "ALPHA") },
+		"multi edit": func(a *sharedAgent, f string) *ToolResponse {
+			return a.run(MultiEditTool(), map[string]any{"file_path": f, "edits": []any{
+				map[string]any{"old_string": "alpha", "new_string": "ALPHA"},
+			}})
+		},
+		"patch": func(a *sharedAgent, f string) *ToolResponse {
+			patch := "--- a/a.go\n+++ b/a.go\n@@ -1,1 +1,1 @@\n-alpha\n+ALPHA\n"
+			return a.run(ApplyPatchTool(), map[string]any{"file_path": f, "patch": patch})
+		},
+	}
+	for name, edit := range edits {
+		t.Run(name, func(t *testing.T) {
+			f := filepath.Join(t.TempDir(), "a.go")
+			if err := os.WriteFile(f, []byte("alpha\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			a := newSharedAgent(t, context.Background(), true)
+			a.read(f)
+			if r := edit(a, f); r.State != message.ToolResultSuccess {
+				t.Fatalf("%s: %s", name, respText(r))
+			}
+			if got := mustContent(t, f); got != "ALPHA\n" {
+				t.Fatalf("content after %s = %q", name, got)
+			}
+			info, err := os.Stat(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(f, []byte("external\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chtimes(f, info.ModTime(), info.ModTime()); err != nil {
+				t.Fatal(err)
+			}
+			a.rc.SetRejectStaleWrites(false)
+			if got := a.read(f); !strings.Contains(got, "external") {
+				t.Fatalf("read served the edited copy: %q", got)
+			}
+		})
+	}
+}
+
 // TestEditOverAnotherAgentsChange: the edit itself applies to the current
 // content, but the agent has not seen the other change, so a later
 // whole-file write needs a read first.
@@ -315,7 +363,7 @@ func TestOwnEditsThroughABackend(t *testing.T) {
 	}
 }
 
-func TestKnowsVersionAndHostMtime(t *testing.T) {
+func TestKnowsVersion(t *testing.T) {
 	rc := NewReadCache(0, 0)
 	if rc.knowsVersion("missing", []byte("x")) {
 		t.Fatal("an unknown path has no version")
@@ -323,8 +371,5 @@ func TestKnowsVersionAndHostMtime(t *testing.T) {
 	rc.noteOwnEdit("missing", []byte("x"), []byte("y"), nil)
 	if rc.Len() != 0 {
 		t.Fatal("an edit of an unknown file must not create an entry")
-	}
-	if hostMtime(filepath.Join(t.TempDir(), "absent")) != nil {
-		t.Fatal("an absent file has no mtime")
 	}
 }

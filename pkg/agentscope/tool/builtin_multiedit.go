@@ -149,7 +149,7 @@ func (t *multiEditTool) Execute(ctx context.Context, args map[string]any) (*Tool
 		return NewErrorResponse(fmt.Errorf("write file: %w", err)), nil
 	}
 	if rc := GetReadCache(ctx); rc != nil && rc.RejectsStaleWrites() {
-		rc.noteOwnEdit(abs, data, []byte(newContent), hostMtime(abs))
+		rc.noteOwnEdit(abs, data, []byte(newContent), nil)
 	}
 	return multiEditResponse(abs, oldContent, newContent, count, len(ops)), nil
 }

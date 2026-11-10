@@ -186,7 +186,7 @@ func (t *applyPatchTool) Execute(ctx context.Context, args map[string]any) (*Too
 		return NewErrorResponse(fmt.Errorf("write file: %w", err)), nil
 	}
 	if rc := GetReadCache(ctx); rc != nil && rc.RejectsStaleWrites() {
-		rc.noteOwnEdit(abs, data, []byte(newContent), hostMtime(abs))
+		rc.noteOwnEdit(abs, data, []byte(newContent), nil)
 	}
 	return patchResponse(abs, oldContent, newContent), nil
 }

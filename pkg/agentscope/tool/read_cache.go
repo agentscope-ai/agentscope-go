@@ -100,7 +100,8 @@ func (rc *ReadCache) knowsVersion(filePath string, data []byte) bool {
 // cache knew, after becomes it; otherwise the file changed under the agent
 // and its entry is dropped. mtime is the file's time after the write; nil
 // stores a zero time, so the next freshness check misses and Read reads the
-// file again.
+// file again. Host edits pass nil: while the check is on, Read never serves
+// a cached copy, so only the hash matters.
 func (rc *ReadCache) noteOwnEdit(filePath string, before, after []byte, mtime *time.Time) {
 	knew := rc.knowsVersion(filePath, before)
 	rc.mu.Lock()
@@ -119,17 +120,6 @@ func (rc *ReadCache) noteOwnEdit(filePath string, before, after []byte, mtime *t
 		updatedAt = *mtime
 	}
 	rc.insertLocked(filePath, splitReadLines(after), updatedAt, contentHash(after))
-}
-
-// hostMtime is the modification time of a host file, nil when it cannot be
-// read.
-func hostMtime(path string) *time.Time {
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil
-	}
-	t := info.ModTime()
-	return &t
 }
 
 // NewReadCache creates a ReadCache with the given limits.
