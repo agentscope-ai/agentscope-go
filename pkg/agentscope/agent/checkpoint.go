@@ -7,8 +7,10 @@ import (
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/event"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/logging"
+	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/loop"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/message"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/middleware"
+	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/protocol"
 )
 
 // Checkpointing and crash-recovery (HARNESS_DESIGN F1).
@@ -206,12 +208,21 @@ func (a *UnifiedAgent) awaitingCalls() (asking, submitted []message.ToolCallBloc
 // records the outcomes, so a conversation restored via WithState continues
 // where it parked instead of ending silently at StateWait. Returns true if
 // any awaiting call was handled (the react loop should re-evaluate).
-func (a *UnifiedAgent) repromptAwaitingCalls(ctx context.Context, ch chan<- event.Event, replyID string, actingHandler middleware.ActingHandler) bool {
+//
+// The loop hooks bracket each call as on the StateAct path: BeforeToolExec
+// precedes the re-emitted confirmation or execution request and
+// AfterToolExec follows the recorded outcome, a denial included. They
+// receive StateAct and the current iteration; the reported state stays
+// StateWait, so no transition to StateAct is announced.
+func (a *UnifiedAgent) repromptAwaitingCalls(ctx context.Context, ch chan<- event.Event, replyID string,
+	actingHandler middleware.ActingHandler, hooks *loop.HookRunner, iter int) bool {
+	const state = protocol.StateAct
 	asking, submitted := a.awaitingCalls()
 	handled := false
 
 	for i := range asking {
 		tc := asking[i]
+		hooks.BeforeToolExec(state, iter, tc.Name)
 		emit(ctx, ch, event.NewRequireUserConfirmEvent(replyID, []message.ToolCallBlock{tc}))
 		confirmed, resultTC := a.waitForConfirmation(ctx, a.resumedAnswerIDs(replyID), tc.ID)
 		if !confirmed {
@@ -223,6 +234,7 @@ func (a *UnifiedAgent) repromptAwaitingCalls(ctx context.Context, ch chan<- even
 				State:  message.ToolResultDenied,
 			}}, nil)
 			a.updateToolCallState(tc.ID, message.ToolCallFinished)
+			hooks.AfterToolExec(state, iter, tc.Name, nil)
 			handled = true
 			continue
 		}
@@ -234,6 +246,7 @@ func (a *UnifiedAgent) repromptAwaitingCalls(ctx context.Context, ch chan<- even
 		resultTC.State = message.ToolCallAllowed
 		a.replaceToolCallInContext(tc.ID, &resultTC)
 		a.executeAndRecord(ctx, ch, replyID, &resultTC, actingHandler)
+		hooks.AfterToolExec(state, iter, resultTC.Name, nil)
 		handled = true
 	}
 
@@ -241,7 +254,9 @@ func (a *UnifiedAgent) repromptAwaitingCalls(ctx context.Context, ch chan<- even
 		tc := submitted[i]
 		// A restored call must honor the current toolkit, permissions and
 		// validators. Reuse normal recording and event assembly as well.
+		hooks.BeforeToolExec(state, iter, tc.Name)
 		a.executeAndRecord(ctx, ch, replyID, &tc, actingHandler)
+		hooks.AfterToolExec(state, iter, tc.Name, nil)
 		handled = true
 	}
 

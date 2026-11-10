@@ -47,6 +47,16 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   approved tool after cancellation or, while its core outlived its stream,
   consuming an answer meant for the next reply.
 
+### Fixed — loop hooks around resumed tool calls
+
+- The loop hooks' `BeforeToolExec` and `AfterToolExec` (`agent.WithLoopHooks`)
+  now also run around the awaiting calls a reply re-prompts after a restore:
+  asking or submitted calls restored with `WithState`, picked up by the next
+  reply or, for submitted calls, by `ResumeReplyStream`. As on the ordinary tool
+  path, they bracket the confirmation wait or external handshake and a denied
+  outcome, and receive `StateAct`; no transition to `StateAct` is reported for
+  these calls. `MetricsHook` and `TracingHook` now count and trace them.
+
 ### Added — `OpenAIConfig.Formatter`
 
 - `OpenAIChatModel` now accepts an optional `Formatter` (defaults to
