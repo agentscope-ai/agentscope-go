@@ -41,6 +41,7 @@ jobs:
         run: |
           go run ./examples/classifier
           go run ./examples/piccolo
+          go run ./examples/permission_advisory
           go run ./examples/goal_pipeline
           go run ./examples/team_pipeline
           go run ./examples/openai_server -self-test

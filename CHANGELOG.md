@@ -11,6 +11,16 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Added — shadow-mode permission advice
+
+- An offline-first `permission_advisory` example combines classifier advice with
+  unchanged interactive permission confirmation, with optional local inference
+  and redacted lifecycle auditing.
+- `permission.Decision.Origin` identifies only the Default-mode fallback Ask
+  (`default_ask`); other engine outcomes have unknown origin. Eligible decisions
+  now serialize this additional field. See the [guide](docs/permission-advisory.md)
+  for compatibility and host ownership limits.
+
 ### Fixed — background precompression
 
 - With `ContextConfig.PrecompressRatio` set, a context that is still at the
