@@ -64,10 +64,7 @@ func (a *UnifiedAgent) GenerateStructuredResponseWithUsage(ctx context.Context, 
 		msgs = append(msgs, message.UserMsg(a.name, "[Previous context summary]: "+a.state.Summary))
 	}
 	msgs = append(msgs, threadPromptMsgs(a.name, a.state.PeerSummary)...)
-	if len(a.state.Plan) > 0 {
-		msgs = append(msgs, planPromptMsg(a.name, a.state.Plan))
-	}
-	msgs = append(msgs, a.state.Context...)
+	msgs = a.withPlan(msgs, a.state.Context)
 	copied, err := copyStructuredValue(reflect.ValueOf(msgs), 0)
 	replyID := a.state.ReplyID
 	a.mu.Unlock()

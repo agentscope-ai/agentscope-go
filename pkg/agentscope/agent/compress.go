@@ -725,7 +725,9 @@ func (a *UnifiedAgent) splitContextForCompression(reserveTokenBudget int, tools 
 // must charge against: the system prompt, the previous summary (when any),
 // the thread message (the peer summary, see threadPromptMsgs) and the
 // plan tracker message prepareModelInput injects on every call — counting
-// them is what keeps the reserve fit and the trigger estimate honest.
+// them is what keeps the reserve fit and the trigger estimate honest. The
+// plan is counted here even when WithPlanAfterLatestInput sends it later:
+// only its size matters to the accounting.
 func compressionBaseMsgs(agentName, systemPrompt, summary string, thread []*message.Msg, plan []tool.PlanItem) []*message.Msg {
 	baseMsgs := []*message.Msg{message.SystemMsg(agentName, systemPrompt)}
 	if summary != "" {

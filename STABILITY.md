@@ -194,6 +194,10 @@ ports and deferred work, including realtime/TUI, SOP and model-context wiring.
   pipeline as not completed. The loop bridge honors `WithExclusiveTools` per
   batch but has no handed-off end. Tested offline with scripted models.
 
+- `agent.WithPlanAfterLatestInput` is an Experimental addition to the
+  `agent` package and changes only where the plan message sits in the model
+  input. Its effect on answer quality has not been measured.
+
 - Experimental `evalkit.Runner.RunManagedLoad` evaluates the managed entry point
   directly with independent scoring and all-arrival/cost reporting. It creates no
   qualification records; offline fixtures and opt-in live quality pilots are

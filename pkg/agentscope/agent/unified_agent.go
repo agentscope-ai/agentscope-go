@@ -115,6 +115,7 @@ type UnifiedAgent struct {
 	// planToolEnabled / contextRemainingEnabled register the update_plan and
 	// get_context_remaining tools (see WithPlanTool/WithContextRemainingTool).
 	planToolEnabled         bool
+	planAfterInput          bool // WithPlanAfterLatestInput
 	contextRemainingEnabled bool
 	modelStreaming          bool
 
@@ -2008,12 +2009,7 @@ func (a *UnifiedAgent) modelInputLocked(prompt string) []*message.Msg {
 	msgs = append(msgs, threadPromptMsgs(a.name, a.state.PeerSummary)...)
 	// The plan lives outside Context precisely so it survives compression;
 	// re-inject it on every call or the model loses its tracker after one.
-	if len(a.state.Plan) > 0 {
-		msgs = append(msgs, planPromptMsg(a.name, a.state.Plan))
-	}
-
-	msgs = append(msgs, a.state.Context...)
-	return msgs
+	return a.withPlan(msgs, a.state.Context)
 }
 
 func (a *UnifiedAgent) callModel(ctx context.Context, msgs []*message.Msg, opts []model.CallOption) (*model.ChatResponse, error) {

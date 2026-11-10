@@ -384,10 +384,15 @@ immune to compression, and re-injected into the model input on every call
 read-only for permission purposes and deliberately NOT concurrency-safe:
 updates are ordered state transitions, and batching would scramble
 last-write-wins against event order. Each successful update emits a
-`plan_updated` custom event. `WithContextRemainingTool` registers
-`get_context_remaining`, reporting the usage-grounded remaining budget as
-`{"tokens_left": N|null}`. Both tools follow the compress_context wiring
-pattern: the tool validates, a callback into the agent mutates state.
+`plan_updated` custom event. Experimental `WithPlanAfterLatestInput` moves
+the injected plan right after the newest user message (never after a
+reply's tool steps, so they keep their turn), so a plan update leaves the
+earlier history a cached prefix; forks capture that layout and the
+compression accounting counts the plan either way.
+`WithContextRemainingTool` registers `get_context_remaining`, reporting the
+usage-grounded remaining budget as `{"tokens_left": N|null}`. Both tools
+follow the compress_context wiring pattern: the tool validates, a callback
+into the agent mutates state.
 
 ### Tools, permissions and workspace boundaries
 

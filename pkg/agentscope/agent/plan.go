@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/event"
@@ -15,10 +16,69 @@ import (
 // maintains a visible step plan for multi-step work. The plan lives in the
 // checkpointed agent state — it survives compression and crash-resume — and
 // is injected into the model input after the summary on every call, so the
-// model never loses track after a compaction. Each successful update emits a
-// plan_updated custom event for hosts to render.
+// model never loses track after a compaction (WithPlanAfterLatestInput
+// moves it later). Each successful update emits a plan_updated custom event
+// for hosts to render.
 func WithPlanTool() AgentOption {
 	return func(a *UnifiedAgent) { a.planToolEnabled = true }
+}
+
+// WithPlanAfterLatestInput (EXPERIMENTAL) injects the plan message right
+// after the newest user message in the context (one that holds no tool
+// results: the reply's input, a steered or an imported message) instead of
+// after the summary. Without such a message the plan stays after the
+// summary.
+//
+// Providers cache a request by its prefix. With the plan ahead of the
+// history, every plan update makes the whole history miss the cache on the
+// next call; here an update re-sends uncached only the plan and the current
+// turn's steps after it. The price is that the plan moves when a new user
+// message arrives, so the previous turn's steps miss the cache once.
+//
+// The plan never follows a reply's tool steps: a user message after them
+// would look like the start of a new user turn, which can change how a
+// provider carries reasoning across the tool steps of one reply. Before the
+// first tool step, the plan is the last message, directly after the new
+// input. The message text is the same, the compression accounting counts it
+// either way, and GenerateStructuredResponseWithUsage uses the same layout.
+// It has no effect without a plan. Its effect on answer quality has not been
+// measured.
+func WithPlanAfterLatestInput() AgentOption {
+	return func(a *UnifiedAgent) { a.planAfterInput = true }
+}
+
+// withPlan returns head followed by ctx with the plan message injected:
+// at the end of head by default, right after ctx's newest user message
+// with WithPlanAfterLatestInput. The returned slice is new; head and ctx
+// are not modified. Caller holds a.mu.
+func (a *UnifiedAgent) withPlan(head, ctx []*message.Msg) []*message.Msg {
+	if len(a.state.Plan) == 0 {
+		return slices.Concat(head, ctx)
+	}
+	plan := []*message.Msg{planPromptMsg(a.name, a.state.Plan)}
+	at := -1
+	if a.planAfterInput {
+		at = latestInput(ctx)
+	}
+	if at < 0 {
+		return slices.Concat(head, plan, ctx)
+	}
+	return slices.Concat(head, ctx[:at+1], plan, ctx[at+1:])
+}
+
+// latestInput is the index of the newest user message in ctx that holds no
+// tool results, or -1.
+func latestInput(ctx []*message.Msg) int {
+	for i := len(ctx) - 1; i >= 0; i-- {
+		m := ctx[i]
+		if m == nil || m.Role != message.RoleUser {
+			continue
+		}
+		if len(m.GetContentBlocks(message.ContentBlockToolResult)) == 0 {
+			return i
+		}
+	}
+	return -1
 }
 
 // WithContextRemainingTool registers the get_context_remaining tool (codex

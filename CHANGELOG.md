@@ -58,6 +58,18 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   still runs, even after its event stream closed. Tested offline with
   scripted models.
 
+### Added — plan after the newest user message (experimental)
+
+- `agent.WithPlanAfterLatestInput()` injects the `WithPlanTool` plan message
+  right after the newest user message in the context instead of after the
+  summary. With the plan ahead of the history, every plan update made the
+  whole history miss the provider's prefix cache on the next call; now the
+  history before the current turn stays cached. The plan never follows a
+  reply's tool steps, so they keep following their own user message; on a
+  reply's first call it directly follows the new input.
+  `GenerateStructuredResponseWithUsage` uses the same layout; the default is
+  unchanged, and the effect on answer quality has not been measured.
+
 ### Changed — checkpoint schema version 3
 
 - **BREAKING (constant value)** `agent.StateSchemaVersion` is now 3 (it was 2
