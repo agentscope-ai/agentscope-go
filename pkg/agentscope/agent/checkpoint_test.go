@@ -374,8 +374,8 @@ func TestStashes_LimitCapsGrowth(t *testing.T) {
 	// grow the park stashes unbounded within one reply.
 	a := &UnifiedAgent{}
 	for i := 0; i < stashLimit+100; i++ {
-		a.stashConfirm(&event.ConfirmResult{ToolCall: message.ToolCallBlock{ID: fmt.Sprintf("tc_c_%d", i)}})
-		a.stashExternalResult(&message.ToolResultBlock{ID: fmt.Sprintf("tc_e_%d", i)})
+		a.stashConfirm("", &event.ConfirmResult{ToolCall: message.ToolCallBlock{ID: fmt.Sprintf("tc_c_%d", i)}})
+		a.stashExternalResult("", &message.ToolResultBlock{ID: fmt.Sprintf("tc_e_%d", i)})
 	}
 	a.mu.Lock()
 	nc, ne := len(a.confirmStash), len(a.externalStash)

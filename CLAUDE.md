@@ -154,6 +154,13 @@ missing or no-longer-external tools must be rejected before asking permission.
 External metadata flows through recorded results, `ToolResultEndEvent` and
 `Msg.AppendEvent`. Preserve complete external block output in state and the order
 of supported text/data events; event data-size limits still apply.
+Confirmation and external-result waiters match answers by reply ID as well as
+tool-call ID, since tool-call IDs can repeat across replies: an answer naming
+another reply is dropped before any batched entry is stashed, stashed entries
+keep their reply ID for the taker to check, an empty `ReplyID` matches by call
+ID, and a call re-asked after a plain checkpoint resume also accepts the
+checkpoint's reply ID (`priorReplyID`). A waiter checks its context before
+each read.
 
 `console.Launch` returns the caller's context error at prompts, confirmations and
 active replies. SIGINT during a reply cancels only that reply. The caller owns
@@ -327,7 +334,8 @@ overview head and next-steps tail survive.
 moves summarization latency off the reply's critical path: crossing the lower
 ratio starts a background generation from a context snapshot
 ([precompress.go](pkg/agentscope/agent/precompress.go)), and the hard trigger
-applies a still-valid result without a blocking model call. Validity is
+applies a still-valid result without a blocking model call (and still
+compresses synchronously when the context stays at the threshold). Validity is
 structural — same base summary plus the snapshot's boundary message identity
 — so checkpoint rollbacks and interleaved compactions safely discard it; the
 reserved suffix keeps the LIVE message versions so in-place truncation from
