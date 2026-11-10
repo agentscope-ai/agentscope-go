@@ -44,7 +44,9 @@ type ChatResponse struct {
 	// Error carries a terminal streaming failure. A streaming consumer must check
 	// this on every chunk: a non-nil Error means the stream failed mid-flight and
 	// the accumulated content is incomplete (previously such failures were only
-	// logged, so a truncated stream looked complete with IsLast=true).
+	// logged, so a truncated stream looked complete with IsLast=true). A
+	// buffered Chat response can carry it too, alongside partial content: the
+	// OpenAI Responses adapter reports a status other than "completed" there.
 	Error error `json:"-"`
 }
 

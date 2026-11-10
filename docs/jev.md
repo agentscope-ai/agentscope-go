@@ -160,16 +160,20 @@ The local path uses `SYSTEMONE_LOCAL_API_KEY` when set, or the dummy value
 for unauthenticated servers. It never falls back to `TYPESAFE_API_KEY`. Treat
 this optional key as a secret and supply it securely through the environment.
 
-For [Piccolo](https://github.com/agentscope-ai/Piccolo), the proposed text
+See the [local Piccolo example and CPU setup](piccolo.md) for the W1-tested
+runtime/model pins, server flags and runtime-specific differences.
+
+For [Piccolo](https://github.com/agentscope-ai/Piccolo), the text
 integration reuses `/v1/systemone`; it is not a `ChatModel` adapter. The server
 must already be running. Match the served model name exactly: SGLang returns
-HTTP 400 on a mismatch. Choice questions must have at least two candidates
-(Piccolo rejects one with HTTP 422, although Jev accepts one); the contract
-fixture uses two. These are compatibility notes from
-[RFC #109](https://github.com/agentscope-ai/agentscope-go/issues/109), not a
-live verification result. W0's HTTP fixtures verify configuration and model-name
-propagation only. W1 must verify the actual Piccolo runtime/protocol; no live
-Piccolo compatibility, quality, latency or cost result is claimed here. The
+HTTP 400 on a mismatch. Piccolo Choice questions require at least two candidates,
+although Jev accepts one. For one candidate, SGLang reports HTTP 422 while the
+W1-tested patched llama.cpp reports HTTP 400; the contract fixture uses two. The SGLang status codes are source-based notes from
+[RFC #109](https://github.com/agentscope-ai/agentscope-go/issues/109), not live
+SGLang verification. W0's HTTP fixtures verify configuration and model-name
+propagation only. The linked guide records W1's limited real CPU verification,
+including a different one-option status code and model-mismatch behavior in
+patched llama.cpp; it makes no quality, latency or cost claim. The
 vision `/v1/decisions` endpoint and permission/compaction integration are outside
 this configuration change.
 

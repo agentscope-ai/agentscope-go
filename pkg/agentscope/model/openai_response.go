@@ -453,8 +453,52 @@ func (m *openaiResponseModel) parseResponse(raw map[string]any) (*ChatResponse, 
 			resp.Usage.OutputTokens = int(v)
 		}
 	}
+	// A response cut at max_output_tokens (or one that failed) still
+	// carries its partial output; keep it, but report the status so callers
+	// can tell it apart from a complete answer.
+	resp.Error = responseStatusError(raw, "")
 
 	return resp, nil
+}
+
+// responseStatusError reports a Responses API response whose status is not
+// "completed", naming the status and, when present, the incomplete_details
+// reason or the error code and message. A response without a status is
+// accepted as before. eventStatus is the status a streamed terminal event
+// names ("incomplete" for response.incomplete, "failed" for
+// response.failed); it applies when the object omits its status or reports
+// "completed", so a failure event never reads as a complete answer.
+// Buffered responses pass "".
+func responseStatusError(obj map[string]any, eventStatus string) error {
+	status, _ := obj["status"].(string)
+	if status == "" || status == "completed" {
+		status = eventStatus
+	}
+	if status == "" || status == "completed" {
+		return nil
+	}
+	var reason string
+	if details, ok := obj["incomplete_details"].(map[string]any); ok {
+		reason, _ = details["reason"].(string)
+	}
+	if e, ok := obj["error"].(map[string]any); ok && reason == "" {
+		// Keep the code: the agent's context-overflow recovery matches
+		// context_length_exceeded, which the message does not contain.
+		code, _ := e["code"].(string)
+		msg, _ := e["message"].(string)
+		switch {
+		case code != "" && msg != "":
+			reason = code + ": " + msg
+		case code != "":
+			reason = code
+		default:
+			reason = msg
+		}
+	}
+	if reason != "" {
+		return fmt.Errorf("openai response: response %s: %s", status, reason)
+	}
+	return fmt.Errorf("openai response: response %s", status)
 }
 
 // processStream consumes the Responses SSE stream. Contract: exactly one
@@ -560,11 +604,15 @@ scanLoop:
 				tc.Input += delta
 			}
 
-		case "response.completed":
+		case "response.completed", "response.incomplete", "response.failed":
+			// Terminal events. The latter two (and a completed event whose
+			// response reports another status) keep the accumulated content
+			// and usage and report the status on Error.
 			resp := &ChatResponse{IsLast: true, ModelName: m.cfg.Model}
 			resp.Content = buildStreamContent(accText, accThinking, reasoningItems, toolCalls, toolCallOrder)
 
-			if respObj, ok := event["response"].(map[string]any); ok {
+			respObj, ok := event["response"].(map[string]any)
+			if ok {
 				if id, ok := respObj["id"].(string); ok {
 					resp.ID = id
 				}
@@ -578,6 +626,7 @@ scanLoop:
 					}
 				}
 			}
+			resp.Error = responseStatusError(respObj, strings.TrimPrefix(eventType, "response."))
 
 			if !send(*resp) {
 				return
@@ -592,7 +641,8 @@ scanLoop:
 	}
 
 	// Upstream #2349: never end silently. A scan error or a stream that
-	// terminates without response.completed still delivers a final IsLast
+	// terminates without a terminal event (response.completed,
+	// response.incomplete or response.failed) still delivers a final IsLast
 	// response so consumers can distinguish completion from truncation.
 	final := ChatResponse{IsLast: true, ModelName: m.cfg.Model}
 	final.Content = buildStreamContent(accText, accThinking, reasoningItems, toolCalls, toolCallOrder)
@@ -601,7 +651,7 @@ scanLoop:
 		final.Error = err
 	} else {
 		// Upstream #2349/#2350 class: the SSE stream ended cleanly but never
-		// delivered response.completed, so the reply is truncated (proxy
+		// delivered a terminal event, so the reply is truncated (proxy
 		// reset, upstream abort). Reporting it on ChatResponse.Error is what
 		// lets consumers distinguish a complete answer from a cut-off one;
 		// ending silently made the two indistinguishable. Cancellation and
