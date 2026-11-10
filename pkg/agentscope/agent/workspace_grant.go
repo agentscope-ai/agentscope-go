@@ -72,7 +72,7 @@ func (a *UnifiedAgent) handleWorkspaceEscape(
 	tc.SuggestedRules = rulesToAny([]permission.Rule{grantRule})
 	emit(ctx, ch, event.NewRequireUserConfirmEvent(replyID, []message.ToolCallBlock{*tc}))
 
-	confirmed, resultTC := a.waitForConfirmation(ctx, tc.ID)
+	confirmed, resultTC := a.waitForConfirmation(ctx, answerIDs{reply: replyID}, tc.ID)
 	if !confirmed {
 		a.updateToolCallState(tc.ID, message.ToolCallFinished)
 		return a.emitToolResult(ctx, ch, replyID, tc, message.ToolResultError,

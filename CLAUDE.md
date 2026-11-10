@@ -24,7 +24,7 @@ feature is wired into every execution path.
 | Managed task routing | [router.go](pkg/agentscope/managedtask/router.go), [router_classification.go](pkg/agentscope/managedtask/router_classification.go) | Task-owned qualified pools, guarded classification and shared execution limits; [guide](docs/managed-routing.md) |
 | Fixed managed text tasks | [managedtask/](pkg/agentscope/managedtask/), [openai_text.go](pkg/agentscope/model/openai_text.go) | Opt-in fixed deployment, host disclosure policy, bounded admission/retries and frozen attempt snapshots; [guide](docs/managed-task.md) |
 | Probabilistic classification | [classifier/](pkg/agentscope/classifier/) | Typed decisions, validation, attempt accounting and offline fake; [guide](docs/classifier.md) |
-| Jev adapter | [classifier/jev/](pkg/agentscope/classifier/jev/) | Single-attempt Jev HTTP conversion, bounded payloads and failure accounting; [guide](docs/jev.md) |
+| Jev adapter | [classifier/jev/](pkg/agentscope/classifier/jev/) | Single-attempt Jev HTTP conversion, bounded payloads and failure accounting; [guide](docs/jev.md), [local Piccolo example](docs/piccolo.md) |
 | Bailian adapter | [classifier/bailian/](pkg/agentscope/classifier/bailian/), [shared codec](pkg/agentscope/classifier/internal/systemone/) | Experimental System One decisions, provider limits and guarded single-attempt dispatch; [guide](docs/bailian.md) |
 | OpenAI Decisions adapter | [classifier/openai/](pkg/agentscope/classifier/openai/) | Single-attempt text Decisions conversion, complete distributions and guarded dispatch; [guide](docs/openai-decisions.md) |
 | Message formatting | [formatter/](pkg/agentscope/formatter/) | Provider-specific message and multimodal formats |
@@ -154,6 +154,13 @@ missing or no-longer-external tools must be rejected before asking permission.
 External metadata flows through recorded results, `ToolResultEndEvent` and
 `Msg.AppendEvent`. Preserve complete external block output in state and the order
 of supported text/data events; event data-size limits still apply.
+Confirmation and external-result waiters match answers by reply ID as well as
+tool-call ID, since tool-call IDs can repeat across replies: an answer naming
+another reply is dropped before any batched entry is stashed, stashed entries
+keep their reply ID for the taker to check, an empty `ReplyID` matches by call
+ID, and a call re-asked after a plain checkpoint resume also accepts the
+checkpoint's reply ID (`priorReplyID`). A waiter checks its context before
+each read.
 
 `console.Launch` returns the caller's context error at prompts, confirmations and
 active replies. SIGINT during a reply cancels only that reply. The caller owns

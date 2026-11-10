@@ -88,8 +88,14 @@ type UnifiedAgent struct {
 	replyRecovery  bool
 	activeRecovery *replyRecoveryRun
 	checkpointMu   sync.Mutex
-	confirmStash   map[string]event.ConfirmResult
-	externalStash  map[string]message.ToolResultBlock
+	confirmStash   map[string]stashed[event.ConfirmResult]
+	externalStash  map[string]stashed[message.ToolResultBlock]
+	// priorReplyID is the reply ID the state held when the running reply
+	// started, when that ID differs from the running reply's (empty
+	// otherwise). After a plain checkpoint resume, which gives the reply a
+	// new ID, answers to the calls it asks again may still name it (see
+	// resumedAnswerIDs). Guarded by mu.
+	priorReplyID   string
 	hookRunner     *loop.HookRunner
 	stateAwareness bool
 	responseFormat *model.ResponseFormat
@@ -611,6 +617,11 @@ func (a *UnifiedAgent) Observe(ctx context.Context, msgs []*message.Msg) error {
 
 // SubmitUserConfirm submits a user confirmation result for pending tool calls.
 // Call this after receiving a RequireUserConfirmEvent from the event stream.
+// Set ReplyID to that event's ReplyID: a waiting reply drops a result naming
+// another reply, because tool-call IDs may repeat across replies. A call
+// asked again after a plain checkpoint resume (WithState, then a new reply)
+// also accepts the reply ID the checkpoint held. An empty ReplyID matches the
+// waiting reply, by tool-call ID only.
 func (a *UnifiedAgent) SubmitUserConfirm(result *event.UserConfirmResultEvent) {
 	if a.confirmCh != nil {
 		a.confirmCh <- *result
@@ -621,7 +632,9 @@ func (a *UnifiedAgent) SubmitUserConfirm(result *event.UserConfirmResultEvent) {
 // Call this after receiving a RequireExternalExecutionEvent from the event
 // stream. Results whose IDs match no pending call are parked for other
 // waiters (batched results); the wait ends only on a matching result or
-// context cancellation.
+// context cancellation. Set ReplyID to the request event's ReplyID, as for
+// SubmitUserConfirm: a result naming another reply is dropped whole, and an
+// empty ReplyID matches by tool-call ID only.
 // Submission transfers ownership of the result objects and their nested maps
 // and slices to the agent. Do not mutate them after this call.
 func (a *UnifiedAgent) SubmitExternalResult(result *event.ExternalExecutionResultEvent) {
@@ -682,6 +695,10 @@ func (a *UnifiedAgent) replyLoop(ctx context.Context, input string, ch chan<- ev
 	a.clearExternalStash()
 
 	a.mu.Lock()
+	a.priorReplyID = ""
+	if prior := a.state.ReplyID; prior != replyID {
+		a.priorReplyID = prior
+	}
 	a.state.ReplyID = replyID
 	if run == nil || !run.resume {
 		a.state.CurIter = 0
@@ -1233,7 +1250,7 @@ func (a *UnifiedAgent) executeToolCallWithPermission(
 			emit(ctx, ch, event.NewRequireUserConfirmEvent(replyID, []message.ToolCallBlock{*tc}))
 
 			// Block waiting for user confirmation
-			confirmed, resultTC := a.waitForConfirmation(ctx, tc.ID)
+			confirmed, resultTC := a.waitForConfirmation(ctx, answerIDs{reply: replyID}, tc.ID)
 			if !confirmed {
 				a.updateToolCallState(tc.ID, message.ToolCallFinished)
 				return a.emitToolResult(ctx, ch, replyID, tc, message.ToolResultDenied,
@@ -1266,21 +1283,37 @@ func (a *UnifiedAgent) executeToolCallWithPermission(
 	return a.executeTool(ctx, ch, replyID, tc, actingHandler)
 }
 
-func (a *UnifiedAgent) waitForConfirmation(ctx context.Context, toolCallID string) (bool, message.ToolCallBlock) {
+// waitForConfirmation waits for the answer to toolCallID's confirmation
+// request. Answers naming a reply outside ids are dropped (see answerIDs).
+func (a *UnifiedAgent) waitForConfirmation(ctx context.Context, ids answerIDs, toolCallID string) (bool, message.ToolCallBlock) {
 	var input <-chan event.UserConfirmResultEvent = a.confirmCh
 	if scoped := confirmation.Input(ctx, a); scoped != nil {
 		input = scoped
 	}
-	// A batch confirmation consumed by an earlier waiter may already carry our
-	// call (HARNESS review M2): check the stash first.
-	if confirmed, tc, found := a.takeStashedConfirm(toolCallID); found {
-		return confirmed, tc
-	}
 	for {
+		// A canceled reply takes no answer: its core can outlive the close
+		// of its stream, and an answer queued by then may be a later reply's.
+		if ctx.Err() != nil {
+			return false, message.ToolCallBlock{}
+		}
+		// A batch confirmation consumed by an earlier waiter may already
+		// carry our call (HARNESS review M2): check the stash before reading.
+		if confirmed, tc, found := a.takeStashedConfirm(ids, toolCallID); found {
+			return confirmed, tc
+		}
 		select {
 		case result, ok := <-input:
 			if !ok {
 				return false, message.ToolCallBlock{}
+			}
+			if ids.other(result.ReplyID) {
+				// An answer to another reply's request, such as a late
+				// answer to a canceled reply. Tool-call IDs may repeat
+				// across replies, so it must not approve or deny this
+				// reply's call; drop it whole, before stashing any entry.
+				logrus.WithFields(logrus.Fields{"agent": a.name, "reply_id": result.ReplyID, "current_reply_id": ids.reply}).
+					Warn("agent: dropping a confirmation that names another reply")
+				continue
 			}
 			var match *event.ConfirmResult
 			for i := range result.ConfirmResults {
@@ -1292,7 +1325,7 @@ func (a *UnifiedAgent) waitForConfirmation(ctx context.Context, toolCallID strin
 				// Not ours: keep it for the other waiter(s) instead of
 				// dropping it on the floor (also stash entries AFTER our
 				// match — a batch answer must not lose later results).
-				a.stashConfirm(cr)
+				a.stashConfirm(result.ReplyID, cr)
 			}
 			if match != nil {
 				if match.Confirmed {
@@ -1332,31 +1365,41 @@ func (a *UnifiedAgent) waitForConfirmation(ctx context.Context, toolCallID strin
 // answers for concurrent waiters of ONE reply, so the bound is generous.
 const stashLimit = 1024
 
+// stashed is a parked batch entry with the reply ID its event named. The
+// waiter that parked it may have accepted a checkpoint's reply ID that the
+// entry's own waiter does not (answerIDs.prior), so takers check it again.
+type stashed[T any] struct {
+	reply string
+	value T
+}
+
 // stashConfirm parks a confirmation meant for another call so its waiter can
-// pick it up (batch ConfirmResults support).
-func (a *UnifiedAgent) stashConfirm(cr *event.ConfirmResult) {
+// pick it up (batch ConfirmResults support). reply is the event's ReplyID.
+func (a *UnifiedAgent) stashConfirm(reply string, cr *event.ConfirmResult) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.confirmStash == nil {
-		a.confirmStash = map[string]event.ConfirmResult{}
+		a.confirmStash = map[string]stashed[event.ConfirmResult]{}
 	}
 	if _, exists := a.confirmStash[cr.ToolCall.ID]; !exists && len(a.confirmStash) >= stashLimit {
 		logrus.WithField("tool_call_id", cr.ToolCall.ID).Warn("agent: confirmation stash limit reached, dropping entry")
 		return
 	}
-	a.confirmStash[cr.ToolCall.ID] = *cr
+	a.confirmStash[cr.ToolCall.ID] = stashed[event.ConfirmResult]{reply: reply, value: *cr}
 }
 
-// takeStashedConfirm retrieves and removes a parked confirmation.
-func (a *UnifiedAgent) takeStashedConfirm(toolCallID string) (bool, message.ToolCallBlock, bool) {
+// takeStashedConfirm retrieves and removes a parked confirmation for
+// toolCallID whose reply ID ids accepts. An entry naming another reply stays
+// parked for a waiter that accepts it.
+func (a *UnifiedAgent) takeStashedConfirm(ids answerIDs, toolCallID string) (bool, message.ToolCallBlock, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	cr, ok := a.confirmStash[toolCallID]
-	if !ok {
+	entry, ok := a.confirmStash[toolCallID]
+	if !ok || ids.other(entry.reply) {
 		return false, message.ToolCallBlock{}, false
 	}
 	delete(a.confirmStash, toolCallID)
-	return cr.Confirmed, cr.ToolCall, true
+	return entry.value.Confirmed, entry.value.ToolCall, true
 }
 
 // clearConfirmStash drops leftover parked confirmations; called at the start
@@ -1367,18 +1410,32 @@ func (a *UnifiedAgent) clearConfirmStash() {
 	a.confirmStash = nil
 }
 
-func (a *UnifiedAgent) waitForExternalResult(ctx context.Context, toolCallID string) *message.ToolResultBlock {
+// waitForExternalResult waits for the result of toolCallID's external
+// execution. Results naming a reply outside ids are dropped (see answerIDs).
+func (a *UnifiedAgent) waitForExternalResult(ctx context.Context, ids answerIDs, toolCallID string) *message.ToolResultBlock {
 	if a.externalCh == nil {
 		return nil
 	}
-	// A batched result consumed by an earlier waiter may already carry our
-	// call (HARNESS review M-1): check the stash first.
-	if tr, found := a.takeStashedExternalResult(toolCallID); found {
-		return &tr
-	}
 	for {
+		// A canceled reply takes no result (see waitForConfirmation).
+		if ctx.Err() != nil {
+			return nil
+		}
+		// A batched result consumed by an earlier waiter may already carry
+		// our call (HARNESS review M-1): check the stash before reading.
+		if tr, found := a.takeStashedExternalResult(ids, toolCallID); found {
+			return &tr
+		}
 		select {
 		case result := <-a.externalCh:
+			if ids.other(result.ReplyID) {
+				// A result for another reply's call, such as a late answer
+				// to a canceled reply: the tool-call ID alone cannot tell
+				// the two calls apart, so drop it whole.
+				logrus.WithFields(logrus.Fields{"agent": a.name, "reply_id": result.ReplyID, "current_reply_id": ids.reply}).
+					Warn("agent: dropping an external result that names another reply")
+				continue
+			}
 			var match *message.ToolResultBlock
 			for i := range result.ExecutionResults {
 				tr := &result.ExecutionResults[i]
@@ -1389,7 +1446,7 @@ func (a *UnifiedAgent) waitForExternalResult(ctx context.Context, toolCallID str
 				// Not ours: keep it for the other waiter(s) instead of
 				// dropping it on the floor (same mechanism as the
 				// confirmation stash).
-				a.stashExternalResult(tr)
+				a.stashExternalResult(result.ReplyID, tr)
 			}
 			if match != nil {
 				return match
@@ -1401,31 +1458,55 @@ func (a *UnifiedAgent) waitForExternalResult(ctx context.Context, toolCallID str
 	}
 }
 
+// answerIDs are the reply IDs an answer to one of a reply's calls may name:
+// the reply's own and, for a call the reply asks again after a plain
+// checkpoint resume (which gives the reply a new ID), also prior, the ID the
+// checkpoint held, since the host may answer the request it saw before the
+// restart.
+type answerIDs struct{ reply, prior string }
+
+// other reports whether an answer naming reply got belongs to another reply.
+// An answer without a reply ID matches any reply, so hosts that leave it
+// empty keep tool-call-ID matching.
+func (m answerIDs) other(got string) bool {
+	return m.reply != "" && got != "" && got != m.reply && got != m.prior
+}
+
+// resumedAnswerIDs is answerIDs for a call the running reply asks again
+// because it was still awaiting an answer when the reply started.
+func (a *UnifiedAgent) resumedAnswerIDs(replyID string) answerIDs {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return answerIDs{reply: replyID, prior: a.priorReplyID}
+}
+
 // stashExternalResult parks an external result meant for another call so its
 // waiter can pick it up (batch ExecutionResults support, HARNESS review M-1).
-func (a *UnifiedAgent) stashExternalResult(tr *message.ToolResultBlock) {
+// reply is the event's ReplyID.
+func (a *UnifiedAgent) stashExternalResult(reply string, tr *message.ToolResultBlock) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.externalStash == nil {
-		a.externalStash = map[string]message.ToolResultBlock{}
+		a.externalStash = map[string]stashed[message.ToolResultBlock]{}
 	}
 	if _, exists := a.externalStash[tr.ID]; !exists && len(a.externalStash) >= stashLimit {
 		logrus.WithField("tool_call_id", tr.ID).Warn("agent: external result stash limit reached, dropping entry")
 		return
 	}
-	a.externalStash[tr.ID] = *tr
+	a.externalStash[tr.ID] = stashed[message.ToolResultBlock]{reply: reply, value: *tr}
 }
 
-// takeStashedExternalResult retrieves and removes a parked external result.
-func (a *UnifiedAgent) takeStashedExternalResult(toolCallID string) (message.ToolResultBlock, bool) {
+// takeStashedExternalResult retrieves and removes a parked external result
+// for toolCallID whose reply ID ids accepts (see takeStashedConfirm).
+func (a *UnifiedAgent) takeStashedExternalResult(ids answerIDs, toolCallID string) (message.ToolResultBlock, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	tr, ok := a.externalStash[toolCallID]
-	if !ok {
+	entry, ok := a.externalStash[toolCallID]
+	if !ok || ids.other(entry.reply) {
 		return message.ToolResultBlock{}, false
 	}
 	delete(a.externalStash, toolCallID)
-	return tr, true
+	return entry.value, true
 }
 
 // clearExternalStash drops leftover parked external results; called at the
