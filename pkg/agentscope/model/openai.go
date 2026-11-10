@@ -21,6 +21,11 @@ type OpenAIChatModel struct {
 	defaultHeaders map[string]string
 
 	httpClient *http.Client
+
+	// formatter serializes messages into the request payload (default: OpenAI).
+	// Reasoning models need a formatter whose SupportsThinking is true so that
+	// reasoning_content is sent back on messages carrying tool calls.
+	formatter formatter.Formatter
 }
 
 // OpenAIConfig configures OpenAIChatModel.
@@ -32,6 +37,18 @@ type OpenAIConfig struct {
 
 	HTTPClient    *http.Client
 	ClientOptions *ClientOptions
+
+	// Formatter is an optional message serializer; nil means OpenAIFormatter.
+	//
+	// Reasoning models such as DeepSeek require reasoning_content to be passed
+	// back on every assistant message that carries tool calls, otherwise the API
+	// rejects multi-turn tool use with:
+	//
+	//	The `reasoning_content` in the thinking mode must be passed back to the API.
+	//
+	// The default OpenAIFormatter has SupportsThinking=false and therefore never
+	// emits the field. Use formatter.NewDeepSeekFormatter() to enable it.
+	Formatter formatter.Formatter
 }
 
 // NewOpenAIChatModel creates a ChatModel backed by OpenAI.
@@ -51,12 +68,17 @@ func NewOpenAIChatModel(cfg OpenAIConfig) (*OpenAIChatModel, error) { //nolint:g
 	if cfg.ClientOptions != nil {
 		defHeaders = cfg.ClientOptions.DefaultHeaders
 	}
+	f := cfg.Formatter
+	if f == nil {
+		f = formatter.NewOpenAIFormatter()
+	}
 	return &OpenAIChatModel{
 		apiKey:         apiKey,
 		baseURL:        base,
 		model:          cfg.Model,
 		defaultHeaders: defHeaders,
 		httpClient:     defaultHTTPClient(cfg.HTTPClient, cfg.ClientOptions),
+		formatter:      f,
 	}, nil
 }
 
@@ -76,7 +98,7 @@ func (m *OpenAIChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts ..
 
 	reqBody := openAIChatRequest{
 		Model:    m.model,
-		Messages: convertMessagesToOpenAI(msgs),
+		Messages: m.convertMessages(msgs),
 	}
 	if callOpts.Temperature != nil {
 		t := float32(*callOpts.Temperature)
@@ -160,7 +182,7 @@ func (m *OpenAIChatModel) ChatStream(ctx context.Context, msgs []*message.Msg, o
 
 	reqBody := openAIChatRequest{
 		Model:         m.model,
-		Messages:      convertMessagesToOpenAI(msgs),
+		Messages:      m.convertMessages(msgs),
 		Stream:        true,
 		StreamOptions: &openAIStreamOpts{IncludeUsage: true},
 	}
@@ -212,6 +234,14 @@ func (m *OpenAIChatModel) ChatStream(ctx context.Context, msgs []*message.Msg, o
 // CountTokens estimates token count.
 func (m *OpenAIChatModel) CountTokens(msgs []*message.Msg, tools []ToolSchema) int {
 	return countTokensByBytes(msgs, tools)
+}
+
+// convertMessages serializes msgs with the formatter configured on the model.
+func (m *OpenAIChatModel) convertMessages(msgs []*message.Msg) []openAIChatMessage {
+	if m.formatter == nil {
+		return convertMessagesToOpenAI(msgs)
+	}
+	return convertMessagesWithFormatter(msgs, m.formatter)
 }
 
 // convertMessagesToOpenAI maps internal Msg instances to OpenAI messages.
