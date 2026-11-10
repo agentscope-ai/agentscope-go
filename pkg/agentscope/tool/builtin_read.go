@@ -4,14 +4,17 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	pathpkg "path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/message"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/permission"
@@ -90,7 +93,9 @@ func (t *readTool) Execute(ctx context.Context, args map[string]any) (*ToolRespo
 		// it is paid only when there is an entry to validate, never just to
 		// build a cache key.
 		var rawLines []string
-		if rc != nil && rc.HasBeenRead(p) {
+		// SetRejectStaleWrites: always read, so the version recorded is the
+		// one this call returns.
+		if rc != nil && !rc.RejectsStaleWrites() && rc.HasBeenRead(p) {
 			if mt := backendMtime(ctx, b, p); mt != nil {
 				if cached := rc.GetCacheWithMtime(p, mt); cached != nil {
 					rawLines = cached.Lines
@@ -127,7 +132,11 @@ func (t *readTool) Execute(ctx context.Context, args map[string]any) (*ToolRespo
 			// there is no trustworthy freshness key, and falling back to a
 			// host stat would key the entry on an unrelated file.
 			if mt := backendMtime(ctx, b, p); mt != nil {
-				rc.CacheFileWithMtime(p, rawLines, mt)
+				rc.cacheFile(p, rawLines, mt, contentHash(data))
+			} else if rc.RejectsStaleWrites() {
+				// Without an mtime the copy is never served, but the version
+				// still has to be known for the stale-write check.
+				rc.cacheFile(p, rawLines, &time.Time{}, contentHash(data))
 			}
 		}
 		return NewTextResponse(formatReadLines(rawLines, offset, limit)), nil
@@ -167,7 +176,7 @@ func (t *readTool) Execute(ctx context.Context, args map[string]any) (*ToolRespo
 	var rawLines []string
 	rc := GetReadCache(ctx)
 
-	if rc != nil {
+	if rc != nil && !rc.RejectsStaleWrites() {
 		if cached := rc.GetCache(abs); cached != nil {
 			rawLines = cached.Lines
 		}
@@ -180,7 +189,9 @@ func (t *readTool) Execute(ctx context.Context, args map[string]any) (*ToolRespo
 		}
 		defer f.Close() //nolint:errcheck
 
-		scanner := bufio.NewScanner(f)
+		// The hash of every byte scanned is the version this read returns.
+		h := sha256.New()
+		scanner := bufio.NewScanner(io.TeeReader(f, h))
 		for scanner.Scan() {
 			rawLines = append(rawLines, scanner.Text())
 		}
@@ -189,7 +200,7 @@ func (t *readTool) Execute(ctx context.Context, args map[string]any) (*ToolRespo
 		}
 
 		if rc != nil {
-			rc.CacheFile(abs, rawLines)
+			rc.cacheFile(abs, rawLines, nil, hex.EncodeToString(h.Sum(nil)))
 		}
 	}
 

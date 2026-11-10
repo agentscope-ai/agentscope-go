@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	pathpkg "path"
@@ -90,6 +91,9 @@ func (t *writeTool) Execute(ctx context.Context, args map[string]any) (*ToolResp
 			if rc := GetReadCache(ctx); rc != nil && !rc.HasBeenRead(p) {
 				return NewErrorResponse(fmt.Errorf("file exists but has not been read yet; you must read the file first before writing to it")), nil
 			}
+			if staleWrite(ctx, p, existingData, content) {
+				return NewErrorResponse(errors.New(staleWriteMessage)), nil
+			}
 			oldContent = string(existingData)
 		}
 		if err := b.WriteFile(ctx, p, []byte(content)); err != nil {
@@ -122,6 +126,9 @@ func (t *writeTool) Execute(ctx context.Context, args map[string]any) (*ToolResp
 			if !rc.HasBeenRead(abs) {
 				return NewErrorResponse(fmt.Errorf("file exists but has not been read yet; you must read the file first before writing to it")), nil
 			}
+		}
+		if staleWrite(ctx, abs, existingData, content) {
+			return NewErrorResponse(errors.New(staleWriteMessage)), nil
 		}
 		oldContent = string(existingData)
 	}
@@ -311,4 +318,15 @@ func containsAt(lines []string, start int, target string) bool {
 		}
 	}
 	return false
+}
+
+// staleWrite reports whether replacing current with content would overwrite
+// a version the agent has not seen (ReadCache.SetRejectStaleWrites). A write
+// that leaves the content unchanged loses nothing.
+func staleWrite(ctx context.Context, key string, current []byte, content string) bool {
+	rc := GetReadCache(ctx)
+	if rc == nil || !rc.RejectsStaleWrites() || string(current) == content {
+		return false
+	}
+	return !rc.knowsVersion(key, current)
 }

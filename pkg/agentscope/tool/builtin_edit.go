@@ -92,8 +92,13 @@ func (t *editTool) Execute(ctx context.Context, args map[string]any) (*ToolRespo
 		}
 		// Upstream #2092: drop any cached copy so the next Read/Edit sees
 		// the new content — the host-side cache cannot stat backend files.
+		// With SetRejectStaleWrites the edit's result is recorded instead.
 		if rc := GetReadCache(ctx); rc != nil {
-			rc.Remove(p)
+			if rc.RejectsStaleWrites() {
+				rc.noteOwnEdit(p, data, []byte(newContent), backendMtime(ctx, b, p))
+			} else {
+				rc.Remove(p)
+			}
 		}
 		resp := NewTextResponse(fmt.Sprintf("Replaced %d occurrence(s) in %s", count, p))
 		if diff := generateUnifiedDiff(p, oldContent, newContent); diff != "" {
@@ -130,6 +135,9 @@ func (t *editTool) Execute(ctx context.Context, args map[string]any) (*ToolRespo
 
 	if err := os.WriteFile(abs, []byte(newContent), 0o644); err != nil {
 		return NewErrorResponse(fmt.Errorf("write file: %w", err)), nil
+	}
+	if rc := GetReadCache(ctx); rc != nil && rc.RejectsStaleWrites() {
+		rc.noteOwnEdit(abs, data, []byte(newContent), hostMtime(abs))
 	}
 
 	resp := NewTextResponse(fmt.Sprintf("Replaced %d occurrence(s) in %s", count, abs))

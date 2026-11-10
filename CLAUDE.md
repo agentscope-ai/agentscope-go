@@ -464,6 +464,12 @@ When that backend is present, inspect its path and operation semantics instead
 of assuming local OS behavior. Use `path` for workspace-relative paths with
 forward slashes and `filepath` for actual host filesystem paths.
 
+`ReadCache.SetRejectStaleWrites` (experimental, per cache) refuses a
+whole-file `Write` over a version that cache has not recorded: `Read` stores a
+content hash and skips cached copies while it is on, and the edit tools record
+their own results. It is a check before the write, not a lock; see
+[stale writes](docs/tools.md#stale-writes-on-a-shared-workspace-experimental).
+
 Local file-tool path confinement is opt-in through `tool.WithWorkspaceRoot`;
 it does not provide process or network isolation. Session grants widen the
 jail: when a jailed file tool rejects a path, `tool.NewErrorResponse` tags the

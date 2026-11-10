@@ -198,6 +198,13 @@ ports and deferred work, including realtime/TUI, SOP and model-context wiring.
   `agent` package and changes only where the plan message sits in the model
   input. Its effect on answer quality has not been measured.
 
+- `tool.ReadCache.SetRejectStaleWrites`, `ReadCache.RejectsStaleWrites` and
+  `ReadCacheEntry.Hash` are Experimental. The check is off by default; `Read`
+  records the hash either way. The check is not a lock and covers the
+  built-in Write tool; files changed by other tools are seen only through
+  their content. See
+  [stale writes](docs/tools.md#stale-writes-on-a-shared-workspace-experimental).
+
 - Experimental `evalkit.Runner.RunManagedLoad` evaluates the managed entry point
   directly with independent scoring and all-arrival/cost reporting. It creates no
   qualification records; offline fixtures and opt-in live quality pilots are

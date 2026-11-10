@@ -70,6 +70,20 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   `GenerateStructuredResponseWithUsage` uses the same layout; the default is
   unchanged, and the effect on answer quality has not been measured.
 
+### Added — stale-write check for shared workspaces (experimental)
+
+- `tool.ReadCache.SetRejectStaleWrites(true)` makes `Write` refuse to replace
+  a file whose content is not the version the agent last read or edited, so
+  agents with separate caches sharing a workspace cannot overwrite each
+  other's changes from an old copy. `Read` records the content's SHA-256
+  (`ReadCacheEntry.Hash`) and, while the check is on, always reads the file;
+  the edit tools record their own results. Edits are not refused. The check
+  runs just before the write and is not a lock. The setting is off by default
+  and is not saved with the cache; `Read` records the hash either way.
+  `ReadCacheEntry.Hash` is omitted when empty, and an older build ignores it
+  when it loads a saved cache. See
+  [stale writes](docs/tools.md#stale-writes-on-a-shared-workspace-experimental).
+
 ### Changed — checkpoint schema version 3
 
 - **BREAKING (constant value)** `agent.StateSchemaVersion` is now 3 (it was 2
