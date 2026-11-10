@@ -44,6 +44,9 @@ func (a *UnifiedAgent) GenerateStructuredResponseWithUsage(ctx context.Context, 
 	}
 	schema = append(json.RawMessage(nil), schema...)
 	a.mu.Lock()
+	// This pre-existing guard checks the event stream only; a canceled
+	// reply's core can outlive its stream. The newer between-replies seams
+	// also check runningCores (see busyLocked).
 	if a.activeConv != nil || a.activeReplies > 0 {
 		a.mu.Unlock()
 		return nil, fmt.Errorf("agent: structured generation requires an idle agent")
@@ -60,6 +63,7 @@ func (a *UnifiedAgent) GenerateStructuredResponseWithUsage(ctx context.Context, 
 	if a.state.Summary != "" {
 		msgs = append(msgs, message.UserMsg(a.name, "[Previous context summary]: "+a.state.Summary))
 	}
+	msgs = append(msgs, threadPromptMsgs(a.name, a.state.PeerSummary)...)
 	if len(a.state.Plan) > 0 {
 		msgs = append(msgs, planPromptMsg(a.name, a.state.Plan))
 	}

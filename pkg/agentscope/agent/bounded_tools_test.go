@@ -365,7 +365,8 @@ func TestBoundedDispatchCancellationAndRecovery(t *testing.T) {
 						t.Fatalf("failed save changed prior snapshot or retained core: results=%d", storedResults)
 					}
 				} else {
-					if storedResults != 8 || stored.ReplyRecovery.NextIteration != 1 || stored.SchemaVersion != StateSchemaVersion {
+					// Recovery counters need schema 2; schema 3 is only for thread state.
+					if storedResults != 8 || stored.ReplyRecovery.NextIteration != 1 || stored.SchemaVersion != 2 {
 						t.Fatalf("checkpoint lost completion/iteration/schema: %+v results=%d", stored.ReplyRecovery, storedResults)
 					}
 					if resume && stored.ReplyRecovery.Budgets.Counters["fixture"].UsedTokens != 7 {

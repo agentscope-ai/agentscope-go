@@ -210,6 +210,11 @@ func runGoalWork(ctx context.Context, a *agent.UnifiedAgent, prompt string) (*mo
 		if end.Error != nil {
 			return usage, fmt.Errorf("pipeline: agent work failed: %s", end.Error.Message)
 		}
+		// A handed-off end stopped the work after a tool step: the goal is
+		// not complete here, so it is not reported or verified as if it were.
+		if end.FinishedReason == types.ReplyHandedOff {
+			return usage, errors.New("pipeline: agent work was handed off before completion")
+		}
 		return usage, fmt.Errorf("pipeline: agent work did not complete: %s", end.FinishedReason)
 	}
 	return usage, nil

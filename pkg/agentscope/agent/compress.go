@@ -125,6 +125,21 @@ type ContextConfig struct {
 	// near the tail, so the middle loses the least.
 	SummaryMaxTokens int
 
+	// ThreadSummaryTokens (EXPERIMENTAL) is the budget the agent's own summary
+	// shares with a peer summary it holds (see ThreadUpdate.PeerSummary):
+	// the own summary gets what the peer summary leaves, at least 256
+	// estimated tokens and never more than the SummaryMaxTokens budget, and
+	// a peer summary that arrives leaves the own summary middle-elided to
+	// that share at once. The peer summary is then also left out of the
+	// reserve, so the recent tail keeps its ReserveRatio share (the reserve
+	// stays under 0.75 of the window). Zero (the default) sizes the budget
+	// from the context window, 3/8 of it (the issue #117 experiments gave
+	// 3,000 tokens of an 8,192-token window), and applies it only while a
+	// peer summary is held; a positive value is the budget; a negative value
+	// turns the option off. UnifiedAgent.SetThreadSummaryTokens changes it
+	// at run time.
+	ThreadSummaryTokens int
+
 	// CompactStrategy selects the window layout after compression:
 	// CompactStrategyReserveTail (default, also "") or
 	// CompactStrategyFreshWindow. See the constants for the trade-off.
@@ -372,12 +387,12 @@ func (a *UnifiedAgent) compressContextImpl(ctx context.Context, cfg *ContextConf
 		"threshold": threshold,
 	}).Info("context compression triggered")
 
-	// A background pre-compression (PrecompressRatio) that already finished
-	// against a still-valid snapshot applies instantly, skipping the blocking
-	// summarization call. Stale or missing results fall through to the
-	// synchronous path, and so does a non-forced trigger (automatic, or the
-	// compress_context tool at its own threshold) whose context is still at
-	// the threshold after the result went in. Forced compactions (Compact,
+	// A background pre-compression (PrecompressRatio) or an offered summary
+	// (OfferSummary) that is still valid applies instantly, skipping the
+	// blocking summarization call. Stale or missing results fall through to
+	// the synchronous path, and so does a non-forced trigger (automatic, or
+	// the compress_context tool at its own threshold) whose context is still
+	// at the threshold after the result went in. Forced compactions (Compact,
 	// overflow recovery) apply the result alone.
 	if a.applyReadyPrecompress(ctx) {
 		if force || a.model.CountTokens(a.prepareModelInput(ctx), toolSchemas) < threshold {
@@ -396,7 +411,7 @@ func (a *UnifiedAgent) compressContextImpl(ctx context.Context, cfg *ContextConf
 		logrus.WithField("agent", a.name).Info("context still at the threshold after the ready summary; compressing")
 	}
 
-	reserveTokens := int(float64(ctxSize) * cfg.ReserveRatio)
+	reserveTokens := a.reserveTokens(cfg, ctxSize)
 	if cfg.CompactStrategy == CompactStrategyFreshWindow {
 		// Fresh window: reserve as little as possible. A budget of 1 — NOT 0,
 		// which would take the emergency path — routes the split through the
@@ -480,7 +495,7 @@ func (a *UnifiedAgent) compressContextImpl(ctx context.Context, cfg *ContextConf
 	// Enforce the summary budget: a runaway summary silently re-inflates the
 	// window it just freed. Middle-elision keeps the overview head and the
 	// next-steps tail, the two ends the resumed context needs most.
-	if budget := summaryMaxTokens(cfg, ctxSize); budget > 0 {
+	if budget := a.ownSummaryBudget(cfg, ctxSize); budget > 0 {
 		if truncated, did := TruncateToolResult(newSummary, budget); did {
 			logrus.WithFields(logrus.Fields{
 				"agent":  a.name,
@@ -696,9 +711,10 @@ func (a *UnifiedAgent) splitContextForCompression(reserveTokenBudget int, tools 
 	systemPrompt := a.systemPrompt
 	summary := a.state.Summary
 	plan := a.state.Plan
+	thread := threadPromptMsgs(a.name, a.state.PeerSummary)
 	a.mu.Unlock()
 
-	baseMsgs := compressionBaseMsgs(a.name, systemPrompt, summary, plan)
+	baseMsgs := compressionBaseMsgs(a.name, systemPrompt, summary, thread, plan)
 	if a.contentBlockCompaction {
 		return a.splitContentBlocksForCompression(ctxMsgs, baseMsgs, reserveTokenBudget, tools)
 	}
@@ -706,14 +722,16 @@ func (a *UnifiedAgent) splitContextForCompression(reserveTokenBudget int, tools 
 }
 
 // compressionBaseMsgs builds the invariant head every compression accounting
-// must charge against: the system prompt, the previous summary (when any)
-// and the plan tracker message prepareModelInput injects on every call —
-// counting it is what keeps the reserve fit and the trigger estimate honest.
-func compressionBaseMsgs(agentName, systemPrompt, summary string, plan []tool.PlanItem) []*message.Msg {
+// must charge against: the system prompt, the previous summary (when any),
+// the thread message (the peer summary, see threadPromptMsgs) and the
+// plan tracker message prepareModelInput injects on every call — counting
+// them is what keeps the reserve fit and the trigger estimate honest.
+func compressionBaseMsgs(agentName, systemPrompt, summary string, thread []*message.Msg, plan []tool.PlanItem) []*message.Msg {
 	baseMsgs := []*message.Msg{message.SystemMsg(agentName, systemPrompt)}
 	if summary != "" {
 		baseMsgs = append(baseMsgs, message.UserMsg(agentName, "[Previous context summary]: "+summary))
 	}
+	baseMsgs = append(baseMsgs, thread...)
 	if len(plan) > 0 {
 		baseMsgs = append(baseMsgs, planPromptMsg(agentName, plan))
 	}

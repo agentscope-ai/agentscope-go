@@ -9,6 +9,12 @@ const (
 	ReplyInterrupted    ReplyFinishedReason = "interrupted"
 	ReplyExceedMaxIters ReplyFinishedReason = "exceed_max_iters"
 	ReplyError          ReplyFinishedReason = "error"
+	// ReplyHandedOff (EXPERIMENTAL) means a tool committed a handoff of the
+	// foreground to another participant (agent.UnifiedAgent.MarkHandedOff)
+	// and the reply ended after that tool step without a further model call.
+	// It is a normal (non-error) end, and like an interrupted end it cannot
+	// be swallowed by OnReply middleware.
+	ReplyHandedOff ReplyFinishedReason = "handed_off"
 )
 
 // ReplyErrorType classifies a fatal error that terminated a reply. Not

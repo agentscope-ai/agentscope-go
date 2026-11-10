@@ -25,6 +25,10 @@ type agentStateJSON struct {
 	MiddlewareState map[string]any      `json:"middleware_context,omitempty"`
 	ReadCacheData   json.RawMessage     `json:"read_cache_data,omitempty"`
 	Plan            []tool.PlanItem     `json:"plan,omitempty"`
+	SummaryOffer    *SummaryOffer       `json:"summary_offer,omitempty"`
+	// Thread state (schema version 3).
+	PeerSummary  *PeerSummary `json:"peer_summary,omitempty"`
+	ThreadCursor uint64       `json:"thread_cursor,omitempty"`
 }
 
 // MarshalJSON serializes AgentState to JSON.
@@ -43,7 +47,30 @@ func (s *AgentState) MarshalJSON() ([]byte, error) {
 		MiddlewareState: s.MiddlewareState,
 		ReadCacheData:   s.ReadCacheData,
 		Plan:            s.Plan,
+		SummaryOffer:    s.SummaryOffer,
+		PeerSummary:     s.PeerSummary,
+		ThreadCursor:    s.ThreadCursor,
 	})
+}
+
+// usesThreadState reports whether any thread field is set. Such a state needs
+// schema version 3: an older loader would silently drop the cursor and could
+// re-import entries the agent already holds.
+func (s *AgentState) usesThreadState() bool {
+	return s.PeerSummary != nil || s.ThreadCursor != 0
+}
+
+// checkpointSchemaVersion returns the lowest schema version able to carry s:
+// 1 by default, 2 with reply-recovery counters, 3 with thread state.
+func (s *AgentState) checkpointSchemaVersion() int {
+	switch {
+	case s.usesThreadState():
+		return 3
+	case s.ReplyRecovery != nil:
+		return 2
+	default:
+		return 1
+	}
 }
 
 // UnmarshalJSON deserializes AgentState from JSON.
@@ -65,6 +92,9 @@ func (s *AgentState) UnmarshalJSON(data []byte) error {
 	s.MiddlewareState = raw.MiddlewareState
 	s.ReadCacheData = raw.ReadCacheData
 	s.Plan = raw.Plan
+	s.SummaryOffer = raw.SummaryOffer
+	s.PeerSummary = raw.PeerSummary
+	s.ThreadCursor = raw.ThreadCursor
 	return nil
 }
 

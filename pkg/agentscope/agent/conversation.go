@@ -422,6 +422,8 @@ func (c *Conversation) runTurn(input string) {
 		case event.ReplyStartEvent:
 			replyID = e.ReplyID
 		case event.ReplyEndEvent:
+			// Only a user abort gets the interruption marker; a handed-off
+			// end (MarkHandedOff) finished its tool step and is a normal end.
 			if e.ReplyID == replyID && e.FinishedReason == types.ReplyInterrupted {
 				interrupted = true
 			}
