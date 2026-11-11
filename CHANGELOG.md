@@ -20,6 +20,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   messages per input. Local fixtures cover both call paths; no live API result
   is claimed. Part of #125.
 
+### Fixed — Anthropic thinking history
+
+- Preserve redacted thinking data in buffered and streamed responses and retain
+  empty thinking blocks carrying signatures when formatting follow-up history.
+  Existing message types and serialization are unchanged. Part of #125 (A2).
 
 ### Fixed — background precompression
 
