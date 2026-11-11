@@ -78,6 +78,20 @@ Go uses its existing `RedactedThinkingBlock` and `ThinkingBlock.Extra` signature
 field rather than Python's thinking-block attributes. Existing nonempty unsigned
 thinking behavior is unchanged; no new signature validation is introduced.
 
+When tools are provided, `WithToolChoice(&model.ToolChoice{Mode: "none"})`
+explicitly sends `tool_choice: {"type":"none"}` for Anthropic and the shared
+MiniMax Messages request builder. This unreleased fix keeps the tool definitions
+in the request while disabling model-side tool selection for that call. Unset
+choice still leaves the provider default; without tools, the existing builder
+continues to omit tool choice. Tool execution permissions remain separate.
+
+The mapping follows the
+[Python Anthropic tool-choice conversion](https://github.com/agentscope-ai/agentscope/blob/d74b833943d84ba8e6b8440b0fd4d46bcdc59569/src/agentscope/model/_anthropic/_model.py#L719-L724)
+and [Anthropic's tool-choice contract](https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools#forcing-tool-use).
+[MiniMax documents tool-choice compatibility](https://platform.minimax.io/docs/api-reference/text-anthropic-api#supported-parameters).
+Local fixtures verify request serialization for both providers; live-provider
+acceptance and model behavior have not been tested.
+
 ### DashScope (Alibaba Qwen)
 
 ```go
