@@ -11,6 +11,34 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Added — Main Thread coordinator (experimental)
+
+- New experimental package `thread`, as proposed in
+  [#117](https://github.com/agentscope-ai/agentscope-go/issues/117): a cloud
+  participant and an edge participant share one session through an
+  append-only log (`MemoryStore`, or `FileStore` with one fsynced JSON line
+  per batch). A `Coordinator` is the only writer. It keeps one foreground
+  owner with an epoch that guards reply and owner-change writes, routes
+  at query boundaries through a `Router` (or stays with the owner), delivers
+  steering at the owner's next boundary, fails a failed owner's request over
+  to the other side and resumes the request a stopped process was answering.
+  It commits transfers, background tasks and reports, imports what a
+  participant lacks before each activation (a clear with the newest peer
+  summary for an edge handover, otherwise a budgeted or chunked import for
+  the edge and a full import for the cloud) and schedules summaries a
+  `Forker` writes. A shared usage ledger, an opt-in tool-output list and
+  leases come with it.
+- The report that ends a task records how it ended (`Task.End`: the
+  assignee's finish reason, or `TaskUnfinished` for a task recovery found
+  unfinished), and assign entries reach the event stream, so a host can
+  follow tasks from the log without parsing text. There is no task state
+  machine; see the
+  [note on `taskenvelope`](https://github.com/agentscope-ai/agentscope-go/issues/117#issuecomment-6769407061).
+- The log has no privacy classes: every participant reads every entry. The
+  adapters for `UnifiedAgent` (`thread/participant`) and the router
+  (`thread/route`) land separately. Tested offline with scripted
+  participants. See [Main Thread](docs/main-thread.md).
+
 ### Added — agent seams for a session shared by several agents (experimental)
 
 - Opt-in `agent` seams for a host that runs several agents over one shared,

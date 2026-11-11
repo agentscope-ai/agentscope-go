@@ -36,6 +36,7 @@ feature is wired into every execution path.
 | OpenAI-compatible serving | [openaiserver/](pkg/agentscope/openaiserver/) | Experimental stateless text Chat Completions, server-owned tools and request admission; [guide](docs/openai-serving.md) |
 | External integrations | [mcp/](pkg/agentscope/mcp/), [a2a/](pkg/agentscope/a2a/), [channel/](pkg/agentscope/channel/) | Tool servers, remote agents and messaging channels |
 | Retrieval and memory | [rag/](pkg/agentscope/rag/), [embedding/](pkg/agentscope/embedding/), [memory/](pkg/agentscope/memory/) | Retrieval, embeddings and memory stores |
+| Cloud-edge shared session | [thread/](pkg/agentscope/thread/) | Experimental Main Thread log, Coordinator, transfer, background tasks, imports and summary scheduling; [guide](docs/main-thread.md) |
 | Composition and scheduling | [pipeline/](pkg/agentscope/pipeline/), [team/](pkg/agentscope/team/), [schedule/](pkg/agentscope/schedule/) | Agent coordination and scheduled execution |
 | Discovery and skills | [credential/](pkg/agentscope/credential/), [hub/](pkg/agentscope/hub/), [skill/](pkg/agentscope/skill/) | Provider configuration, integration discovery and skill loading |
 | Edge and device support | [device/](pkg/agentscope/device/), [messagebus/](pkg/agentscope/messagebus/), [connectivity.go](pkg/agentscope/model/connectivity.go) | Device tools, pub/sub and cloud/local routing |
@@ -326,6 +327,21 @@ performs final local admission and owns an independent durable command/effect
 log. The host schedules plan steps; the package does not fetch media, control
 hardware or provide real-time/exactly-once physical guarantees. See
 [embodied contracts](docs/embodied-contracts.md).
+
+Experimental `thread` runs a cloud and an edge participant over one append-only
+log. The `Coordinator` is the only writer: it routes at query boundaries, guards
+reply and owner-change writes with `{owner, epoch}` and shows the user the
+foreground owner's events (others' confirmation requests pass marked
+`Foreground: false`). The log has no privacy classes: every participant reads
+every entry. A participant fails `Activate` when its Sync was not applied; no
+Sync moves the cursor back (an edge clear is one Reset Sync with the
+activation). A failed owner's request fails over to the other side, queued
+behind any task running there (no takeover); a crash resumes the newest
+unanswered request on its owner. A task never re-runs: the report that ends it
+carries `Task.End`, and recovery reports one left without a report as
+`TaskUnfinished`. `Close` stops event delivery at an arbitrary point, so
+entries not yet delivered then may reach only the store. See
+[Main Thread](docs/main-thread.md).
 
 ### Context and model capabilities
 
