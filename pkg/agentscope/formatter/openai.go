@@ -213,18 +213,39 @@ type AnthropicFormatter struct {
 func (f *AnthropicFormatter) Format(msgs []*message.Msg) ([]map[string]any, error) {
 	var result []map[string]any
 	for _, msg := range msgs {
-		if msg == nil {
+		if msg == nil || msg.Role == message.RoleSystem {
 			continue
 		}
-		if msg.Role == message.RoleSystem {
-			continue
-		}
-		formatted := f.formatMsg(msg)
-		if formatted != nil {
-			result = append(result, formatted)
-		}
+		result = append(result, f.expandMsg(msg)...)
 	}
 	return result, nil
+}
+
+// expandMsg splits the rendered wire view, leaving stored history untouched.
+// Split after filtering empty/unsupported blocks so consecutive tool results
+// remain together even when an omitted block separates them internally.
+func (f *AnthropicFormatter) expandMsg(msg *message.Msg) []map[string]any {
+	formatted := f.formatMsg(msg)
+	if formatted == nil {
+		return nil
+	}
+	content := formatted["content"].([]map[string]any)
+	var out []map[string]any
+	start := 0
+	for start < len(content) {
+		result := content[start]["type"] == "tool_result"
+		end := start + 1
+		for end < len(content) && (content[end]["type"] == "tool_result") == result {
+			end++
+		}
+		role := formatted["role"]
+		if result {
+			role = "user"
+		}
+		out = append(out, map[string]any{"role": role, "content": content[start:end]})
+		start = end
+	}
+	return out
 }
 
 func (f *AnthropicFormatter) formatMsg(msg *message.Msg) map[string]any {
@@ -349,22 +370,18 @@ func (f *AnthropicFormatter) FormatMultiAgent(msgs []*message.Msg, currentAgent 
 		if msg == nil || msg.Role == message.RoleSystem {
 			continue
 		}
-		m := f.formatMsg(msg)
-		if m == nil {
-			continue
-		}
-		role, _ := m["role"].(string)
-		if role == "user" || role == "assistant" {
-			if msg.Name != "" && msg.Name != currentAgent {
-				if content, ok := m["content"].([]map[string]any); ok && len(content) > 0 {
-					nameBlock := map[string]any{"type": "text", "text": "[" + msg.Name + "]:"}
-					m["content"] = append([]map[string]any{nameBlock}, content...)
-				}
+		for _, part := range f.expandMsg(msg) {
+			content := part["content"].([]map[string]any)
+			// A result must lead its user message. Attribute only the sender's own
+			// content, never synthetic result segments or original tool messages.
+			if (msg.Role == message.RoleUser || msg.Role == message.RoleAssistant) &&
+				msg.Name != "" && msg.Name != currentAgent && content[0]["type"] != "tool_result" {
+				nameBlock := map[string]any{"type": "text", "text": "[" + msg.Name + "]:"}
+				part["content"] = append([]map[string]any{nameBlock}, content...)
 			}
+			formatted = append(formatted, part)
 		}
-		formatted = append(formatted, m)
 	}
-
 	return formatted, nil
 }
 
