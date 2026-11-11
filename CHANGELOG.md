@@ -11,6 +11,13 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — Anthropic thinking history
+
+- Preserve redacted thinking data in buffered and streamed responses and retain
+  empty thinking blocks carrying signatures when formatting follow-up history.
+  Existing message types and serialization are unchanged. Part of #125 (A2).
+
+
 ### Fixed — background precompression
 
 - With `ContextConfig.PrecompressRatio` set, a context that is still at the

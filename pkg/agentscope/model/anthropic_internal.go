@@ -60,7 +60,8 @@ func parseAnthropicResponse(parsed *anthropicResponse) (*ChatResponse, error) {
 	}
 
 	var content []message.ContentBlock
-	for _, c := range parsed.Content {
+	for i := range parsed.Content {
+		c := &parsed.Content[i]
 		switch c.Type {
 		case "text":
 			content = append(content, message.TextBlock{
@@ -78,6 +79,10 @@ func parseAnthropicResponse(parsed *anthropicResponse) (*ChatResponse, error) {
 				tb.Extra = map[string]any{"signature": c.Signature}
 			}
 			content = append(content, tb)
+		case "redacted_thinking":
+			content = append(content, message.RedactedThinkingBlock{
+				Type: "redacted_thinking", ID: fmt.Sprintf("redacted_thinking_%s", parsed.ID), Data: c.Data,
+			})
 		case "tool_use":
 			inputStr := string(c.Input)
 			content = append(content, message.ToolCallBlock{

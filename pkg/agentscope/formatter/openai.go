@@ -249,7 +249,9 @@ func (f *AnthropicFormatter) formatMsg(msg *message.Msg) map[string]any {
 				})
 			}
 		case message.ThinkingBlock:
-			if blk.Thinking != "" {
+			signature, _ := blk.Extra["signature"].(string)
+			// Empty provider thinking may carry the signature needed for continuation.
+			if blk.Thinking != "" || signature != "" {
 				tb := map[string]any{
 					"type":     "thinking",
 					"thinking": blk.Thinking,

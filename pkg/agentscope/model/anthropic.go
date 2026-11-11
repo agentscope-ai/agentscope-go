@@ -178,6 +178,7 @@ type anthropicResponse struct {
 		Text      string          `json:"text,omitempty"`
 		Thinking  string          `json:"thinking,omitempty"`
 		Signature string          `json:"signature,omitempty"`
+		Data      string          `json:"data,omitempty"`
 		ID        string          `json:"id,omitempty"`
 		Name      string          `json:"name,omitempty"`
 		Input     json.RawMessage `json:"input,omitempty"`
@@ -315,12 +316,13 @@ type anthropicContentBlockStart struct {
 	Type         string `json:"type"`
 	Index        int    `json:"index"`
 	ContentBlock struct {
-		Type      string          `json:"type"` // "text", "thinking", "tool_use"
+		Type      string          `json:"type"` // "text", "thinking", "redacted_thinking", "tool_use"
 		ID        string          `json:"id,omitempty"`
 		Name      string          `json:"name,omitempty"`
 		Text      string          `json:"text,omitempty"`
 		Thinking  string          `json:"thinking,omitempty"`
 		Signature string          `json:"signature,omitempty"`
+		Data      string          `json:"data,omitempty"`
 		Input     json.RawMessage `json:"input,omitempty"`
 	} `json:"content_block"`
 }
@@ -469,6 +471,8 @@ func processAnthropicStreamWithPolicy(ctx context.Context, sseCh <-chan httpx.SS
 					if initialText != "" {
 						initial = []message.ContentBlock{message.ThinkingBlock{Type: "thinking", Thinking: initialText}}
 					}
+				case "redacted_thinking":
+					initialText = cbs.ContentBlock.Data
 				case "tool_use":
 					initialText = string(cbs.ContentBlock.Input)
 				}
@@ -640,6 +644,10 @@ func processAnthropicStreamWithPolicy(ctx context.Context, sseCh <-chan httpx.SS
 				tb.Extra = map[string]any{"signature": ab.signature.String()}
 			}
 			finalContent = append(finalContent, tb)
+		case "redacted_thinking":
+			finalContent = append(finalContent, message.RedactedThinkingBlock{
+				Type: "redacted_thinking", ID: fmt.Sprintf("redacted_thinking_%s", responseID), Data: ab.text.String(),
+			})
 		case "tool_use":
 			finalContent = append(finalContent, message.ToolCallBlock{
 				Type:  "tool_call",
@@ -701,7 +709,7 @@ type anthropicStreamError struct {
 // Store accumulators by pointer: a non-zero strings.Builder must not be copied
 // when the block slice grows or when assembling the final response.
 type anthropicAccBlock struct {
-	blockType    string // "text", "thinking", "tool_use"
+	blockType    string // "text", "thinking", "redacted_thinking", "tool_use"
 	id           string
 	name         string
 	text         strings.Builder

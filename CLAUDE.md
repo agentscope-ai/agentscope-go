@@ -210,7 +210,9 @@ Its output count can exceed the input count. Multi-agent formatting assigns the
 sender before expansion is combined and merges only plain text messages without
 tool calls or reasoning; structured media keeps its message boundary.
 
-Anthropic requests use its public formatter. Gemini builds requests separately
+Anthropic requests use its public formatter. Buffered and streamed parsing retain
+redacted thinking data, and formatting retains empty thinking with a nonempty
+signature for tool-history continuation. Gemini builds requests separately
 in `model/gemini.go`: formatter support for media inside hints does not establish
 adapter support. Both paths filter empty text before joining or emitting it;
 nonempty whitespace remains content. Multi-agent formatting must associate each
