@@ -65,6 +65,19 @@ Models: `claude-opus-4-5`, `claude-opus-4-6`, `claude-opus-4-7`, `claude-opus-4-
 
 Extended thinking: `model.WithThinking(true, 10000)` enables thinking with a 10K token budget.
 
+Anthropic responses retain `redacted_thinking` blocks (including their opaque
+`data`) and thinking signatures in both buffered and streamed calls. Empty
+thinking text with a nonempty signature is retained when formatting history;
+empty unsigned thinking and empty text remain filtered. Return these blocks
+unchanged when continuing tool use. This change is unreleased,
+with local wire-fixture coverage; no live API validation is claimed.
+
+The preservation follows the
+[Python Anthropic formatter](https://github.com/agentscope-ai/agentscope/blob/d74b833943d84ba8e6b8440b0fd4d46bcdc59569/src/agentscope/formatter/_anthropic_formatter.py).
+Go uses its existing `RedactedThinkingBlock` and `ThinkingBlock.Extra` signature
+field rather than Python's thinking-block attributes. Existing nonempty unsigned
+thinking behavior is unchanged; no new signature validation is introduced.
+
 ### DashScope (Alibaba Qwen)
 
 ```go

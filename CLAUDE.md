@@ -124,6 +124,11 @@ have their own handler contracts. In particular:
   is passed explicitly, not inferred from middleware context. Hook inputs are
   read-only detached snapshots; nil/unknown decisions, errors and cancellation
   fail closed. See [the coverage and behavior-change note](docs/middleware.md#oncheckpermission).
+- The [permission advisory example](docs/permission-advisory.md) uses typed
+  `permission.Decision.Origin` to recognize only the engine Default fallback Ask.
+  Classification is host-owned advice and leaves the original decision intact;
+  its policy generation and binding checks are example-local, not an engine-wide
+  authorization transaction.
 - The loop bridge cannot carry interactive approval or external-tool events;
   use `UnifiedAgent.ReplyStream` for that workflow. Do not silently approve a
   tool because an execution path cannot request confirmation.
@@ -236,7 +241,10 @@ tool calls or reasoning; structured media keeps its message boundary.
 
 Anthropic requests use its public formatter, which expands merged tool history
 into assistant/user segments and groups consecutive tool results without adding
-sender text before them. The stored history remains unchanged. Gemini builds requests separately
+sender text before them. The stored history remains unchanged. Buffered and
+streamed parsing retain redacted thinking data, and formatting retains empty
+thinking with a nonempty signature for tool-history continuation. Gemini builds
+requests separately
 in `model/gemini.go`: formatter support for media inside hints does not establish
 adapter support. Both paths filter empty text before joining or emitting it;
 nonempty whitespace remains content. Multi-agent formatting must associate each

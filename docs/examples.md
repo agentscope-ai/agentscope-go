@@ -47,6 +47,7 @@ contracts; no real identity-provider or model integration is claimed.
 | [managed_task](../examples/managed_task/) | Fixed-model managed text execution with a local HTTP fixture |
 | [classifier](../examples/classifier/) | Typed classification with offline fake results and attempt accounting |
 | [piccolo](../examples/piccolo/) | Local Piccolo text decisions with offline fixtures and explicit live configuration |
+| [permission_advisory](../examples/permission_advisory/) | Offline shadow reviewer, scripted denial/approval and optional local classification; [guide](permission-advisory.md) |
 | [model_call](../examples/model_call/) | Direct model streaming, tool calls and structured output |
 | [structured_output](../examples/structured_output/) | Structured output through tool calling |
 | [multi_provider](../examples/multi_provider/) | Provider configuration and model cards |

@@ -87,6 +87,12 @@ ports and deferred work, including realtime/TUI, SOP and model-context wiring.
 
 ## Unreleased execution and retrieval behavior
 
+- `permission.Decision.Origin` adds typed provenance for the Default fallback Ask.
+  It does not change permission behavior. That branch adds `origin: default_ask`
+  to JSON; missing/unknown origin remains ineligible for shadow advice. Whole-value
+  comparisons and strict JSON schemas may need updating. See the
+  [advisory example](docs/permission-advisory.md).
+
 - **Permission middleware behavior change:** existing host `OnCheckPermission`
   implementations now run on eligible fresh interactive UnifiedAgent tool calls.
   Defaults without middleware remain unchanged. See [middleware coverage](docs/middleware.md#oncheckpermission)

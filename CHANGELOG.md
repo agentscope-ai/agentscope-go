@@ -11,7 +11,7 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
-### Added — agent seams for a session shared by several agents (experimental)
+### Added — shadow-mode permission advice
 
 - Opt-in `agent` seams for a host that runs several agents over one shared,
   append-only log, as proposed in
@@ -57,6 +57,15 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   The between-replies seams return `ErrReplyInProgress` while any reply core
   still runs, even after its event stream closed. Tested offline with
   scripted models.
+
+### Added — agent seams for a session shared by several agents (experimental)
+
+- An offline-first `permission_advisory` example combines classifier advice with
+  unchanged interactive permission confirmation, with optional local inference
+  and redacted lifecycle auditing.
+- `permission.Decision.Origin` identifies only the Default-mode fallback Ask
+  (`default_ask`); other engine outcomes have unknown origin. Eligible decisions
+  now serialize this additional field. See the [guide](docs/permission-advisory.md)
 
 ### Added — plan after the newest user message (experimental)
 
@@ -104,7 +113,7 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   `AgentState` fields (`summary_offer`, `peer_summary`, `thread_cursor`) are
   omitted when empty; an older build ignores them, which drops a summary
   offer, the one new field that does not raise the version (the trigger then
-  compresses synchronously).
+  for compatibility and host ownership limits.
 
 ### Fixed — Anthropic tool-result history
 
@@ -115,6 +124,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   messages per input. Local fixtures cover both call paths; no live API result
   is claimed. Part of #125.
 
+### Fixed — Anthropic thinking history
+
+- Preserve redacted thinking data in buffered and streamed responses and retain
+  empty thinking blocks carrying signatures when formatting follow-up history.
+  Existing message types and serialization are unchanged. Part of #125 (A2).
 
 ### Fixed — background precompression
 

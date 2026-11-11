@@ -172,6 +172,7 @@ necesarios.
 | [managed_task](examples/managed_task/) | Ejecución de texto con modelo fijo y servidor HTTP local de prueba |
 | [classifier](examples/classifier/) | Clasificación tipada con resultados simulados y registro de intentos |
 | [piccolo](examples/piccolo/) | Decisiones de texto con Piccolo local, servidor simulado y modo real opcional |
+| [permission_advisory](examples/permission_advisory/) | Consejo del clasificador sin modificar la confirmación simulada del usuario |
 | [model_call](examples/model_call/) | Streaming del modelo, herramientas y salida estructurada |
 | [volcengine](examples/volcengine/) | Streaming directo de Ark con autenticación por clave de API |
 | [minimax](examples/minimax/) | Herramientas de MiniMax con razonamiento conservado y respuesta posterior en streaming |
