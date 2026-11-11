@@ -11,6 +11,16 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — Anthropic tool-result history
+
+- Split merged assistant/tool-result history into Anthropic assistant/user
+  messages, preserving parallel results and subsequent assistant segments.
+  Multi-agent sender labels no longer precede tool results. This fixes tool
+  continuation with UnifiedAgent; public formatter output can contain multiple
+  messages per input. Local fixtures cover both call paths; no live API result
+  is claimed. Part of #125.
+
+
 ### Fixed — background precompression
 
 - With `ContextConfig.PrecompressRatio` set, a context that is still at the
