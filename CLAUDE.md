@@ -114,8 +114,9 @@ provides defaults. System-prompt transformation is a pipeline; the other hooks
 have their own handler contracts. In particular:
 
 - `OnReply` may consume a non-interrupted `ReplyEndEvent` to request another
-  round. Interrupted ends must propagate. Forward `CustomEvent` values whose
-  names start with `agentscope.`; these carry internal round-boundary signals.
+  round. Interrupted and handed-off ends must propagate. Forward `CustomEvent`
+  values whose names start with `agentscope.`; these carry internal
+  round-boundary signals.
 - `OnCheckPermission` runs around engine checks for newly generated sequential
   non-external calls in fresh `ReplyStream`/Conversation turns with an engine.
   Buffered `Reply`, resumed/restored calls, external tools, concurrent-dispatch
@@ -141,6 +142,28 @@ Read [checkpoint tests](pkg/agentscope/agent/checkpoint_test.go) and
 snapshot under a new session ID (context, summary, plan and permission grants;
 reply ID and recovery counters cleared). It is a between-replies operation and
 requires a `StateSaver`; run the branch via `LoadCheckpoint` + `WithState`.
+
+Experimental thread seams in `agent/thread_state.go`, `fork.go`,
+`compact_strict.go` and `handoff.go` let a host run several agents over one
+shared log (proposed in
+[issue #117](https://github.com/agentscope-ai/agentscope-go/issues/117)); all
+are opt-in and inert unless used. `ApplyThreadUpdate`, `WithThreadInput` and
+`WithBoundaryInput` import entries and move `AgentState.ThreadCursor` in one
+state update, boundary input at the same certified StateReason boundary as
+Conversation steering. A `PeerSummary` is injected after the agent's own
+summary and shares `ContextConfig.ThreadSummaryTokens` with it.
+`WithForkCapture`/`ForkSnapshot`/`ForkSummary` write a summary from the last
+captured request without touching the main context; `ApplySummary` installs it
+between replies, `OfferSummary` (checkpointed) at the next compression trigger
+through the precompression apply path. Both always keep the snapshot's
+boundary message raw: a mid-reply snapshot's boundary is the reply's own
+assistant message, which later rounds keep growing. `CompactStrict` leaves
+the state unchanged on any failure. `MarkHandedOff` ends the reply with
+`types.ReplyHandedOff` after the current tool step; like an interrupted end it
+cannot be swallowed by `OnReply`. `WithExclusiveTools` answers a mixed step
+holding an exclusive tool with error results. The between-replies seams return
+`ErrReplyInProgress` while any reply core still runs, even after its stream
+closed. Checkpoints carry schema 3 only when thread state is set.
 
 Model streams carry an idle guard (`ModelConfig.StreamIdleTimeout`, 5-minute
 default): a silent stream is a transport failure — replayed while unpublished,
@@ -351,12 +374,19 @@ ratio starts a background generation from a context snapshot
 ([precompress.go](pkg/agentscope/agent/precompress.go)), and the hard trigger
 applies a still-valid result without a blocking model call (and still
 compresses synchronously when the context stays at the threshold). Validity is
-structural — same base summary plus the snapshot's boundary message identity
-— so checkpoint rollbacks and interleaved compactions safely discard it; the
-reserved suffix keeps the LIVE message versions so in-place truncation from
-overflow recovery stays in effect. Precompression is off under
-`WithContentBlockCompaction` (the block-level splitter's granularity differs)
-and never retries or truncates on failure — the synchronous path owns that.
+structural — same base summary, the snapshot's boundary message identity and
+the order of the messages up to it (`contextDigest`: role, name, ID and thread
+seq) — so checkpoint rollbacks, interleaved compactions and removals before
+the boundary safely discard it. The boundary ID alone is not enough: every
+assistant message of a reply carries the reply ID, so a peer summary removing
+thread entries can slide a later message of the same reply onto the boundary.
+A summary offered with `OfferSummary` takes the same path and may come from a
+checkpoint, so validity also requires bounds that fit the context, a
+nonblank summary and a digest. The reserved suffix keeps the LIVE message
+versions so in-place truncation from overflow recovery stays in effect.
+Precompression and offers are off under `WithContentBlockCompaction` (the
+block-level splitter's granularity differs); precompression never retries or
+truncates on failure — the synchronous path owns that.
 
 `WithPlanTool` registers `update_plan`: the model maintains a step plan
 (at most one `in_progress`) stored in `AgentState.Plan` — checkpointed,
@@ -365,10 +395,15 @@ immune to compression, and re-injected into the model input on every call
 read-only for permission purposes and deliberately NOT concurrency-safe:
 updates are ordered state transitions, and batching would scramble
 last-write-wins against event order. Each successful update emits a
-`plan_updated` custom event. `WithContextRemainingTool` registers
-`get_context_remaining`, reporting the usage-grounded remaining budget as
-`{"tokens_left": N|null}`. Both tools follow the compress_context wiring
-pattern: the tool validates, a callback into the agent mutates state.
+`plan_updated` custom event. Experimental `WithPlanAfterLatestInput` moves
+the injected plan right after the newest user message (never after a
+reply's tool steps, so they keep their turn), so a plan update leaves the
+earlier history a cached prefix; forks capture that layout and the
+compression accounting counts the plan either way.
+`WithContextRemainingTool` registers `get_context_remaining`, reporting the
+usage-grounded remaining budget as `{"tokens_left": N|null}`. Both tools
+follow the compress_context wiring pattern: the tool validates, a callback
+into the agent mutates state.
 
 ### Tools, permissions and workspace boundaries
 
@@ -439,6 +474,12 @@ File and command tools can use a `tool.Backend` from the context.
 When that backend is present, inspect its path and operation semantics instead
 of assuming local OS behavior. Use `path` for workspace-relative paths with
 forward slashes and `filepath` for actual host filesystem paths.
+
+`ReadCache.SetRejectStaleWrites` (experimental, per cache) refuses a
+whole-file `Write` over a version that cache has not recorded: `Read` stores a
+content hash and skips cached copies while it is on, and the edit tools record
+their own results. It is a check before the write, not a lock; see
+[stale writes](docs/tools.md#stale-writes-on-a-shared-workspace-experimental).
 
 Local file-tool path confinement is opt-in through `tool.WithWorkspaceRoot`;
 it does not provide process or network isolation. Session grants widen the

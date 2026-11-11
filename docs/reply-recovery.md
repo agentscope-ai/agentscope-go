@@ -27,7 +27,11 @@ exposes persistence failures directly; legacy `Checkpoint` still logs them.
 ## Schema versions
 
 Legacy checkpoints keep schema 1. Checkpoints carrying recovery state use schema
-2; older readers reject them. New readers accept older conversation state, but
+2; older readers reject them. Checkpoints of an agent holding experimental thread
+state (`AgentState.PeerSummary` or `ThreadCursor`) use schema 3, with or without
+recovery state; readers from before schema 3 reject them.
+`agent.StateSchemaVersion` is the newest schema `LoadCheckpoint` accepts, not the
+version every write carries. New readers accept older conversation state, but
 explicit resume needs the typed recovery snapshot. Roll back to an older binary
 using a pre-recovery checkpoint or start a fresh conversation; do not strip
 budget fields to simulate a successful resume. Budget snapshots reject unknown

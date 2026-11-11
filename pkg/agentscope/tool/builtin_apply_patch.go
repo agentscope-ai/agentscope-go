@@ -157,6 +157,9 @@ func (t *applyPatchTool) Execute(ctx context.Context, args map[string]any) (*Too
 		if err := b.WriteFile(ctx, p, []byte(newContent)); err != nil {
 			return NewErrorResponse(fmt.Errorf("write file: %w", err)), nil
 		}
+		if rc := GetReadCache(ctx); rc != nil && rc.RejectsStaleWrites() {
+			rc.noteOwnEdit(p, data, []byte(newContent), backendMtime(ctx, b, p))
+		}
 		return patchResponse(p, oldContent, newContent), nil
 	}
 
@@ -181,6 +184,9 @@ func (t *applyPatchTool) Execute(ctx context.Context, args map[string]any) (*Too
 	}
 	if err := os.WriteFile(abs, []byte(newContent), 0o644); err != nil {
 		return NewErrorResponse(fmt.Errorf("write file: %w", err)), nil
+	}
+	if rc := GetReadCache(ctx); rc != nil && rc.RejectsStaleWrites() {
+		rc.noteOwnEdit(abs, data, []byte(newContent), nil)
 	}
 	return patchResponse(abs, oldContent, newContent), nil
 }

@@ -177,6 +177,40 @@ ports and deferred work, including realtime/TUI, SOP and model-context wiring.
   provide real-time, exactly-once or physical-safety guarantees. See
   [embodied contracts](docs/embodied-contracts.md).
 
+- The thread seams (`WithForkCapture`, `ForkSnapshot`, `ForkRequest`,
+  `ForkResult`, `ForkSummary`, `ApplySummary`, `SummaryApplyOptions`,
+  `OfferSummary`, `SummaryOffer`, `AgentState.SummaryOffer`, `CompactStrict`,
+  `CompactStrictOptions`, `ContextConfig.ThreadSummaryTokens`,
+  `SetThreadSummaryTokens`, `ApplyThreadUpdate`, `ThreadUpdate`,
+  `PeerSummary`, `AgentState.PeerSummary`, `AgentState.ThreadCursor`,
+  `WithBoundaryInput`, `BoundaryInput`, `WithThreadInput`, `ThreadView`,
+  `ThreadSeqOf`, `ThreadSeqMetadataKey`, `ThreadEventInputInjected`,
+  `ErrReplyInProgress`, `ErrNoForkSnapshot`, `ErrStaleSnapshot`,
+  `MarkHandedOff`, `WithExclusiveTools`, `SubmitExternalResultContext` and
+  `SubmitUserConfirmContext`) are Experimental additions to the Stable-tier
+  `agent` package, and `types.ReplyHandedOff` to `types`. They let a host
+  run several agents over one shared log (proposed in
+  [issue #117](https://github.com/agentscope-ai/agentscope-go/issues/117))
+  and are inert unless used: an agent that never uses them sends the same
+  requests and writes the same checkpoints as before. The between-replies
+  seams refuse with `ErrReplyInProgress` while any reply core still runs,
+  even after its event stream closed; a host that cancels a reply must let
+  its core finish first. A `ReplyHandedOff` end cannot be swallowed by
+  `OnReply` middleware; `TeamRun` treats it as a normal end and the goal
+  pipeline as not completed. The loop bridge honors `WithExclusiveTools` per
+  batch but has no handed-off end. Tested offline with scripted models.
+
+- `agent.WithPlanAfterLatestInput` is an Experimental addition to the
+  `agent` package and changes only where the plan message sits in the model
+  input. Its effect on answer quality has not been measured.
+
+- `tool.ReadCache.SetRejectStaleWrites`, `ReadCache.RejectsStaleWrites` and
+  `ReadCacheEntry.Hash` are Experimental. The check is off by default; `Read`
+  records the hash either way. The check is not a lock and covers the
+  built-in Write tool; files changed by other tools are seen only through
+  their content. See
+  [stale writes](docs/tools.md#stale-writes-on-a-shared-workspace-experimental).
+
 - Experimental `evalkit.Runner.RunManagedLoad` evaluates the managed entry point
   directly with independent scoring and all-arrival/cost reporting. It creates no
   qualification records; offline fixtures and opt-in live quality pilots are
@@ -249,8 +283,11 @@ limits. Shared governance across ordinary Agent/helper paths remains proposed.
   unfinished iteration on resume and pass current validation. See the
   [reply recovery guide](docs/reply-recovery.md).
 - Ordinary checkpoints keep schema 1; recovery checkpoints use schema 2 and
-  budget snapshot version 1. Older loaders reject schema 2. New loaders accept
-  older conversation state, but explicit recovery requires its typed snapshot.
+  budget snapshot version 1; checkpoints of agents holding thread state
+  (`AgentState.PeerSummary` or `ThreadCursor`) use schema 3, which takes
+  precedence. Older loaders reject schema 2, and loaders before schema 3
+  reject schema 3. New loaders accept older conversation state, but explicit
+  recovery requires its typed snapshot.
   Use a pre-recovery checkpoint or fresh conversation when rolling back; do not
   remove counters to bypass resume validation. `SaveCheckpoint` returns errors;
   legacy `Checkpoint` still logs them. Recovery does not provide exactly-once

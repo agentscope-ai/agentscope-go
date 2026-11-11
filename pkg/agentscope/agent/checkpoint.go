@@ -63,14 +63,14 @@ func (a *UnifiedAgent) SaveCheckpoint(ctx context.Context) error {
 		st.PermissionCtx = a.engine.SnapshotContext()
 	}
 	// Preserve legacy writes for readers that support only schema 1. Recovery
-	// counters require schema 2 and must never silently disappear on downgrade.
-	st.SchemaVersion = 1
+	// counters require schema 2 and thread state schema 3; neither may
+	// silently disappear on downgrade, so their presence raises the version.
 	run := a.activeRecovery
 	if run != nil {
 		st.ReplyRecovery = run.snapshot()
 	}
+	st.SchemaVersion = st.checkpointSchemaVersion()
 	if st.ReplyRecovery != nil {
-		st.SchemaVersion = StateSchemaVersion
 		if _, err := middleware.WithReplyBudgetSnapshot(ctx, &st.ReplyRecovery.Budgets); err != nil {
 			a.mu.Unlock()
 			return fmt.Errorf("agent: checkpoint budgets: %w", err)
@@ -131,7 +131,7 @@ func (a *UnifiedAgent) ForkSession(ctx context.Context, newSessionID string) err
 	st.SessionID = newSessionID
 	st.ReplyID = ""
 	st.ReplyRecovery = nil
-	st.SchemaVersion = 1
+	st.SchemaVersion = st.checkpointSchemaVersion() // 1, or 3 with thread state
 	raw, err := json.Marshal(&st)
 	if err != nil {
 		return fmt.Errorf("agent: fork marshal: %w", err)

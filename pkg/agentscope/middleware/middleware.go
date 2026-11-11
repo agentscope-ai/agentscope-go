@@ -83,12 +83,16 @@ type ReasoningInput struct {
 //
 // Reply-lifecycle contract: an OnReply hook may swallow a completed reply's
 // ReplyEndEvent (receive it without forwarding it) to force another
-// reasoning-acting round; interrupted ends cannot be swallowed. Middleware
+// reasoning-acting round; interrupted and handed-off (types.ReplyHandedOff)
+// ends cannot be swallowed, and OnReply must forward them unchanged: the
+// agent does not wait for a verdict on them, so a dropped one is simply lost
+// to the caller. Middleware
 // MUST forward CustomEvent values whose name starts with "agentscope." —
 // they are internal round-boundary sentinels, and dropping them stalls
 // swallow detection until the reply context ends.
 type Middleware interface {
-	// OnReply wraps the entire reply lifecycle (outermost hook).
+	// OnReply wraps the entire reply lifecycle (outermost hook). It must
+	// forward interrupted and handed-off ReplyEndEvents unchanged.
 	OnReply(ctx context.Context, input ReplyInput, next ReplyHandler) <-chan event.Event
 
 	// OnReasoning wraps each reasoning step within the ReAct loop.

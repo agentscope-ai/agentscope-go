@@ -608,6 +608,47 @@ correct spelling is backend-specific (`workspace.ExecPathResolver`):
 A wrong spelling is not merely a wasted exec. It supplies a freshness key for the
 wrong file, and the cache can then serve stale content as fresh.
 
+## Stale writes on a shared workspace (experimental)
+
+`Write` replaces a whole file. When two agents work on one workspace, each
+with its own read cache, an agent writing from a copy it read earlier deletes
+whatever the other agent wrote since. The read-before-write guard does not
+catch this: the file was read, just not that version.
+`ReadCache.SetRejectStaleWrites(true)` adds the check:
+
+```go
+rc := tool.NewReadCache(0, 0)
+rc.SetRejectStaleWrites(true)
+a := agent.NewUnifiedAgent("cloud", prompt, m, agent.WithReadCache(rc), agent.WithToolkit(tk))
+```
+
+* `Read` records the SHA-256 of the content it returned
+  (`ReadCacheEntry.Hash`). While the check is on it always reads the file
+  instead of serving a cached copy, so a change that keeps the modification
+  time is still seen.
+* `Write` over an existing file is refused unless its current content is the
+  version the cache recorded, or the write leaves the content unchanged. The
+  refusal tells the model to read the file again; creating a new file needs no
+  read, and the existing guard still asks for a read of a file never read.
+* `Edit`, `MultiEdit` and `ApplyPatch` apply to the current content and are
+  not refused. When they edited the version the cache knew, their result
+  becomes the known version, so the agent can follow its own edits with more
+  edits or a write; otherwise the entry is dropped and the agent reads before
+  its next `Edit`, `MultiEdit` or `Write`. A `Write` drops cached entries as
+  before (on the host path all of them), so the agent reads again before
+  changing a file after writing it.
+
+The check runs just before the write and is not a lock. Files changed by
+other means, such as a shell command, are seen through their content only
+when the agent next writes them. Give each agent its own cache: agents that
+share one cache share what they have seen. The setting is configuration, not
+state, and is not saved with the cache's JSON; versions are, and entries saved
+before versions existed vouch for none, so the first write after loading them
+asks for a read. `Read` records the hash whether or not the check is on, so
+turning it on mid-session works from the versions read so far; edits made
+while it was off did not update the cache, and a later write may ask for a
+read.
+
 ## WASM Sandbox
 
 The CLI implementation enforces fuel, linear-memory, timeout, directory-grant, and output-capture settings through Wasmtime. Wasmer and wasm3 may be discovered, but execution with the default resource limits returns `ErrUnsupportedLimits`. Select Wasmtime explicitly and check both errors and result status. Empty `AllowedPaths` grants no host directories.

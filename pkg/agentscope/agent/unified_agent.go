@@ -9,6 +9,7 @@ import (
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/audit"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -67,9 +68,13 @@ type UnifiedAgent struct {
 	reactCfg     ReactConfig
 	modelCfg     ModelConfig
 	contextCfg   *ContextConfig
-	readCache    *tool.ReadCache
-	engine       *permission.Engine
-	skills       []skill.Skill
+	// threadSummaryTokens replaces ContextConfig.ThreadSummaryTokens once
+	// SetThreadSummaryTokens set it (threadSummarySet). Guarded by mu.
+	threadSummaryTokens int
+	threadSummarySet    bool
+	readCache           *tool.ReadCache
+	engine              *permission.Engine
+	skills              []skill.Skill
 
 	contentBlockCompaction bool
 	compactionVersion      uint64
@@ -110,6 +115,7 @@ type UnifiedAgent struct {
 	// planToolEnabled / contextRemainingEnabled register the update_plan and
 	// get_context_remaining tools (see WithPlanTool/WithContextRemainingTool).
 	planToolEnabled         bool
+	planAfterInput          bool // WithPlanAfterLatestInput
 	contextRemainingEnabled bool
 	modelStreaming          bool
 
@@ -120,6 +126,15 @@ type UnifiedAgent struct {
 	// to take over a busy agent. Both are guarded by mu.
 	activeConv    *Conversation
 	activeReplies int
+	// runningCores counts reply cores (replyLoop goroutines) that have not
+	// returned yet. activeReplies is released when the agent-owned forwarder
+	// ends, which can come first: an OnReply middleware may stop forwarding
+	// on cancellation while the core still waits for a tool that ignores
+	// it. The between-replies seams (busyLocked) check both counters.
+	// coresIdle is open while runningCores > 0 and closed when it drops to
+	// zero. Both are guarded by mu.
+	runningCores int
+	coresIdle    chan struct{}
 
 	// stats accumulates per-reply usage for the turn_stats event. It stays
 	// installed after the reply ends so a swallowed round keeps
@@ -135,6 +150,14 @@ type UnifiedAgent struct {
 	pendingPrecompress *precompressResult
 
 	toolConcurrencyLimit int
+
+	// Thread seams (EXPERIMENTAL, all opt-in and inert when unset; see
+	// thread_state.go, fork.go and handoff.go).
+	boundaryInput  BoundaryInput
+	forkCaptureOn  bool
+	lastCapture    *forkCapture // last captured model request; guarded by mu
+	handedOff      atomic.Bool
+	exclusiveTools map[string]bool
 }
 
 // ReactConfig controls the ReAct reasoning-acting loop.
@@ -160,8 +183,11 @@ type ModelConfig struct {
 
 // AgentState holds conversation state for a session.
 // StateSchemaVersion is bumped when AgentState's serialized shape changes
-// incompatibly; loaders dispatch on it (HARNESS_DESIGN F1).
-const StateSchemaVersion = 2
+// incompatibly; loaders dispatch on it (HARNESS_DESIGN F1). Writers stamp the
+// lowest version that can carry the state: 1 by default, 2 with reply-recovery
+// counters, 3 with thread state (see AgentState.usesThreadState), so older
+// builds keep reading checkpoints that do not need the newer fields.
+const StateSchemaVersion = 3
 
 type AgentState struct {
 	ReplyRecovery *ReplyRecoveryState `json:"reply_recovery,omitempty"`
@@ -181,6 +207,22 @@ type AgentState struct {
 	// Plan is the current update_plan tracker state (see WithPlanTool). It
 	// lives outside Context so compression and crash-resume preserve it.
 	Plan []tool.PlanItem `json:"plan,omitempty"`
+	// SummaryOffer (EXPERIMENTAL) is a summary of the agent's own context
+	// waiting for the compression trigger (OfferSummary). It is checkpointed
+	// so an agent rebuilt from its checkpoint still holds it; a loader that
+	// predates the field drops it, and the trigger then compresses
+	// synchronously. It does not raise the schema version.
+	SummaryOffer *SummaryOffer `json:"summary_offer,omitempty"`
+
+	// Thread state (EXPERIMENTAL, see ThreadUpdate). Any of these set makes
+	// checkpoints carry schema version 3.
+
+	// PeerSummary is a summary another participant's model wrote for this
+	// agent's window (see ThreadUpdate). It is injected after the agent's own
+	// summary on every call and is never rewritten by local compression.
+	PeerSummary *PeerSummary `json:"peer_summary,omitempty"`
+	// ThreadCursor is the last thread entry this agent has imported.
+	ThreadCursor uint64 `json:"thread_cursor,omitempty"`
 }
 
 // ToolStateContext captures which tool groups are active for serialization.
@@ -507,8 +549,14 @@ func (a *UnifiedAgent) replyStream(ctx context.Context, input string, resume, pe
 			close(ch)
 			return ch
 		}
+		a.coreStarted()
 		go func() {
 			defer release()
+			// Keep these defers in this order: the core is released before
+			// its channel closes, so a consumer that sees the stream end never
+			// finds the core still counted (between-replies seams would refuse).
+			defer close(ch)
+			defer a.coreFinished()
 			a.replyLoop(ctx, ri.UserInput, ch, verdict, permissionHooks && !resume)
 		}()
 		return ch
@@ -578,6 +626,27 @@ func (a *UnifiedAgent) replyDone() {
 	a.mu.Unlock()
 }
 
+// coreStarted counts a reply core that is about to run (see runningCores).
+func (a *UnifiedAgent) coreStarted() {
+	a.mu.Lock()
+	if a.runningCores == 0 {
+		a.coresIdle = make(chan struct{})
+	}
+	a.runningCores++
+	a.mu.Unlock()
+}
+
+// coreFinished releases a reply core once replyLoop has returned.
+func (a *UnifiedAgent) coreFinished() {
+	a.mu.Lock()
+	a.runningCores--
+	if a.runningCores == 0 {
+		close(a.coresIdle)
+		a.coresIdle = nil
+	}
+	a.mu.Unlock()
+}
+
 // Observe injects external messages into the agent's context.
 // It validates each message: system-role messages and messages containing
 // tool_call, tool_result, or thinking blocks are rejected.
@@ -643,6 +712,81 @@ func (a *UnifiedAgent) SubmitExternalResult(result *event.ExternalExecutionResul
 	}
 }
 
+// SubmitUserConfirmContext is SubmitUserConfirm with a context
+// (EXPERIMENTAL). The confirmation channel holds one value. While a reply
+// core is running the call waits for room, and returns ctx.Err() instead of
+// blocking once ctx ends. While no reply core is running nothing can be
+// waiting for the value, so a value still in the channel (one a reply that
+// has since ended never read) is dropped and result takes its place, to be
+// read by the next reply, whose waiters match it as SubmitUserConfirm
+// describes. A value a running reply may still read is never dropped. It
+// returns ctx.Err() at once when ctx has already ended, and an error when
+// result or ctx is nil or the agent has no permission context
+// (WithPermissionContext), which is what creates the channel.
+func (a *UnifiedAgent) SubmitUserConfirmContext(ctx context.Context, result *event.UserConfirmResultEvent) error {
+	if result == nil {
+		return fmt.Errorf("agent %s: submit confirmation: nil result", a.name)
+	}
+	return submitHandshake(ctx, a, a.confirmCh, *result, "confirmation")
+}
+
+// SubmitExternalResultContext is SubmitExternalResult with a context
+// (EXPERIMENTAL), with the waiting and stale-value rules of
+// SubmitUserConfirmContext. Submission transfers ownership of the result
+// objects and their nested maps and slices to the agent.
+func (a *UnifiedAgent) SubmitExternalResultContext(ctx context.Context, result *event.ExternalExecutionResultEvent) error {
+	if result == nil {
+		return fmt.Errorf("agent %s: submit external result: nil result", a.name)
+	}
+	return submitHandshake(ctx, a, a.externalCh, *result, "external result")
+}
+
+// submitHandshake sends v on ch, one of the agent's one-value handshake
+// channels, following SubmitUserConfirmContext's rules.
+func submitHandshake[T any](ctx context.Context, a *UnifiedAgent, ch chan T, v T, what string) error {
+	if ctx == nil {
+		return fmt.Errorf("agent %s: submit %s: nil context", a.name, what)
+	}
+	if ch == nil {
+		return fmt.Errorf("agent %s: submit %s: no permission context is configured, so no reply waits for it", a.name, what)
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		a.mu.Lock()
+		if a.runningCores == 0 {
+			// No reply core runs, and none can start while mu is held: the
+			// channel has no reader, so a value in it is stale. Replace it.
+			select {
+			case <-ch:
+			default:
+			}
+			select {
+			case ch <- v:
+				a.mu.Unlock()
+				return nil
+			default:
+				// A SubmitUserConfirm or SubmitExternalResult call that does
+				// not take mu filled the channel in between; try again.
+			}
+			a.mu.Unlock()
+			continue
+		}
+		idle := a.coresIdle
+		a.mu.Unlock()
+		select {
+		case ch <- v:
+			return nil
+		case <-idle:
+			// The last reply core ended while the channel was full; loop to
+			// drop the value it left unread.
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
 // PermissionEngine returns the agent's permission engine, or nil if not configured.
 func (a *UnifiedAgent) PermissionEngine() *permission.Engine {
 	return a.engine
@@ -661,9 +805,9 @@ func (a *UnifiedAgent) ReadCache() *tool.ReadCache {
 // reply context ends.
 const roundBoundSentinel = "agentscope.round_bound"
 
+// replyLoop runs one reply and emits its events on ch. The caller (the core
+// goroutine in replyStream) closes ch after replyLoop returns.
 func (a *UnifiedAgent) replyLoop(ctx context.Context, input string, ch chan<- event.Event, verdict <-chan bool, permissionHooks bool) {
-	defer close(ch)
-
 	// Conversation turns emit terminal events on the session context:
 	// Interrupt cancels the turn context before these fire, and a
 	// canceled-ctx select may silently drop the ReplyEnd (the host would
@@ -693,6 +837,7 @@ func (a *UnifiedAgent) replyLoop(ctx context.Context, input string, ch chan<- ev
 	}
 	a.clearConfirmStash()
 	a.clearExternalStash()
+	a.handedOff.Store(false) // a handoff mark never outlives the reply that made it
 
 	a.mu.Lock()
 	a.priorReplyID = ""
@@ -721,6 +866,11 @@ func (a *UnifiedAgent) replyLoop(ctx context.Context, input string, ch chan<- ev
 	userMsg := message.UserMsg(a.name, input)
 	a.mu.Lock()
 	if run == nil || !run.resume {
+		// WithThreadInput: the input is a thread entry; tag it and raise the
+		// cursor in the same state update.
+		if seq, ok := threadInputFrom(ctx); ok {
+			a.tagThreadInputLocked(userMsg, seq)
+		}
 		a.state.Context = append(a.state.Context, userMsg)
 	}
 	a.mu.Unlock()
@@ -741,7 +891,8 @@ func (a *UnifiedAgent) replyLoop(ctx context.Context, input string, ch chan<- ev
 	// loop emits an internal sentinel; the agent-owned forwarder outside
 	// the chain reports on `verdict` whether the end event escaped. A new
 	// round restarts the iteration counter, which also unblocks a swallowed
-	// exceed-max-iters end. Interrupted ends cannot be swallowed.
+	// exceed-max-iters end. Interrupted and handed-off ends cannot be
+	// swallowed.
 	madeProgress := true
 	for {
 		reason, progress, errInfo := a.reactRound(ctx, ch, replyID, hooks, modelCallHandler, actingHandler, permissionHooks)
@@ -754,8 +905,10 @@ func (a *UnifiedAgent) replyLoop(ctx context.Context, input string, ch chan<- ev
 			madeProgress = true
 		}
 
-		if reason == types.ReplyInterrupted {
-			// Cannot be swallowed to continue the reply (Python parity).
+		if reason == types.ReplyInterrupted || reason == types.ReplyHandedOff {
+			// Cannot be swallowed to continue the reply (Python parity). A
+			// handed-off end is final too: the foreground already moved to
+			// another participant, so no middleware may start another round.
 			a.emitTurnStats(endCtx, ch, replyID)
 			emit(endCtx, ch, event.NewReplyEndEventWithReason(a.state.SessionID, replyID, reason))
 			return
@@ -800,7 +953,8 @@ func (a *UnifiedAgent) replyLoop(ctx context.Context, input string, ch chan<- ev
 
 // reactRound runs one reasoning-acting cycle until an exit condition:
 // final text (completed), iteration exhaustion (exceed_max_iters), model
-// failure (error), context cancellation (interrupted), or a parked wait
+// failure (error), context cancellation (interrupted), a committed handoff
+// after a tool step (handed_off), or a parked wait
 // state. It emits every lifecycle event except ReplyEndEvent, which the
 // swallow loop in replyLoop owns.
 func (a *UnifiedAgent) reactRound(
@@ -863,6 +1017,9 @@ reactLoop:
 					return types.ReplyError, madeProgress, checkpointError(err)
 				}
 				madeProgress = true
+				if a.handedOff.Load() {
+					return types.ReplyHandedOff, madeProgress, nil
+				}
 				continue
 			}
 			// Waiting for external events — emit to consumer, don't save to context
@@ -874,6 +1031,9 @@ reactLoop:
 		case protocol.StateAct:
 			// Execute pending tool calls from prior iteration
 			toolCalls := a.getExecutableToolCalls()
+			// WithExclusiveTools: a mixed step is answered with error results
+			// and nothing runs (toolCalls comes back empty).
+			toolCalls = a.enforceExclusiveTools(ctx, ch, replyID, toolCalls)
 			if a.toolConcurrencyLimit > 0 {
 				a.executeBoundedToolStep(ctx, ch, replyID, toolCalls, actingHandler, hooks, curState, iter, false)
 			} else {
@@ -910,6 +1070,11 @@ reactLoop:
 			if a.toolConcurrencyLimit > 0 && ctx.Err() != nil {
 				return types.ReplyInterrupted, madeProgress, nil
 			}
+			// MarkHandedOff: the step committed a handoff; end without
+			// another model call.
+			if a.handedOff.Load() {
+				return types.ReplyHandedOff, madeProgress, nil
+			}
 			// Transition back to Reason after acting
 			hooks.OnStateTransition(curState, protocol.StateReason, iter)
 			curState = protocol.StateReason
@@ -925,6 +1090,13 @@ reactLoop:
 			if th := conversationTurnFrom(ctx); th != nil {
 				if err := a.drainConversationOps(ctx, ch, replyID, th.conv); err != nil {
 					return types.ReplyError, madeProgress, checkpointError(err)
+				}
+			}
+			// Thread boundary input (WithBoundaryInput) uses the same
+			// certified boundary, with or without a Conversation.
+			if a.boundaryInput != nil {
+				if end, errInfo := a.drainBoundaryInput(ctx, ch, replyID); end != "" {
+					return end, madeProgress, errInfo
 				}
 			}
 
@@ -1063,7 +1235,9 @@ reactLoop:
 			hooks.OnStateTransition(curState, protocol.StateAct, iter)
 			curState = protocol.StateAct
 
-			// Execute tool calls
+			// Execute tool calls (a mixed step with an exclusive tool is
+			// answered with error results instead; see WithExclusiveTools)
+			toolCalls = a.enforceExclusiveTools(ctx, ch, replyID, toolCalls)
 			if a.toolConcurrencyLimit > 0 {
 				a.executeBoundedToolStep(ctx, ch, replyID, toolCalls, actingHandler, hooks, curState, iter, permissionHooks)
 			} else {
@@ -1097,6 +1271,9 @@ reactLoop:
 			}
 			if a.toolConcurrencyLimit > 0 && ctx.Err() != nil {
 				return types.ReplyInterrupted, madeProgress, nil
+			}
+			if a.handedOff.Load() {
+				return types.ReplyHandedOff, madeProgress, nil
 			}
 			// After acting, transition back to Reason
 			hooks.OnStateTransition(curState, protocol.StateReason, iter)
@@ -1178,6 +1355,9 @@ func (a *UnifiedAgent) buildModelCallHandler(ch chan<- event.Event, replyID stri
 			opts = append(opts, model.WithToolChoice(input.ToolChoice))
 		}
 		opts = ApplyResponseFormat(opts, a.responseFormat)
+		if a.forkCaptureOn {
+			a.captureForkRequest(input) // WithForkCapture: record the request about to be sent
+		}
 		if a.streamsModel() {
 			return a.callModelStreaming(ctx, input.Messages, opts, ch, replyID)
 		}
@@ -1796,7 +1976,14 @@ func (a *UnifiedAgent) prepareModelInput(ctx context.Context) []*message.Msg {
 	if len(a.middlewares) > 0 {
 		prompt = middleware.ApplySystemPromptPipeline(ctx, a.middlewares, a.name, prompt)
 	}
+	return a.modelInputLocked(prompt)
+}
 
+// modelInputLocked builds the model input around prompt, the system prompt
+// after the OnSystemPrompt pipeline (ThreadView passes the raw prompt and
+// runs no middleware). Caller holds a.mu. The returned slice shares the live
+// Context message pointers.
+func (a *UnifiedAgent) modelInputLocked(prompt string) []*message.Msg {
 	// Inject runtime state awareness if enabled
 	if a.stateAwareness {
 		prompt = InjectStateAwareness(prompt, a.state)
@@ -1817,14 +2004,12 @@ func (a *UnifiedAgent) prepareModelInput(ctx context.Context) []*message.Msg {
 	if a.state.Summary != "" {
 		msgs = append(msgs, message.UserMsg(a.name, "[Previous context summary]: "+a.state.Summary))
 	}
+	// The peer summary follows the agent's own summary; nothing is added
+	// while none is held.
+	msgs = append(msgs, threadPromptMsgs(a.name, a.state.PeerSummary)...)
 	// The plan lives outside Context precisely so it survives compression;
 	// re-inject it on every call or the model loses its tracker after one.
-	if len(a.state.Plan) > 0 {
-		msgs = append(msgs, planPromptMsg(a.name, a.state.Plan))
-	}
-
-	msgs = append(msgs, a.state.Context...)
-	return msgs
+	return a.withPlan(msgs, a.state.Context)
 }
 
 func (a *UnifiedAgent) callModel(ctx context.Context, msgs []*message.Msg, opts []model.CallOption) (*model.ChatResponse, error) {

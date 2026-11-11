@@ -36,6 +36,24 @@ lower threshold, the synchronous path also runs when the context is still at
 that threshold after the result went in. Forced compactions (`Compact` and
 the compaction of context-overflow recovery) apply the result alone.
 
+A summary the host offers with the experimental `UnifiedAgent.OfferSummary`
+(written by `ForkSummary` from a `ForkSnapshot`) waits in the same slot and is
+applied by the same trigger, under the same validity and fallback rules. A
+result or offer stays valid while the agent's own summary is unchanged and
+the context still begins with the snapshot's messages up to its boundary, in
+the same order (compared by role, name, ID and thread seq). Appends keep it
+valid; a compaction, a rollback or a peer summary that removes thread entries
+before the boundary makes it stale. The offer is checkpointed
+(`AgentState.SummaryOffer`), so it may come from a checkpoint the agent did
+not write: an offer whose bounds do not fit the context, that keeps no
+message, whose summary is blank or that carries no digest is dropped and the
+trigger compresses synchronously. An offer always keeps its boundary message
+raw: a reply that ran on after the snapshot added its later rounds to that
+message, and the summary does not cover them. Like background generation,
+offers are off under `WithContentBlockCompaction`: `OfferSummary` fails and a
+loaded offer is dropped. A background result that finishes while a
+still-valid offer waits is discarded; the offer is newer.
+
 The summary covers the snapshot prefix: messages appended since the snapshot
 stay raw, so the window refills somewhat sooner after an applied
 pre-compression than after a synchronous one. Background generations burn

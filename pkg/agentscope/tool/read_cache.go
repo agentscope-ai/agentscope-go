@@ -2,6 +2,8 @@ package tool
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"sync"
@@ -19,6 +21,11 @@ type ReadCacheEntry struct {
 	UpdatedAt time.Time // file mtime when cached
 	Bytes     int       // total byte size of cached lines
 	FilePath  string
+	// Hash (EXPERIMENTAL) is the SHA-256 (hex) of the content the entry was
+	// read from, or of the agent's own edit of it (SetRejectStaleWrites).
+	// Empty for entries cached through CacheFile and for entries saved by
+	// older versions.
+	Hash string `json:"Hash,omitempty"`
 }
 
 // ReadCache is a FIFO-evicting cache for file contents.
@@ -27,7 +34,92 @@ type ReadCache struct {
 	entries       []ReadCacheEntry
 	maxCacheFiles int
 	maxCacheBytes int
+	rejectStale   bool
 	mu            sync.Mutex
+}
+
+// staleWriteMessage is the refusal of a write over a version the agent has
+// not seen.
+const staleWriteMessage = "the file has changed since you last read it (another agent or process may have written it); " +
+	"read it again, then write"
+
+// SetRejectStaleWrites (EXPERIMENTAL) makes the Write tool refuse to replace
+// a file whose current content is not the version this cache recorded for
+// it: the version the agent's last Read returned, or the result of its own
+// last Edit, MultiEdit or ApplyPatch of it. Use it when agents with separate
+// caches share a workspace, as a cloud and an edge agent working on one task
+// can: a whole-file write from an old copy would delete what the other agent
+// wrote since. The agent then reads the file again and retries. Creating a
+// new file is allowed, and so is a write that leaves the content unchanged
+// (the existing guard still asks for a read of a file never read).
+//
+// While it is on, Read always reads the file and records the version it
+// returned instead of serving a cached copy, and the edit tools record their
+// own result when they edited the version the cache knew (otherwise they
+// drop the entry, so the agent reads before its next Edit, MultiEdit or
+// Write). Edits apply to the current content and are not refused. The check
+// runs just before the write and is not a lock: a write that lands in
+// between is not detected. Files written by other tools, such as a shell
+// command, are seen only through their content. The setting is configuration
+// and is not saved with the cache's JSON.
+func (rc *ReadCache) SetRejectStaleWrites(on bool) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	rc.rejectStale = on
+}
+
+// RejectsStaleWrites (EXPERIMENTAL) reports whether SetRejectStaleWrites is
+// on.
+func (rc *ReadCache) RejectsStaleWrites() bool {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	return rc.rejectStale
+}
+
+// contentHash is the version key of a file's content.
+func contentHash(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// knowsVersion reports whether data is the version of filePath this cache
+// recorded. An entry without a hash vouches for no version.
+func (rc *ReadCache) knowsVersion(filePath string, data []byte) bool {
+	h := contentHash(data)
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	for _, e := range rc.entries {
+		if e.FilePath == filePath {
+			return e.Hash != "" && e.Hash == h
+		}
+	}
+	return false
+}
+
+// noteOwnEdit records an edit tool's result. When before is the version the
+// cache knew, after becomes it; otherwise the file changed under the agent
+// and its entry is dropped. mtime is the file's time after the write; nil
+// stores a zero time, so the next freshness check misses and Read reads the
+// file again. Host edits pass nil: while the check is on, Read never serves
+// a cached copy, so only the hash matters.
+func (rc *ReadCache) noteOwnEdit(filePath string, before, after []byte, mtime *time.Time) {
+	knew := rc.knowsVersion(filePath, before)
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	for i, e := range rc.entries {
+		if e.FilePath == filePath {
+			rc.removeAt(i)
+			break
+		}
+	}
+	if !knew {
+		return
+	}
+	var updatedAt time.Time
+	if mtime != nil {
+		updatedAt = *mtime
+	}
+	rc.insertLocked(filePath, splitReadLines(after), updatedAt, contentHash(after))
 }
 
 // NewReadCache creates a ReadCache with the given limits.
@@ -155,6 +247,11 @@ func (rc *ReadCache) CacheFile(filePath string, lines []string) {
 // same filesystem that served the read (upstream #2092). A nil mtime falls
 // back to a host os.Stat, and a failed stat skips caching entirely.
 func (rc *ReadCache) CacheFileWithMtime(filePath string, lines []string, mtime *time.Time) {
+	rc.cacheFile(filePath, lines, mtime, "")
+}
+
+// cacheFile is CacheFileWithMtime that also records the content's hash.
+func (rc *ReadCache) cacheFile(filePath string, lines []string, mtime *time.Time, hash string) {
 	var updatedAt time.Time
 	if mtime != nil {
 		updatedAt = *mtime
@@ -166,11 +263,6 @@ func (rc *ReadCache) CacheFileWithMtime(filePath string, lines []string, mtime *
 		updatedAt = info.ModTime()
 	}
 
-	byteSize := 0
-	for _, line := range lines {
-		byteSize += len(line)
-	}
-
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 
@@ -179,6 +271,16 @@ func (rc *ReadCache) CacheFileWithMtime(filePath string, lines []string, mtime *
 			rc.removeAt(i)
 			break
 		}
+	}
+	rc.insertLocked(filePath, lines, updatedAt, hash)
+}
+
+// insertLocked appends an entry for a path that has none, evicting the
+// oldest entries over the limits. Caller holds rc.mu.
+func (rc *ReadCache) insertLocked(filePath string, lines []string, updatedAt time.Time, hash string) {
+	byteSize := 0
+	for _, line := range lines {
+		byteSize += len(line)
 	}
 
 	for len(rc.entries) >= rc.maxCacheFiles {
@@ -196,6 +298,7 @@ func (rc *ReadCache) CacheFileWithMtime(filePath string, lines []string, mtime *
 		UpdatedAt: updatedAt,
 		Bytes:     byteSize,
 		FilePath:  filePath,
+		Hash:      hash,
 	})
 }
 

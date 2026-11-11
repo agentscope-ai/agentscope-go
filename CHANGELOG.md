@@ -13,12 +13,106 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ### Added — shadow-mode permission advice
 
+- Opt-in `agent` seams for a host that runs several agents over one shared,
+  append-only log, as proposed in
+  [#117](https://github.com/agentscope-ai/agentscope-go/issues/117). They are
+  inert unless used: an agent that does not use them sends the same requests
+  and writes the same checkpoints as before.
+  - `ApplyThreadUpdate`, `WithThreadInput`, `WithBoundaryInput`, `ThreadView`
+    and `ThreadSeqOf` import log entries, install a summary another agent
+    wrote (`PeerSummary`) and move the agent's cursor
+    (`AgentState.ThreadCursor`) in one state update. Boundary input applies at
+    the certified reasoning boundary that `Conversation` steering uses.
+  - `WithForkCapture`, `ForkSnapshot` and `ForkSummary` write a summary from
+    a copy of the agent's last model request, so the provider can serve the
+    shared prefix from its cache, without touching the main context.
+    `ApplySummary` installs it between replies; `OfferSummary` (checkpointed
+    as `AgentState.SummaryOffer`) hands it to the next compression trigger,
+    which applies it like a background precompression result. A snapshot,
+    an offer or a background result applies only while the context still
+    holds the same messages up to its boundary, in the same order, so a
+    peer summary that removes entries before the boundary makes it stale.
+    Both ways of installing a summary keep its boundary message raw: a
+    reply that ran on after the snapshot added its later rounds to that
+    message, and the summary does not cover them. An offer whose bounds do
+    not fit the context, that keeps no message, whose summary is blank or
+    that carries no digest is dropped and the trigger compresses
+    synchronously. Like background precompression, offers are off under
+    `WithContentBlockCompaction`.
+  - `CompactStrict` compacts now and leaves the state unchanged on any
+    failure, an empty summary included.
+  - `ContextConfig.ThreadSummaryTokens` and `SetThreadSummaryTokens` set the
+    budget the agent's own summary shares with a peer summary.
+  - `MarkHandedOff` ends the reply with the new `types.ReplyHandedOff`
+    (`"handed_off"`) after the current tool step, without another model
+    call. Like an interrupted end it cannot be swallowed by `OnReply`
+    middleware; `TeamRun` treats it as a normal end, the goal pipeline as
+    not completed, and reply recovery does not resume it.
+    `WithExclusiveTools` answers a model response that mixes an exclusive
+    tool with other calls with error results, running none of them.
+  - `SubmitExternalResultContext` and `SubmitUserConfirmContext` submit an
+    answer with a context, replacing a value that a finished reply left
+    unread.
+
+  The between-replies seams return `ErrReplyInProgress` while any reply core
+  still runs, even after its event stream closed. Tested offline with
+  scripted models.
+
+### Added — agent seams for a session shared by several agents (experimental)
+
 - An offline-first `permission_advisory` example combines classifier advice with
   unchanged interactive permission confirmation, with optional local inference
   and redacted lifecycle auditing.
 - `permission.Decision.Origin` identifies only the Default-mode fallback Ask
   (`default_ask`); other engine outcomes have unknown origin. Eligible decisions
   now serialize this additional field. See the [guide](docs/permission-advisory.md)
+
+### Added — plan after the newest user message (experimental)
+
+- `agent.WithPlanAfterLatestInput()` injects the `WithPlanTool` plan message
+  right after the newest user message in the context instead of after the
+  summary. With the plan ahead of the history, every plan update made the
+  whole history miss the provider's prefix cache on the next call; now the
+  history before the current turn stays cached. The plan never follows a
+  reply's tool steps, so they keep following their own user message; on a
+  reply's first call it directly follows the new input.
+  `GenerateStructuredResponseWithUsage` uses the same layout; the default is
+  unchanged, and the effect on answer quality has not been measured.
+
+### Added — stale-write check for shared workspaces (experimental)
+
+- `tool.ReadCache.SetRejectStaleWrites(true)` makes `Write` refuse to replace
+  a file whose content is not the version the agent last read or edited, so
+  agents with separate caches sharing a workspace cannot overwrite each
+  other's changes from an old copy. `Read` records the content's SHA-256
+  (`ReadCacheEntry.Hash`) and, while the check is on, always reads the file;
+  the edit tools record their own results. Edits are not refused. The check
+  runs just before the write and is not a lock. The setting is off by default
+  and is not saved with the cache; `Read` records the hash either way.
+  `ReadCacheEntry.Hash` is omitted when empty, and an older build ignores it
+  when it loads a saved cache. See
+  [stale writes](docs/tools.md#stale-writes-on-a-shared-workspace-experimental).
+
+### Changed — checkpoint schema version 3
+
+- **BREAKING (constant value)** `agent.StateSchemaVersion` is now 3 (it was 2
+  on `main` and 1 in `v2.0.11`); `apidiff` reports the value change. It is
+  the newest schema `LoadCheckpoint` accepts, not the version every
+  checkpoint carries: `SaveCheckpoint` and `ForkSession` still stamp the
+  lowest version that holds the state, 1 by default, 2 with reply-recovery
+  counters, and 3 only when the agent holds thread state (a peer summary or
+  a thread cursor). Checkpoints of agents that do not use the thread seams
+  are written as before, so older builds keep reading checkpoints stamped 1,
+  and those stamped 2 wherever they read reply recovery's schema today. A
+  build from before this change rejects a checkpoint stamped 3.
+  **Migration:** code that stamps `SchemaVersion: agent.StateSchemaVersion`
+  on a state it persists itself now writes 3; stamp the version the state
+  needs (1 for plain conversation state) if older builds must read it. Code
+  that compares a loaded version with `StateSchemaVersion` to recognize a
+  current checkpoint should compare with the version it needs. The new
+  `AgentState` fields (`summary_offer`, `peer_summary`, `thread_cursor`) are
+  omitted when empty; an older build ignores them, which drops a summary
+  offer, the one new field that does not raise the version (the trigger then
   for compatibility and host ownership limits.
 
 ### Fixed — Anthropic tool-result history

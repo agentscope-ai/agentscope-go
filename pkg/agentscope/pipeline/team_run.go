@@ -200,9 +200,13 @@ func (r *TeamRun) participant(parent context.Context, a *agent.UnifiedAgent, inp
 		return out
 	}
 	out.reason = end.FinishedReason
-	if end.FinishedReason != types.ReplyCompleted || partial {
+	// A handed-off end is a normal end: for the leader the foreground moved to
+	// another participant, which ends the run without error; members never
+	// receive a transfer tool, so a member handoff is treated as completed.
+	completed := end.FinishedReason == types.ReplyCompleted || end.FinishedReason == types.ReplyHandedOff
+	if !completed || partial {
 		out.err = fmt.Errorf("pipeline: %s finished as %s", a.Name(), end.FinishedReason)
-		if end.FinishedReason == types.ReplyCompleted {
+		if completed {
 			out.err = fmt.Errorf("pipeline: %s final model round is incomplete", a.Name())
 		}
 		if end.Error != nil {

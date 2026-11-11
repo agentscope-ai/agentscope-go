@@ -224,6 +224,8 @@ func (a *UnifiedAgent) acceptRecoveryEnd(ctx context.Context, end *event.ReplyEn
 	}
 	if run.err() == nil {
 		run.mu.Lock()
+		// Every accepted end but an interruption is terminal; a handed-off
+		// reply must not be resumed after the foreground moved elsewhere.
 		run.completed = end.FinishedReason != types.ReplyInterrupted
 		run.mu.Unlock()
 		if err := a.SaveCheckpoint(ctx); err != nil {
