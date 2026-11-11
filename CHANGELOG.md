@@ -11,7 +11,7 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
-### Added — shadow-mode permission advice
+### Added — agent seams for a session shared by several agents (experimental)
 
 - Opt-in `agent` seams for a host that runs several agents over one shared,
   append-only log, as proposed in
@@ -58,7 +58,7 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   still runs, even after its event stream closed. Tested offline with
   scripted models.
 
-### Added — agent seams for a session shared by several agents (experimental)
+### Added — shadow-mode permission advice
 
 - An offline-first `permission_advisory` example combines classifier advice with
   unchanged interactive permission confirmation, with optional local inference
@@ -66,6 +66,7 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 - `permission.Decision.Origin` identifies only the Default-mode fallback Ask
   (`default_ask`); other engine outcomes have unknown origin. Eligible decisions
   now serialize this additional field. See the [guide](docs/permission-advisory.md)
+  for compatibility and host ownership limits.
 
 ### Added — plan after the newest user message (experimental)
 
@@ -113,7 +114,7 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   `AgentState` fields (`summary_offer`, `peer_summary`, `thread_cursor`) are
   omitted when empty; an older build ignores them, which drops a summary
   offer, the one new field that does not raise the version (the trigger then
-  for compatibility and host ownership limits.
+  compresses synchronously).
 
 ### Fixed — Anthropic tool-result history
 
