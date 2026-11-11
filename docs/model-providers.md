@@ -309,6 +309,25 @@ construction: app credential registration, media, other MiniMax APIs and model
 cards/pricing catalogs are deferred. Tests use local fixtures; live MiniMax
 compatibility has not been validated.
 
+## Tool-call history in Anthropic Messages
+
+On main (unreleased), the Anthropic formatter expands merged assistant history
+into ordered assistant and user messages. Consecutive tool results share a user
+message, keeping all calls from the round before their results; subsequent
+assistant content starts another segment. Stored messages are not mutated.
+`AnthropicFormatter.Format` and `FormatMultiAgent` may therefore return more
+messages than they receive. Multi-agent sender labels are added only to the
+sender's own content, never before tool results.
+
+This fixes the continuation after `UnifiedAgent` executes tools; callers of the
+formatter must still provide matching IDs and a valid call/result sequence.
+Thinking preservation and other provider options are separate work in #125.
+The boundary handling follows the
+[Python Anthropic formatter](https://github.com/agentscope-ai/agentscope/blob/d74b833943d84ba8e6b8440b0fd4d46bcdc59569/src/agentscope/formatter/_anthropic_formatter.py).
+Go retains its existing typed-block conversion and renders before splitting so
+filtered empty or unsupported blocks do not split consecutive tool results.
+Validation uses local HTTP fixtures, not a live Anthropic request.
+
 ## Tool-call history in OpenAI-compatible chat
 
 **Unreleased fix for [#7](https://github.com/agentscope-ai/agentscope-go/issues/7):**

@@ -198,7 +198,8 @@ are rejected. App credential registration is deferred; see
 thinking, output effort and per-call output limits. `anthropic_internal.go`
 shares protocol-envelope construction and buffered parsing with Anthropic.
 MiniMax expands merged assistant/tool-result history into provider-role segments
-without mutating stored messages or changing the default Anthropic formatter.
+without mutating stored messages. The shared Anthropic formatter also expands
+merged histories; MiniMax retains its existing history preprocessing.
 MiniMax selects an internal stream policy that ends at `message_stop`, retains
 reported zero/cache-only usage and optional final usage updates, and releases
 its HTTP reader through an owned child context. The default Anthropic path
@@ -210,9 +211,12 @@ Its output count can exceed the input count. Multi-agent formatting assigns the
 sender before expansion is combined and merges only plain text messages without
 tool calls or reasoning; structured media keeps its message boundary.
 
-Anthropic requests use its public formatter. Buffered and streamed parsing retain
-redacted thinking data, and formatting retains empty thinking with a nonempty
-signature for tool-history continuation. Gemini builds requests separately
+Anthropic requests use its public formatter, which expands merged tool history
+into assistant/user segments and groups consecutive tool results without adding
+sender text before them. The stored history remains unchanged. Buffered and
+streamed parsing retain redacted thinking data, and formatting retains empty
+thinking with a nonempty signature for tool-history continuation. Gemini builds
+requests separately
 in `model/gemini.go`: formatter support for media inside hints does not establish
 adapter support. Both paths filter empty text before joining or emitting it;
 nonempty whitespace remains content. Multi-agent formatting must associate each
