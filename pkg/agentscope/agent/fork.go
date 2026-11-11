@@ -547,6 +547,9 @@ func (o SummaryApplyOptions) withDefaults(window int) SummaryApplyOptions {
 // unless the agent's Summary still equals the one at capture, the snapshot's
 // last context message still sits at its index and no message before it was
 // removed, inserted or replaced since the snapshot.
+// A snapshot taken (ForkSnapshot) while the context was empty covers no
+// message to replace: ApplySummary refuses it with an error and changes
+// nothing, as OfferSummary does.
 //
 // The new Context is a tail of the snapshot-time context, grown backwards
 // from the snapshot boundary until it holds at least MinTailTokens (by the
@@ -591,6 +594,10 @@ func (a *UnifiedAgent) ApplySummary(ctx context.Context, snap *ForkSnapshot, tex
 	if !snap.validLocked(a.state) {
 		a.mu.Unlock()
 		return ErrStaleSnapshot
+	}
+	if snap.contextLen == 0 {
+		a.mu.Unlock()
+		return errors.New("agent: apply summary: the snapshot holds no context to replace")
 	}
 	live := append([]*message.Msg(nil), a.state.Context...)
 	counted := cloneMsgs(live) // counted off-lock; the live pointers stay untouched

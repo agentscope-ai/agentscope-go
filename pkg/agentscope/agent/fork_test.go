@@ -838,6 +838,39 @@ func TestApplySummaryStale(t *testing.T) {
 	}
 }
 
+// TestSummaryRefusesAnEmptySnapshot: a snapshot taken while the context was
+// empty covers no message to replace. ApplySummary refuses it as OfferSummary
+// does, instead of installing the summary over messages it never saw.
+func TestSummaryRefusesAnEmptySnapshot(t *testing.T) {
+	ctx := context.Background()
+	a := NewUnifiedAgent("edge", "sys", &seamModel{tokens: charTokens}, WithForkCapture())
+	a.state.Summary = "earlier summary"
+	a.captureForkRequest(&middleware.ModelCallInput{Messages: a.prepareModelInput(ctx)})
+	snap, err := a.ForkSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.contextLen != 0 {
+		t.Fatalf("snapshot covers %d messages, want none", snap.contextLen)
+	}
+	a.state.Context = append(a.state.Context, message.UserMsg("u", "after"))
+	before := append([]*message.Msg(nil), a.state.Context...)
+	version := a.compactionVersion
+	refused := func(err error) bool {
+		return err != nil && !errors.Is(err, ErrStaleSnapshot) && strings.Contains(err.Error(), "no context to replace")
+	}
+	if err := a.ApplySummary(ctx, snap, "x", SummaryApplyOptions{}); !refused(err) {
+		t.Fatalf("ApplySummary err = %v, want a refusal", err)
+	}
+	if err := a.OfferSummary(ctx, snap, "x", SummaryApplyOptions{}); !refused(err) {
+		t.Fatalf("OfferSummary err = %v, want a refusal", err)
+	}
+	if a.state.Summary != "earlier summary" || !reflect.DeepEqual(before, a.state.Context) ||
+		a.state.SummaryOffer != nil || a.compactionVersion != version {
+		t.Fatal("an empty snapshot must change nothing")
+	}
+}
+
 // TestApplySummaryRechecksAfterCounting: the tail is counted outside the
 // lock, so a change made meanwhile (another between-replies call) must make
 // the apply stale instead of being overwritten or folded in.

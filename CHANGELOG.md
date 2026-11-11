@@ -130,6 +130,14 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   empty thinking blocks carrying signatures when formatting follow-up history.
   Existing message types and serialization are unchanged. Part of #125 (A2).
 
+### Fixed — summary over an empty fork snapshot
+
+- `UnifiedAgent.ApplySummary` (experimental) now refuses a fork snapshot
+  taken (`ForkSnapshot`) while the agent's context was empty, as
+  `OfferSummary` already did, and changes nothing. Before, it replaced the
+  agent's summary and reported success although the snapshot covered no
+  message to replace.
+
 ### Fixed — background precompression
 
 - With `ContextConfig.PrecompressRatio` set, a context that is still at the
