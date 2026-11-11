@@ -167,6 +167,7 @@ its model choice, environment variables and required services or runtimes.
 | [managed_task](examples/managed_task/) | Fixed-model managed text execution with a local HTTP fixture |
 | [classifier](examples/classifier/) | Typed classification with offline fake results and attempt accounting |
 | [piccolo](examples/piccolo/) | Local Piccolo text decisions with an offline fixture and opt-in live server |
+| [permission_advisory](examples/permission_advisory/) | Shadow-mode classifier advice with unchanged scripted user confirmation |
 | [model_call](examples/model_call/) | Direct model streaming, tool calls and structured output |
 | [volcengine](examples/volcengine/) | Direct Ark chat streaming with API-key authentication |
 | [minimax](examples/minimax/) | MiniMax tool use with preserved thinking and a streamed follow-up |

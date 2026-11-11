@@ -518,3 +518,10 @@ attribute. Nil responses keep the established contract of no supplementary span.
 - [Architecture](architecture.md) — Middleware in the broader system design
 - [Go Runtime Features](go-exclusive.md) — Replay middleware for CI/CD
 - [Tools](tools.md) — Tool-level middleware
+
+## Shadow-mode permission advice
+
+The [permission advisory example](permission-advisory.md) recognizes the engine's
+typed Default fallback `Ask` origin, requests bounded classifier advice and
+returns the complete original decision unchanged. It demonstrates both scripted
+human denial and approval; a classifier recommendation never grants permission.

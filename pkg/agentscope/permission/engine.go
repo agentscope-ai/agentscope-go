@@ -190,6 +190,8 @@ func (e *Engine) checkDefault(tool Checker, input map[string]any) Decision {
 	}
 
 	td := tool.CheckPermissions(input, e.Context)
+	// Only the engine may certify the default fallback branch.
+	td.Origin = OriginUnknown
 	if td.Behavior == BehaviorAllow || td.Behavior == BehaviorDeny {
 		return td
 	}
@@ -203,6 +205,7 @@ func (e *Engine) checkDefault(tool Checker, input map[string]any) Decision {
 	}
 
 	return Decision{
+		Origin:         OriginDefaultAsk,
 		Behavior:       BehaviorAsk,
 		Message:        fmt.Sprintf("Permission required for %s", tool.Name()),
 		DecisionReason: fmt.Sprintf("Mode: %s", e.Context.Mode),
@@ -263,6 +266,8 @@ func (e *Engine) checkAcceptEdits(tool Checker, input map[string]any) Decision {
 	}
 
 	td := tool.CheckPermissions(input, e.Context)
+	// Only the engine may certify the default fallback branch.
+	td.Origin = OriginUnknown
 	if td.Behavior == BehaviorAllow || td.Behavior == BehaviorDeny {
 		return td
 	}
@@ -299,6 +304,8 @@ func (e *Engine) checkBypass(tool Checker, input map[string]any) Decision {
 	}
 
 	td := tool.CheckPermissions(input, e.Context)
+	// Only the engine may certify the default fallback branch.
+	td.Origin = OriginUnknown
 	if td.Behavior == BehaviorAllow || td.Behavior == BehaviorDeny {
 		return td
 	}
@@ -330,6 +337,8 @@ func (e *Engine) checkDontAsk(tool Checker, input map[string]any) Decision {
 	}
 
 	td := tool.CheckPermissions(input, e.Context)
+	// Only the engine may certify the default fallback branch.
+	td.Origin = OriginUnknown
 	if td.Behavior == BehaviorAllow || td.Behavior == BehaviorDeny {
 		return td
 	}
