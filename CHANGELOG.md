@@ -159,6 +159,21 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   empty thinking blocks carrying signatures when formatting follow-up history.
   Existing message types and serialization are unchanged. Part of #125 (A2).
 
+### Fixed — explicit Messages tool-choice none
+
+- Anthropic and MiniMax Messages requests now retain an explicit
+  `tool_choice: {"type":"none"}` when tools are supplied, rather than silently
+  falling back to the provider default. Unset choice and no-tools behavior are
+  unchanged. Part of #125 (A3).
+
+### Fixed — summary over an empty fork snapshot
+
+- `UnifiedAgent.ApplySummary` (experimental) now refuses a fork snapshot
+  taken (`ForkSnapshot`) while the agent's context was empty, as
+  `OfferSummary` already did, and changes nothing. Before, it replaced the
+  agent's summary and reported success although the snapshot covered no
+  message to replace.
+
 ### Fixed — background precompression
 
 - With `ContextConfig.PrecompressRatio` set, a context that is still at the
