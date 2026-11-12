@@ -7,6 +7,11 @@ import (
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/message"
 )
 
+const (
+	anthropicMinThinkingBudget      = 1024
+	anthropicThinkingOutputHeadroom = 1024
+)
+
 // baseAnthropicRequest shares only the Messages protocol envelope. Thinking,
 // output configuration, authentication and caching remain provider decisions.
 func baseAnthropicRequest(model string, maxTokens int, msgs []*message.Msg, opts *CallOptions) *anthropicRequest {
@@ -30,18 +35,23 @@ func (m *AnthropicChatModel) request(msgs []*message.Msg, opts *CallOptions) (*a
 		r.MaxTokens = *opts.MaxTokens
 	}
 	if opts.ThinkingEnable != nil && *opts.ThinkingEnable {
-		budget := r.MaxTokens / 2
-		if opts.ThinkingBudget != nil && *opts.ThinkingBudget > 0 {
+
+		budget := max(anthropicMinThinkingBudget, r.MaxTokens/2)
+		if opts.ThinkingBudget != nil {
 			budget = *opts.ThinkingBudget
-		} else if opts.MaxTokens != nil && budget < 1024 {
-			// Automatic manual-thinking budgets must fit the API minimum.
-			budget = 1024
+			if budget < anthropicMinThinkingBudget {
+				return nil, fmt.Errorf("anthropic: thinking budget must be at least %d tokens", anthropicMinThinkingBudget)
+			}
 		}
 		if budget >= r.MaxTokens {
 			if opts.MaxTokens != nil {
 				return nil, fmt.Errorf("anthropic: thinking budget must be less than the per-call max_tokens limit")
 			}
-			r.MaxTokens = budget + 1024
+			// The configured/default limit may grow, but a per-call ceiling never does.
+			if budget > int(^uint(0)>>1)-anthropicThinkingOutputHeadroom {
+				return nil, fmt.Errorf("anthropic: thinking budget leaves no representable output limit")
+			}
+			r.MaxTokens = budget + anthropicThinkingOutputHeadroom
 		}
 		r.Thinking = &anthropicThinking{Type: "enabled", BudgetTokens: budget}
 	} else if opts.ThinkingEnable != nil {

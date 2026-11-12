@@ -164,6 +164,15 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   empty thinking blocks carrying signatures when formatting follow-up history.
   Existing message types and serialization are unchanged. Part of #125 (A2).
 
+### Fixed — Anthropic manual-thinking budgets
+
+- Clamp automatic thinking budgets to the 1024-token minimum. The default
+  thinking call now uses a 2048-token output limit and 1024-token thinking
+  budget. Reject explicit budgets below 1024 and overflowing limit growth
+  before dispatch. Configured/default limits may grow to fit a budget plus
+  1024 tokens; explicit per-call output ceilings remain hard limits. Other
+  thinking modes and MiniMax policy are unchanged. Part of #125 (A4).
+
 ### Fixed — explicit Messages tool-choice none
 
 - Anthropic and MiniMax Messages requests now retain an explicit
