@@ -36,7 +36,7 @@ feature is wired into every execution path.
 | OpenAI-compatible serving | [openaiserver/](pkg/agentscope/openaiserver/) | Experimental stateless text Chat Completions, server-owned tools and request admission; [guide](docs/openai-serving.md) |
 | External integrations | [mcp/](pkg/agentscope/mcp/), [a2a/](pkg/agentscope/a2a/), [channel/](pkg/agentscope/channel/) | Tool servers, remote agents and messaging channels |
 | Retrieval and memory | [rag/](pkg/agentscope/rag/), [embedding/](pkg/agentscope/embedding/), [memory/](pkg/agentscope/memory/) | Retrieval, embeddings and memory stores |
-| Cloud-edge shared session | [thread/](pkg/agentscope/thread/) | Experimental Main Thread log, Coordinator, transfer, background tasks, imports and summary scheduling; [guide](docs/main-thread.md) |
+| Cloud-edge shared session | [thread/](pkg/agentscope/thread/), [route/](pkg/agentscope/thread/route/) | Experimental Main Thread log, Coordinator, transfer, background tasks, imports, summary scheduling and routing modes; [guide](docs/main-thread.md) |
 | Composition and scheduling | [pipeline/](pkg/agentscope/pipeline/), [team/](pkg/agentscope/team/), [schedule/](pkg/agentscope/schedule/) | Agent coordination and scheduled execution |
 | Discovery and skills | [credential/](pkg/agentscope/credential/), [hub/](pkg/agentscope/hub/), [skill/](pkg/agentscope/skill/) | Provider configuration, integration discovery and skill loading |
 | Edge and device support | [device/](pkg/agentscope/device/), [messagebus/](pkg/agentscope/messagebus/), [connectivity.go](pkg/agentscope/model/connectivity.go) | Device tools, pub/sub and cloud/local routing |
@@ -348,8 +348,12 @@ behind any task running there (no takeover); a crash resumes the newest
 unanswered request on its owner. A task never re-runs: the report that ends it
 carries `Task.End`, and recovery reports one left without a report as
 `TaskUnfinished`. `Close` stops event delivery at an arbitrary point, so
-entries not yet delivered then may reach only the store. See
-[Main Thread](docs/main-thread.md).
+entries not yet delivered then may reach only the store. `thread/route`
+decides in a fixed order (availability, a named participant, a needed tool
+group only one side holds, host rules, an optional classifier, the mode's
+default); a classifier failure or timeout falls through to the default, and
+the classifier state holds the session's history only with
+`IncludeHistory`. See [Main Thread](docs/main-thread.md).
 
 ### Context and model capabilities
 
