@@ -24,6 +24,12 @@ func TestAnthropicMaxTokensWire(t *testing.T) {
 	}{
 		{"default", 0, nil, 1024, nil},
 		{"configured", 8192, nil, 8192, nil},
+		{"default_thinking", 0, []CallOption{WithThinking(true, 0)}, 2048, map[string]any{"type": "enabled", "budget_tokens": float64(1024)}},
+		{"configured_low_thinking", 512, []CallOption{WithThinking(true, 0)}, 2048, map[string]any{"type": "enabled", "budget_tokens": float64(1024)}},
+		{"configured_fitting_thinking", 1536, []CallOption{WithThinking(true, 0)}, 1536, map[string]any{"type": "enabled", "budget_tokens": float64(1024)}},
+		{"default_explicit_minimum", 0, []CallOption{WithThinking(true, 1024)}, 2048, map[string]any{"type": "enabled", "budget_tokens": float64(1024)}},
+		{"disabled_small_budget", 0, []CallOption{WithThinking(false, 1)}, 1024, map[string]any{"type": "disabled"}},
+
 		{"smaller_override", 8192, []CallOption{WithMaxTokens(77)}, 77, nil},
 		{"larger_override", 2048, []CallOption{WithMaxTokens(8192)}, 8192, nil},
 		{"last_option_wins", 8192, []CallOption{WithMaxTokens(77), WithMaxTokens(55)}, 55, nil},
@@ -171,5 +177,36 @@ func TestAnthropicMaxTokensRejectsThinkingConflict(t *testing.T) {
 	}
 	if requests.Load() != 0 {
 		t.Fatalf("conflicting budgets dispatched %d requests", requests.Load())
+	}
+}
+
+func TestAnthropicThinkingRejectsInvalidBudgetBeforeDispatch(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1); fmt.Fprint(w, anthropicResponseJSON()) }))
+	defer srv.Close()
+	m, err := NewAnthropicChatModel(&AnthropicConfig{APIKey: "test", Model: "test", BaseURL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	maxInt := int(^uint(0) >> 1)
+	for _, budget := range []int{1, 1023, maxInt - 1023, maxInt} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("budget=%d/stream=%v", budget, stream), func(t *testing.T) {
+				opts := []CallOption{WithThinking(true, budget)}
+				msgs := []*message.Msg{message.UserMsg("u", "hi")}
+				var e error
+				if stream {
+					_, e = m.ChatStream(context.Background(), msgs, opts...)
+				} else {
+					_, e = m.Chat(context.Background(), msgs, opts...)
+				}
+				if e == nil {
+					t.Fatal("invalid budget accepted")
+				}
+			})
+		}
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("invalid budgets dispatched %d requests", requests.Load())
 	}
 }
