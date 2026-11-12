@@ -19,6 +19,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   before dispatch. Configured/default limits may grow to fit a budget plus
   1024 tokens; explicit per-call output ceilings remain hard limits. Other
   thinking modes and MiniMax policy are unchanged. Part of #125 (A4).
+### Fixed — explicit Messages tool-choice none
+
+- Anthropic and MiniMax Messages requests now retain an explicit
+  `tool_choice: {"type":"none"}` when tools are supplied, rather than silently
+  falling back to the provider default. Unset choice and no-tools behavior are
+  unchanged. Part of #125 (A3).
 
 
 ### Added — shadow-mode permission advice
@@ -125,6 +131,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   offer, the one new field that does not raise the version (the trigger then
   for compatibility and host ownership limits.
 
+### Fixed — in-memory message bus replay
+
+- Replay reads return independent payload bytes, so changing a returned entry
+  cannot alter the log seen by later readers.
+
 ### Fixed — Anthropic tool-result history
 
 - Split merged assistant/tool-result history into Anthropic assistant/user
@@ -139,6 +150,14 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 - Preserve redacted thinking data in buffered and streamed responses and retain
   empty thinking blocks carrying signatures when formatting follow-up history.
   Existing message types and serialization are unchanged. Part of #125 (A2).
+
+### Fixed — summary over an empty fork snapshot
+
+- `UnifiedAgent.ApplySummary` (experimental) now refuses a fork snapshot
+  taken (`ForkSnapshot`) while the agent's context was empty, as
+  `OfferSummary` already did, and changes nothing. Before, it replaced the
+  agent's summary and reported success although the snapshot covered no
+  message to replace.
 
 ### Fixed — background precompression
 
