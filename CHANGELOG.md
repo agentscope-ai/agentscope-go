@@ -11,6 +11,14 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — explicit Messages tool-choice none
+
+- Anthropic and MiniMax Messages requests now retain an explicit
+  `tool_choice: {"type":"none"}` when tools are supplied, rather than silently
+  falling back to the provider default. Unset choice and no-tools behavior are
+  unchanged. Part of #125 (A3).
+
+
 ### Added — shadow-mode permission advice
 
 - Opt-in `agent` seams for a host that runs several agents over one shared,
