@@ -195,6 +195,38 @@ func TestLogAppendAndRead(t *testing.T) {
 	}
 }
 
+func TestLogReadPayloadIsolation(t *testing.T) {
+	bus := NewInMemoryMessageBus()
+	defer bus.Close()
+
+	ctx := context.Background()
+	cursor, err := bus.LogAppend(ctx, "log", []byte("earlier"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := bus.LogAppend(ctx, "log", []byte("terminal"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := bus.LogRead(ctx, "log", cursor, 1)
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first read = %v, %v; want one entry", first, err)
+	}
+	if first[0].ID != id || string(first[0].Payload) != "terminal" {
+		t.Fatalf("first read = %+v; want entry %q with the original payload", first[0], id)
+	}
+	first[0].Payload[0] = 'X'
+
+	second, err := bus.LogRead(ctx, "log", cursor, 1)
+	if err != nil || len(second) != 1 {
+		t.Fatalf("second read = %v, %v; want one entry", second, err)
+	}
+	if second[0].ID != id || string(second[0].Payload) != "terminal" {
+		t.Errorf("second read = %q, %q; want %q, %q", second[0].ID, second[0].Payload, id, "terminal")
+	}
+}
+
 func TestLogMaxLen(t *testing.T) {
 	bus := NewInMemoryMessageBus()
 	defer bus.Close()
