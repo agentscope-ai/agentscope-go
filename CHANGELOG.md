@@ -41,6 +41,7 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ### Added — agent seams for a session shared by several agents (experimental)
 
+
 - Opt-in `agent` seams for a host that runs several agents over one shared,
   append-only log, as proposed in
   [#117](https://github.com/agentscope-ai/agentscope-go/issues/117). They are
@@ -164,6 +165,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   empty thinking blocks carrying signatures when formatting follow-up history.
   Existing message types and serialization are unchanged. Part of #125 (A2).
 
+### Fixed — buffered Chat Completions stop reasons
+
+- Preserve normalized `finish_reason` on buffered OpenAI-compatible responses,
+  including length truncation, tool calls and content filtering, matching the
+  streaming path. Partial content and usage remain intact; unknown nonempty
+  reasons pass through. Part of #125 (O1).
 ### Fixed — Anthropic manual-thinking budgets
 
 - Clamp automatic thinking budgets to the 1024-token minimum. The default

@@ -33,6 +33,26 @@ cm, _ := model.NewOpenAIChatModel(model.OpenAIConfig{
 
 Models: `gpt-4o`, `gpt-4o-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`, `gpt-5.4`, `gpt-5.5`, `gpt-audio-mini`, `o3`, `o4-mini`
 
+Buffered Chat Completions responses now retain the normalized `StopReason`
+(unreleased O1 fix), matching the existing streaming path. For example,
+`finish_reason: "length"` becomes `model.StopReasonLength`; stop, tool calls,
+and content filtering are distinguished as well. Missing/null/empty reasons
+stay empty, while unknown nonempty reasons are preserved by the existing
+normalizer. Partial content, tool calls, and usage remain available; reporting
+the reason does not itself add retry or continuation behavior.
+Existing StopReason-aware consumers can now act on buffered results, including
+fork-summary and usage-aware structured-response truncation guards; tracing
+also receives the actual reason. Other consumers may still accept partial
+output unless they explicitly check for it.
+
+
+The shared parser serves OpenAI, DashScope, DeepSeek, Moonshot, the
+OpenAI-compatible Ollama adapter, xAI, and Volcengine. Volcengine already sets
+the field in its wrapper. Tests cover buffered/streamed agreement and retain
+provider-specific usage accounting. Responses API and native Ollama use
+separate implementations. These checks use local HTTP fixtures, not live
+provider calls. See the [OpenAI finish-reason reference](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create).
+
 ### OpenAI Responses API
 
 ```go

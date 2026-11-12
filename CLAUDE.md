@@ -212,7 +212,9 @@ GetOutputText accessor still returns only the first text block.
 
 `model.ChatModel` defines `Chat`, `ChatStream` and `CountTokens`. Provider adapters
 live in `model/`; OpenAI Chat Completions and Responses have separate
-implementations. Shared types or options do not prove that every provider
+implementations. The shared Chat Completions parser retains normalized finish reasons in both
+buffered and streamed responses; providers retain their own usage semantics.
+Shared types or options do not prove that every provider
 serializes a field or interprets it identically. Trace request construction and
 response parsing in both call paths.
 
