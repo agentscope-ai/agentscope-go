@@ -11,6 +11,24 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Added — Main Thread router (experimental)
+
+- New experimental package `thread/route`: a `thread.Router` for the Main
+  Thread `Coordinator`, with three modes (`local_based`, `cloud_based` and
+  `hybrid`), host rules and an optional classifier (any
+  `classifier.DispatchClassifier`). The decision order is fixed:
+  availability, a participant the user named, a tool group the query needs
+  that only one side holds, host rules, the classifier, then the mode's
+  default. The classifier answers one Choice question over a bounded state
+  that holds the query and the participants, and the session's history only
+  with `route.Config.IncludeHistory`. Its call is bounded by a timeout (10 s
+  by default), including the dispatch authorization. A failed or timed-out
+  call, a denied dispatch, an invalid answer, low confidence or a choice over
+  `MaxLag` falls through to the mode's default; in `hybrid` that is the
+  cloud, whoever owns the session. Tested offline with the fake classifier.
+  See
+  [Main Thread](docs/main-thread.md#routing-modes-and-the-classifier-layer).
+
 ### Added — Main Thread coordinator (experimental)
 
 - New experimental package `thread`, as proposed in
@@ -35,12 +53,10 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   machine; see the
   [note on `taskenvelope`](https://github.com/agentscope-ai/agentscope-go/issues/117#issuecomment-6769407061).
 - The log has no privacy classes: every participant reads every entry. The
-  adapters for `UnifiedAgent` (`thread/participant`) and the router
-  (`thread/route`) land separately. Tested offline with scripted
-  participants. See [Main Thread](docs/main-thread.md).
+  adapters for `UnifiedAgent` (`thread/participant`) land separately. Tested
+  offline with scripted participants. See [Main Thread](docs/main-thread.md).
 
 ### Added — agent seams for a session shared by several agents (experimental)
-
 
 - Opt-in `agent` seams for a host that runs several agents over one shared,
   append-only log, as proposed in
