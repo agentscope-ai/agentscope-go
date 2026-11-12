@@ -11,6 +11,14 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — buffered Chat Completions stop reasons
+
+- Preserve normalized `finish_reason` on buffered OpenAI-compatible responses,
+  including length truncation, tool calls and content filtering, matching the
+  streaming path. Partial content and usage remain intact; unknown nonempty
+  reasons pass through. Part of #125 (O1).
+
+
 ### Added — shadow-mode permission advice
 
 - Opt-in `agent` seams for a host that runs several agents over one shared,

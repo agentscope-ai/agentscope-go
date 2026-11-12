@@ -754,11 +754,12 @@ func parseOpenAIResponseCfg(parsed *openAIChatResponse, msgs []*message.Msg, inc
 	}
 
 	return &ChatResponse{
-		Content:   content,
-		IsLast:    true,
-		ID:        parsed.ID,
-		CreatedAt: time.Now().Format(message.TimestampFormat),
-		Usage:     usage,
-		ModelName: parsed.Model,
+		Content:    content,
+		IsLast:     true,
+		ID:         parsed.ID,
+		CreatedAt:  time.Now().Format(message.TimestampFormat),
+		Usage:      usage,
+		ModelName:  parsed.Model,
+		StopReason: normalizeStopReason(choice.FinishReason),
 	}, nil
 }
