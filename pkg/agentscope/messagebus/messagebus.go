@@ -203,6 +203,7 @@ func (b *InMemoryMessageBus) LogAppend(_ context.Context, logName string, payloa
 	return id, nil
 }
 
+// LogRead returns replay entries with payloads owned by the caller.
 func (b *InMemoryMessageBus) LogRead(_ context.Context, logName string, sinceID string, maxCount int) ([]LogEntry, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -232,7 +233,9 @@ func (b *InMemoryMessageBus) LogRead(_ context.Context, logName string, sinceID 
 	}
 
 	out := make([]LogEntry, len(result))
-	copy(out, result)
+	for i, entry := range result {
+		out[i] = LogEntry{ID: entry.ID, Payload: copyBytes(entry.Payload)}
+	}
 	return out, nil
 }
 

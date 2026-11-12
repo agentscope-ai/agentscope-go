@@ -123,6 +123,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   offer, the one new field that does not raise the version (the trigger then
   for compatibility and host ownership limits.
 
+### Fixed — in-memory message bus replay
+
+- Replay reads return independent payload bytes, so changing a returned entry
+  cannot alter the log seen by later readers.
+
 ### Fixed — Anthropic tool-result history
 
 - Split merged assistant/tool-result history into Anthropic assistant/user
