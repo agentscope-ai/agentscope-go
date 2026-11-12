@@ -65,6 +65,34 @@ Models: `claude-opus-4-5`, `claude-opus-4-6`, `claude-opus-4-7`, `claude-opus-4-
 
 Extended thinking: `model.WithThinking(true, 10000)` enables thinking with a 10K token budget.
 
+For models supporting manual extended thinking, the automatic budget is half
+of the effective output limit, rounded down, with a minimum of 1024 tokens.
+With default configuration, `WithThinking(true, 0)` therefore sends
+`max_tokens: 2048` and `budget_tokens: 1024` (unreleased A4 fix).
+An explicit positive thinking budget below 1024 is rejected before HTTP dispatch.
+
+A configured/default output limit may grow when it cannot fit the thinking
+budget: the request limit becomes budget plus 1024 tokens of answer headroom.
+Limits that already fit are retained. An explicit per-call `WithMaxTokens(n)`
+is a hard ceiling and is never increased: budget must be strictly below it,
+or the call fails locally. For example, an automatic budget fits a per-call
+limit of 1025 as 1024 thinking tokens plus one token of remaining output;
+a per-call limit of 1024 is rejected. Integer-overflowing growth is rejected.
+The configured model limit is not mutated, and calls without thinking or with
+thinking disabled retain their existing behavior.
+
+These rules concern the legacy `thinking.type: "enabled"` mode; they do not
+add adaptive thinking or guarantee every model accepts manual thinking.
+See [Anthropic's budget constraints](https://platform.claude.com/docs/en/build-with-claude/extended-thinking#budget-rules-and-tuning).
+The automatic floor and answer headroom are informed by the
+[Python thinking policy](https://github.com/agentscope-ai/agentscope/blob/d74b833943d84ba8e6b8440b0fd4d46bcdc59569/src/agentscope/model/_anthropic/_model.py#L211-L244).
+Go deliberately validates small explicit budgets locally, grows an insufficient
+configured/default limit for its automatic budget, and preserves an explicit
+per-call ceiling rather than forwarding an invalid request. MiniMax's adaptive
+thinking policy is separate and unchanged. Validation uses local wire fixtures,
+not live model calls.
+
+
 Anthropic responses retain `redacted_thinking` blocks (including their opaque
 `data`) and thinking signatures in both buffered and streamed calls. Empty
 thinking text with a nonempty signature is retained when formatting history;

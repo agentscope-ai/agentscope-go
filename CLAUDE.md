@@ -239,6 +239,12 @@ Its output count can exceed the input count. Multi-agent formatting assigns the
 sender before expansion is combined and merges only plain text messages without
 tool calls or reasoning; structured media keeps its message boundary.
 
+Anthropic manual-thinking request construction floors automatic budgets at
+1024 and rejects smaller explicit budgets. Configured/default output limits may
+grow to budget plus 1024 when needed; explicit per-call max_tokens never grows.
+Overflowing growth fails before dispatch. This policy does not select adaptive
+thinking or modify MiniMax's separate request policy.
+
 Anthropic requests use its public formatter, which expands merged tool history
 into assistant/user segments and groups consecutive tool results without adding
 sender text before them. The stored history remains unchanged. Buffered and
