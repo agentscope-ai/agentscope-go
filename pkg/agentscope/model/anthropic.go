@@ -780,7 +780,8 @@ func convertMessagesToAnthropicFallback(msgs []*message.Msg) ([]anthropicMessage
 }
 
 // formatToolChoiceAnthropic converts a generic ToolChoice to Anthropic's format.
-// "required" → {"type":"any"}, "auto" → {"type":"auto"}, name → {"type":"tool","name":"..."}
+// "required" maps to "any"; "auto" and "none" retain their types.
+// A specific name maps to {"type":"tool","name":"..."}.
 func formatToolChoiceAnthropic(tc *ToolChoice) *anthropicToolChoice {
 	if tc == nil {
 		return nil
@@ -789,7 +790,7 @@ func formatToolChoiceAnthropic(tc *ToolChoice) *anthropicToolChoice {
 	case "auto":
 		return &anthropicToolChoice{Type: "auto"}
 	case "none":
-		return nil
+		return &anthropicToolChoice{Type: "none"}
 	case "required":
 		return &anthropicToolChoice{Type: "any"}
 	default:

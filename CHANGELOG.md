@@ -11,15 +11,36 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
-### Fixed — buffered Chat Completions stop reasons
+### Added — Main Thread coordinator (experimental)
 
-- Preserve normalized `finish_reason` on buffered OpenAI-compatible responses,
-  including length truncation, tool calls and content filtering, matching the
-  streaming path. Partial content and usage remain intact; unknown nonempty
-  reasons pass through. Part of #125 (O1).
+- New experimental package `thread`, as proposed in
+  [#117](https://github.com/agentscope-ai/agentscope-go/issues/117): a cloud
+  participant and an edge participant share one session through an
+  append-only log (`MemoryStore`, or `FileStore` with one fsynced JSON line
+  per batch). A `Coordinator` is the only writer. It keeps one foreground
+  owner with an epoch that guards reply and owner-change writes, routes
+  at query boundaries through a `Router` (or stays with the owner), delivers
+  steering at the owner's next boundary, fails a failed owner's request over
+  to the other side and resumes the request a stopped process was answering.
+  It commits transfers, background tasks and reports, imports what a
+  participant lacks before each activation (a clear with the newest peer
+  summary for an edge handover, otherwise a budgeted or chunked import for
+  the edge and a full import for the cloud) and schedules summaries a
+  `Forker` writes. A shared usage ledger, an opt-in tool-output list and
+  leases come with it.
+- The report that ends a task records how it ended (`Task.End`: the
+  assignee's finish reason, or `TaskUnfinished` for a task recovery found
+  unfinished), and assign entries reach the event stream, so a host can
+  follow tasks from the log without parsing text. There is no task state
+  machine; see the
+  [note on `taskenvelope`](https://github.com/agentscope-ai/agentscope-go/issues/117#issuecomment-6769407061).
+- The log has no privacy classes: every participant reads every entry. The
+  adapters for `UnifiedAgent` (`thread/participant`) and the router
+  (`thread/route`) land separately. Tested offline with scripted
+  participants. See [Main Thread](docs/main-thread.md).
 
+### Added — agent seams for a session shared by several agents (experimental)
 
-### Added — shadow-mode permission advice
 
 - Opt-in `agent` seams for a host that runs several agents over one shared,
   append-only log, as proposed in
@@ -66,7 +87,7 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   still runs, even after its event stream closed. Tested offline with
   scripted models.
 
-### Added — agent seams for a session shared by several agents (experimental)
+### Added — shadow-mode permission advice
 
 - An offline-first `permission_advisory` example combines classifier advice with
   unchanged interactive permission confirmation, with optional local inference
@@ -74,6 +95,7 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 - `permission.Decision.Origin` identifies only the Default-mode fallback Ask
   (`default_ask`); other engine outcomes have unknown origin. Eligible decisions
   now serialize this additional field. See the [guide](docs/permission-advisory.md)
+  for compatibility and host ownership limits.
 
 ### Added — plan after the newest user message (experimental)
 
@@ -121,7 +143,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   `AgentState` fields (`summary_offer`, `peer_summary`, `thread_cursor`) are
   omitted when empty; an older build ignores them, which drops a summary
   offer, the one new field that does not raise the version (the trigger then
-  for compatibility and host ownership limits.
+  compresses synchronously).
+
+### Fixed — in-memory message bus replay
+
+- Replay reads return independent payload bytes, so changing a returned entry
+  cannot alter the log seen by later readers.
 
 ### Fixed — Anthropic tool-result history
 
@@ -137,6 +164,28 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 - Preserve redacted thinking data in buffered and streamed responses and retain
   empty thinking blocks carrying signatures when formatting follow-up history.
   Existing message types and serialization are unchanged. Part of #125 (A2).
+
+### Fixed — buffered Chat Completions stop reasons
+
+- Preserve normalized `finish_reason` on buffered OpenAI-compatible responses,
+  including length truncation, tool calls and content filtering, matching the
+  streaming path. Partial content and usage remain intact; unknown nonempty
+  reasons pass through. Part of #125 (O1).
+
+### Fixed — explicit Messages tool-choice none
+
+- Anthropic and MiniMax Messages requests now retain an explicit
+  `tool_choice: {"type":"none"}` when tools are supplied, rather than silently
+  falling back to the provider default. Unset choice and no-tools behavior are
+  unchanged. Part of #125 (A3).
+
+### Fixed — summary over an empty fork snapshot
+
+- `UnifiedAgent.ApplySummary` (experimental) now refuses a fork snapshot
+  taken (`ForkSnapshot`) while the agent's context was empty, as
+  `OfferSummary` already did, and changes nothing. Before, it replaced the
+  agent's summary and reported success although the snapshot covered no
+  message to replace.
 
 ### Fixed — background precompression
 
