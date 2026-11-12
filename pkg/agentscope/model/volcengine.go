@@ -122,7 +122,6 @@ func (m *VolcengineChatModel) Chat(ctx context.Context, msgs []*message.Msg, opt
 	if err != nil {
 		return nil, fmt.Errorf("volcengine: %w", err)
 	}
-	response.StopReason = normalizeStopReason(parsed.Choices[0].FinishReason)
 	return response, nil
 }
 

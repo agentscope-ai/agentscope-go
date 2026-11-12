@@ -45,11 +45,10 @@ fork-summary and usage-aware structured-response truncation guards; tracing
 also receives the actual reason. Other consumers may still accept partial
 output unless they explicitly check for it.
 
-
 The shared parser serves OpenAI, DashScope, DeepSeek, Moonshot, the
-OpenAI-compatible Ollama adapter, xAI, and Volcengine. Volcengine already sets
-the field in its wrapper. Tests cover buffered/streamed agreement and retain
-provider-specific usage accounting. Responses API and native Ollama use
+OpenAI-compatible Ollama adapter, xAI, and Volcengine. Tests cover
+buffered/streamed agreement and retain provider-specific usage accounting.
+Responses API and native Ollama use
 separate implementations. These checks use local HTTP fixtures, not live
 provider calls. See the [OpenAI finish-reason reference](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create).
 
@@ -64,6 +63,16 @@ cm, _ := model.NewOpenAIResponseModel(&model.OpenAIResponseConfig{
 ```
 
 Uses the Responses API (`/v1/responses`) instead of Chat Completions. Default timeout is 5 minutes for long reasoning tasks.
+
+Both `Chat` and `ChatStream` preserve direct `DataBlock` images as
+`input_image` parts, using the original URL or a base64 data URL. A
+`HintBlock` becomes user input at its position in the history, including
+when attached to an assistant message; string hints and ordered text/image
+block lists are supported. Other media and unsupported hint block types
+are skipped. A turn with no replayable content keeps the existing
+content-omitted placeholder. Tool-result image conversion is unchanged.
+These request shapes are tested with local HTTP fixtures, not live vision
+calls.
 
 A response whose `status` is not `completed` (for example `incomplete` at
 `max_output_tokens`, or `failed`) keeps its content, ID and usage and reports

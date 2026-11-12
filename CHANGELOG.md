@@ -41,7 +41,6 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ### Added — agent seams for a session shared by several agents (experimental)
 
-
 - Opt-in `agent` seams for a host that runs several agents over one shared,
   append-only log, as proposed in
   [#117](https://github.com/agentscope-ai/agentscope-go/issues/117). They are
@@ -145,6 +144,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   offer, the one new field that does not raise the version (the trigger then
   compresses synchronously).
 
+### Fixed — Responses image and hint input
+
+- Preserve direct URL/base64 images and hints in buffered and streamed
+  Responses requests. Hints become user input at their original position,
+  retaining text and images in order. Part of #125 (O3).
+
 ### Fixed — in-memory message bus replay
 
 - Replay reads return independent payload bytes, so changing a returned entry
@@ -171,6 +176,7 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   including length truncation, tool calls and content filtering, matching the
   streaming path. Partial content and usage remain intact; unknown nonempty
   reasons pass through. Part of #125 (O1).
+
 ### Fixed — Anthropic manual-thinking budgets
 
 - Clamp automatic thinking budgets to the 1024-token minimum. The default
