@@ -196,6 +196,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 - Encode a named tool choice as a function object in buffered and streamed
   Responses requests instead of sending the tool name as an invalid string.
   Part of #125 (O5).
+### Fixed — multi-agent message names for Chat Completions
+
+- Agent names now keep legal dashes and dots, and each run of the characters
+  the API rejects in `name` fields (whitespace and `<|\/>`) collapses to one
+  underscore, so free-text names no longer cause 400s. Part of #138.
+
 
 ### Fixed — Anthropic tool-result history
 

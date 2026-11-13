@@ -124,11 +124,11 @@ func TestOpenAIMultiAgentExpandedToolHistory(t *testing.T) {
 	}
 	want := []map[string]any{
 		{"role": "assistant", "name": "planner", "content": "Check the weather."},
-		{"role": "assistant", "name": "weather_agent", "content": nil, "tool_calls": []map[string]any{{
+		{"role": "assistant", "name": "weather-agent", "content": nil, "tool_calls": []map[string]any{{
 			"id": "a", "type": "function", "function": map[string]any{"name": "weather", "arguments": `{}`},
 		}}},
 		{"role": "tool", "tool_call_id": "a", "content": "18 C"},
-		{"role": "assistant", "name": "weather_agent", "content": "It is mild."},
+		{"role": "assistant", "name": "weather-agent", "content": "It is mild."},
 		{"role": "user", "name": "reader", "content": "Thanks."},
 	}
 	if !reflect.DeepEqual(got, want) {
