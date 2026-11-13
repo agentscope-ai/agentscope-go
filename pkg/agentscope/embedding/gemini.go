@@ -72,9 +72,13 @@ func (m *GeminiEmbeddingModel) Embed(ctx context.Context, texts []string) (*Embe
 		return &EmbeddingResponse{Source: "api"}, nil
 	}
 
-	if m.cache != nil {
-		key := CacheKey(m.model, m.dimensions, texts)
-		if embeddings, ok := m.cache.Retrieve(key); ok {
+	cache := m.cache
+	var key string
+	if cache != nil {
+		key = endpointCacheKey("gemini", m.baseURL, m.model, m.requestDimensions(), texts)
+	}
+	if key != "" {
+		if embeddings, ok := cache.Retrieve(key); ok {
 			return &EmbeddingResponse{
 				Embeddings: embeddings,
 				ID:         timestamp(),
@@ -90,12 +94,18 @@ func (m *GeminiEmbeddingModel) Embed(ctx context.Context, texts []string) (*Embe
 		return nil, err
 	}
 
-	if m.cache != nil {
-		key := CacheKey(m.model, m.dimensions, texts)
-		_ = m.cache.Store(key, resp.Embeddings)
+	if key != "" {
+		_ = cache.Store(key, resp.Embeddings)
 	}
 
 	return resp, nil
+}
+
+func (m *GeminiEmbeddingModel) requestDimensions() int {
+	if m.dimensions > 0 {
+		return m.dimensions
+	}
+	return 0
 }
 
 func (m *GeminiEmbeddingModel) callAPI(ctx context.Context, texts []string) (*EmbeddingResponse, error) {
@@ -109,9 +119,7 @@ func (m *GeminiEmbeddingModel) callAPI(ctx context.Context, texts []string) (*Em
 				Parts: []geminiPart{{Text: text}},
 			},
 		}
-		if m.dimensions > 0 {
-			req.OutputDimensionality = m.dimensions
-		}
+		req.OutputDimensionality = m.requestDimensions()
 		requests[i] = req
 	}
 
