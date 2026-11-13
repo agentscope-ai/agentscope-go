@@ -11,6 +11,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — tool text truncation
+
+- Tool text uses a more conservative estimate for non-ASCII content. The
+  retained head and tail, truncation marker, and any offload reference share
+  the same estimated budget.
+
 ### Added — Main Thread coordinator (experimental)
 
 - New experimental package `thread`, as proposed in

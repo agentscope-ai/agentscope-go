@@ -175,7 +175,7 @@ func (a *UnifiedAgent) runPrecompress(ctx context.Context, cfg *ContextConfig, c
 		return
 	}
 	if budget := a.ownSummaryBudget(cfg, ctxSize); budget > 0 {
-		if truncated, did := TruncateToolResult(newSummary, budget); did {
+		if truncated, did := truncateSummary(newSummary, budget); did {
 			newSummary = truncated
 		}
 	}

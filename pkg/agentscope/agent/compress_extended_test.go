@@ -509,6 +509,7 @@ func TestCompressContext_ToolResultTruncationWithOffloader(t *testing.T) {
 				if !strings.Contains(output, "offloaded") {
 					t.Error("output should reference offloaded content")
 				}
+				checkToolTextBudget(t, output, 50)
 			}
 		}
 	}
