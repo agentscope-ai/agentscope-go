@@ -150,6 +150,13 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 - Replay reads return independent payload bytes, so changing a returned entry
   cannot alter the log seen by later readers.
 
+### Fixed — Anthropic tool-result error flag
+
+- Failed tool results now reach the Anthropic Messages API with
+  `is_error: true`; only `ToolResultError` gains the flag and other states
+  keep the plain `tool_result` shape. Local fixtures cover the formatter and
+  both call paths; no live API result is claimed. Part of #138.
+
 ### Fixed — Anthropic tool-result history
 
 - Split merged assistant/tool-result history into Anthropic assistant/user

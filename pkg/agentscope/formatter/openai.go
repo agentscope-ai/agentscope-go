@@ -308,6 +308,10 @@ func (f *AnthropicFormatter) formatMsg(msg *message.Msg) map[string]any {
 				"tool_use_id": blk.ID,
 				"content":     resultText,
 			}
+			// Only failed results carry is_error (upstream #3905).
+			if blk.State == message.ToolResultError {
+				trBlock["is_error"] = true
+			}
 			content = append(content, trBlock)
 		case message.HintBlock:
 			for _, sub := range hintContent(blk) {
