@@ -196,6 +196,14 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 - Encode a named tool choice as a function object in buffered and streamed
   Responses requests instead of sending the tool name as an invalid string.
   Part of #125 (O5).
+### Fixed — Gemini tool-call thought signatures
+
+- Thinking models require a function-call part's `thought_signature` echoed
+  back with the same history part; the adapter now stashes it in
+  `ToolCallBlock.Extra` and restores it on the wire, for both buffered and
+  streamed responses. Local fixtures cover both call paths; no live API
+  result is claimed. Part of #138.
+
 
 ### Fixed — Anthropic tool-result history
 
