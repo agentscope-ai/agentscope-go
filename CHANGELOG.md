@@ -11,6 +11,15 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — Gemini tool error results
+
+- The Gemini formatter and model request converter send `ToolResultError`
+  details under `functionResponse.response.error`. Other states retain the
+  existing `result` key for compatibility. Tool names, output conversion and
+  stored history are unchanged. This follows the error mapping in
+  [Python #3947](https://github.com/agentscope-ai/agentscope/pull/3947), while
+  deliberately retaining Go's existing success key instead of Python's `output`.
+
 ### Added — Main Thread coordinator (experimental)
 
 - New experimental package `thread`, as proposed in
