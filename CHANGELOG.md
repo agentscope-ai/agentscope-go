@@ -150,6 +150,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 - Replay reads return independent payload bytes, so changing a returned entry
   cannot alter the log seen by later readers.
 
+### Fixed — multi-agent message names for Chat Completions
+
+- Agent names now keep legal dashes and dots, and each run of the characters
+  the API rejects in `name` fields (whitespace and `<|\/>`) collapses to one
+  underscore, so free-text names no longer cause 400s. Part of #138.
+
 ### Fixed — Anthropic tool-result history
 
 - Split merged assistant/tool-result history into Anthropic assistant/user
