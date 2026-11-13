@@ -734,3 +734,32 @@ func TestBatchEmbed_Error(t *testing.T) {
 		t.Error("expected error")
 	}
 }
+
+func TestEndpointCacheKeyURLBoundaries(t *testing.T) {
+	for _, base := range []string{
+		"relative",
+		"https:opaque",
+		"ftp://example.test",
+		"https://:443",
+		"https://user:fixture@example.test",
+		"https://example.test?token=fixture",
+		"https://example.test?",
+		"https://example.test#fragment",
+		"https://example.test#",
+		"https://example.test/%zz",
+	} {
+		if key := endpointCacheKey("gemini", base, "m", 0, []string{"text"}); key != "" {
+			t.Errorf("endpoint %q unexpectedly produced a cache key", base)
+		}
+	}
+	key := func(base, model string) string {
+		return endpointCacheKey("gemini", base, model, 0, []string{"text"})
+	}
+	a := key("https://example.test/\xff", "m")
+	b := key("https://example.test/\xfe", "m")
+	c := key("https://example.test/\xff", "\xff")
+	d := key("https://example.test/\xff", "\xfe")
+	if a == "" || b == "" || c == "" || d == "" || a == b || c == d {
+		t.Fatal("distinct request bytes must produce distinct nonempty keys")
+	}
+}

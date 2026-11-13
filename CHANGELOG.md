@@ -11,6 +11,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — embedding cache endpoint isolation
+
+- Scope OpenAI-compatible and Gemini cache keys to their endpoint and adapter
+  family so a shared cache cannot return a different endpoint's vectors. Entries
+  written with old keys are repopulated on demand.
+
 ### Added — Main Thread coordinator (experimental)
 
 - New experimental package `thread`, as proposed in

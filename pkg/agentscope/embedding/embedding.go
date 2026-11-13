@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,6 +65,19 @@ func CacheKey(parts ...any) string {
 	data, _ := json.Marshal(parts)
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])
+}
+
+// endpointCacheKey scopes the adapter's cache to the configured HTTP route.
+func endpointCacheKey(family, baseURL, model string, dimensions int, texts []string) string {
+	endpoint, err := url.Parse(baseURL)
+	if err != nil || (endpoint.Scheme != "http" && endpoint.Scheme != "https") ||
+		endpoint.Hostname() == "" || endpoint.User != nil || endpoint.ForceQuery ||
+		endpoint.RawQuery != "" || strings.Contains(baseURL, "#") {
+		return ""
+	}
+	// Preserve the exact route bytes, including slashes and escapes. CacheKey's
+	// JSON encoding would otherwise replace invalid UTF-8 in strings.
+	return CacheKey("embedding-endpoint-v1", family, []byte(baseURL), []byte(model), dimensions, texts)
 }
 
 // batchFunc processes a single batch of texts into an EmbeddingResponse.
