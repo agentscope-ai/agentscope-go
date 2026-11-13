@@ -145,6 +145,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   offer, the one new field that does not raise the version (the trigger then
   compresses synchronously).
 
+### Fixed — Responses named tool choice
+
+- Encode a named tool choice as a function object in buffered and streamed
+  Responses requests instead of sending the tool name as an invalid string.
+  Part of #125 (O5).
+
 ### Fixed — in-memory message bus replay
 
 - Replay reads return independent payload bytes, so changing a returned entry

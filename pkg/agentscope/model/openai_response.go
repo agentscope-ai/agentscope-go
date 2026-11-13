@@ -159,7 +159,15 @@ func (m *openaiResponseModel) buildRequestBody(msgs []*message.Msg, opts *CallOp
 		body["tools"] = tools
 	}
 	if opts.ToolChoice != nil {
-		body["tool_choice"] = opts.ToolChoice.Mode
+		switch opts.ToolChoice.Mode {
+		case "auto", "none", "required", "":
+			body["tool_choice"] = opts.ToolChoice.Mode
+		default:
+			body["tool_choice"] = map[string]any{
+				"type": "function",
+				"name": opts.ToolChoice.Mode,
+			}
+		}
 	}
 
 	return body
