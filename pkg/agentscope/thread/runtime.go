@@ -153,7 +153,9 @@ type Participant interface {
 	Descriptor() Descriptor
 	// Bind gives the participant its Host. NewCoordinator calls it once. A
 	// participant that also implements Releaser can be bound again after its
-	// Coordinator releases it.
+	// Coordinator releases it. Call the Host's methods only after
+	// NewCoordinator returns: recovery changes the Coordinator's state
+	// before it starts serving calls.
 	Bind(h Host) error
 	State() ParticipantState
 	// Sync applies an update between activations.

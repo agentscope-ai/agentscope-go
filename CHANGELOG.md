@@ -11,6 +11,30 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Added — Main Thread participants (experimental)
+
+- New experimental package `thread/participant`: `AgentParticipant` runs one
+  `UnifiedAgent` as a Main Thread participant (built in two steps:
+  `Prepare` returns the agent options and thread tools, then
+  `Prepared.Participant` binds the agent), and `TeamParticipant` runs a
+  cloud master with sub-agents through `pipeline.TeamPipeline` (members
+  never see the thread and must not be given thread tools). A participant
+  imports entries into its agent, forwards the reply's events, and reports
+  the visible text, the tool digest and the usage of each model call
+  (all-zero usage is recorded as unknown). The thread
+  tools are `transfer` (called alone; the reply ends with
+  `types.ReplyHandedOff`), `assign_task`, `report`, `publish_artifact`,
+  `thread_read` and the opt-in `event_read`; the four writing tools are
+  external tools answered at their place in the event stream, so they need
+  a permission context. Cloud participants implement `thread.Forker` from a
+  fork of the last request (`KeepForkToolChoice`, `ForkGuard`).
+  `participant.Leased` wraps a tool with a lease on the resource it names,
+  and `SystemPromptSection` renders the peers for a system prompt. Tested
+  offline with scripted models, including end-to-end sessions with the
+  router. See [Main Thread](docs/main-thread.md).
+- `thread.Participant.Bind` documents that a participant calls its `Host`
+  only after `NewCoordinator` returns.
+
 ### Added — Main Thread router (experimental)
 
 - New experimental package `thread/route`: a `thread.Router` for the Main
@@ -52,9 +76,9 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   follow tasks from the log without parsing text. There is no task state
   machine; see the
   [note on `taskenvelope`](https://github.com/agentscope-ai/agentscope-go/issues/117#issuecomment-6769407061).
-- The log has no privacy classes: every participant reads every entry. The
-  adapters for `UnifiedAgent` (`thread/participant`) land separately. Tested
-  offline with scripted participants. See [Main Thread](docs/main-thread.md).
+- The log has no privacy classes: every participant reads every entry.
+  Tested offline with scripted participants. See
+  [Main Thread](docs/main-thread.md).
 
 ### Added — agent seams for a session shared by several agents (experimental)
 
