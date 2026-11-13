@@ -67,9 +67,14 @@ func (m *MoonshotChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts 
 		opt(callOpts)
 	}
 
+	messages, err := convertMessagesToOpenAI(msgs)
+	if err != nil {
+		return nil, fmt.Errorf("moonshot: %w", err)
+	}
+
 	reqBody := openAIChatRequest{
 		Model:    m.model,
-		Messages: convertMessagesToOpenAI(msgs),
+		Messages: messages,
 	}
 	if callOpts.Temperature != nil {
 		t := float32(*callOpts.Temperature)
@@ -127,9 +132,14 @@ func (m *MoonshotChatModel) ChatStream(ctx context.Context, msgs []*message.Msg,
 		opt(callOpts)
 	}
 
+	messages, err := convertMessagesToOpenAI(msgs)
+	if err != nil {
+		return nil, fmt.Errorf("moonshot: %w", err)
+	}
+
 	reqBody := openAIChatRequest{
 		Model:         m.model,
-		Messages:      convertMessagesToOpenAI(msgs),
+		Messages:      messages,
 		Stream:        true,
 		StreamOptions: &openAIStreamOpts{IncludeUsage: true},
 	}

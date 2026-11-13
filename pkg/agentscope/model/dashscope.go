@@ -74,9 +74,14 @@ func (m *DashScopeChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts
 		opt(callOpts)
 	}
 
+	messages, err := convertMessagesWithFormatter(msgs, formatter.NewDashScopeFormatter())
+	if err != nil {
+		return nil, fmt.Errorf("dashscope: %w", err)
+	}
+
 	reqBody := openAIChatRequest{
 		Model:    m.model,
-		Messages: convertMessagesWithFormatter(msgs, formatter.NewDashScopeFormatter()),
+		Messages: messages,
 	}
 	if callOpts.Temperature != nil {
 		t := float32(*callOpts.Temperature)
@@ -136,9 +141,14 @@ func (m *DashScopeChatModel) ChatStream(ctx context.Context, msgs []*message.Msg
 		opt(callOpts)
 	}
 
+	messages, err := convertMessagesWithFormatter(msgs, formatter.NewDashScopeFormatter())
+	if err != nil {
+		return nil, fmt.Errorf("dashscope: %w", err)
+	}
+
 	reqBody := openAIChatRequest{
 		Model:         m.model,
-		Messages:      convertMessagesWithFormatter(msgs, formatter.NewDashScopeFormatter()),
+		Messages:      messages,
 		Stream:        true,
 		StreamOptions: &openAIStreamOpts{IncludeUsage: true},
 	}

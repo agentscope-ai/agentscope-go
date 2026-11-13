@@ -96,9 +96,14 @@ func (m *OpenAIChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts ..
 		opt(callOpts)
 	}
 
+	messages, err := m.convertMessages(msgs)
+	if err != nil {
+		return nil, fmt.Errorf("openai: %w", err)
+	}
+
 	reqBody := openAIChatRequest{
 		Model:    m.model,
-		Messages: m.convertMessages(msgs),
+		Messages: messages,
 	}
 	if callOpts.Temperature != nil {
 		t := float32(*callOpts.Temperature)
@@ -180,9 +185,14 @@ func (m *OpenAIChatModel) ChatStream(ctx context.Context, msgs []*message.Msg, o
 		opt(callOpts)
 	}
 
+	messages, err := m.convertMessages(msgs)
+	if err != nil {
+		return nil, fmt.Errorf("openai: %w", err)
+	}
+
 	reqBody := openAIChatRequest{
 		Model:         m.model,
-		Messages:      m.convertMessages(msgs),
+		Messages:      messages,
 		Stream:        true,
 		StreamOptions: &openAIStreamOpts{IncludeUsage: true},
 	}
@@ -237,7 +247,7 @@ func (m *OpenAIChatModel) CountTokens(msgs []*message.Msg, tools []ToolSchema) i
 }
 
 // convertMessages serializes msgs with the formatter configured on the model.
-func (m *OpenAIChatModel) convertMessages(msgs []*message.Msg) []openAIChatMessage {
+func (m *OpenAIChatModel) convertMessages(msgs []*message.Msg) ([]openAIChatMessage, error) {
 	if m.formatter == nil {
 		return convertMessagesToOpenAI(msgs)
 	}
@@ -246,14 +256,14 @@ func (m *OpenAIChatModel) convertMessages(msgs []*message.Msg) []openAIChatMessa
 
 // convertMessagesToOpenAI maps internal Msg instances to OpenAI messages.
 // Uses the OpenAI formatter for full block-type support, then converts to typed structs.
-func convertMessagesToOpenAI(msgs []*message.Msg) []openAIChatMessage {
+func convertMessagesToOpenAI(msgs []*message.Msg) ([]openAIChatMessage, error) {
 	return convertMessagesWithFormatter(msgs, formatter.NewOpenAIFormatter())
 }
 
-func convertMessagesWithFormatter(msgs []*message.Msg, f formatter.Formatter) []openAIChatMessage {
+func convertMessagesWithFormatter(msgs []*message.Msg, f formatter.Formatter) ([]openAIChatMessage, error) {
 	formatted, err := f.Format(msgs)
 	if err != nil {
-		return convertMessagesToOpenAIFallback(msgs)
+		return nil, fmt.Errorf("format messages: %w", err)
 	}
 
 	out := make([]openAIChatMessage, 0, len(formatted))
@@ -293,24 +303,5 @@ func convertMessagesWithFormatter(msgs []*message.Msg, f formatter.Formatter) []
 		}
 		out = append(out, msg)
 	}
-	return out
-}
-
-func convertMessagesToOpenAIFallback(msgs []*message.Msg) []openAIChatMessage {
-	out := make([]openAIChatMessage, 0, len(msgs))
-	for _, m := range msgs {
-		if m == nil {
-			continue
-		}
-		role := string(m.Role)
-		if role == "" {
-			role = "user"
-		}
-		msg := openAIChatMessage{Role: role, Name: m.Name}
-		if txt := m.GetTextContent("\n"); txt != nil {
-			msg.Content = *txt
-		}
-		out = append(out, msg)
-	}
-	return out
+	return out, nil
 }
