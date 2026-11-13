@@ -92,6 +92,7 @@ contracts; no real identity-provider or model integration is claimed.
 | [guardrail](../examples/guardrail/) | Block, redact and warn with mock model responses |
 | [spend_cap](../examples/spend_cap/) | Observed-cost budgets with a mock model |
 | [agent_service](../examples/agent_service/) | HTTP service and SSE events |
+| [framework_service](../examples/framework_service/) | Agent SSE streaming and MCP tool endpoints mounted into Gin and Echo |
 | [scoped_service](../examples/scoped_service/) | Offline shared service with owner-scoped sessions and file tools |
 | [webui](../examples/webui/) | Embedded browser UI |
 | [dingtalk_channel](../examples/dingtalk_channel/) | DingTalk messages and confirmations |

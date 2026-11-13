@@ -11,6 +11,17 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Added — examples
+
+- **Gin and Echo integration example** (`examples/framework_service/`): serves
+  an agent's chat replies as SSE events and exposes its tools through the MCP
+  HTTP endpoints, mounted into Gin and Echo routers in one process.
+  Demonstrates the net/http interop pattern (native framework handlers for
+  streaming, `gin.WrapH`/`echo.WrapHandler` for the MCP handler) and includes
+  offline endpoint tests using a scripted model. Adds example-only
+  dependencies `github.com/gin-gonic/gin` and `github.com/labstack/echo/v4`
+  (both MIT).
+
 ### Added — Main Thread coordinator (experimental)
 
 - New experimental package `thread`, as proposed in

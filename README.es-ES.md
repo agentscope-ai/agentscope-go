@@ -219,6 +219,7 @@ necesarios.
 | [guardrail](examples/guardrail/) | Bloqueo, ocultación y avisos con respuestas simuladas |
 | [spend_cap](examples/spend_cap/) | Presupuestos basados en el coste observado con un modelo simulado |
 | [agent_service](examples/agent_service/) | Servicio HTTP y eventos SSE |
+| [framework_service](examples/framework_service/) | Streaming SSE del agente y endpoints de herramientas MCP montados en Gin y Echo |
 | [scoped_service](examples/scoped_service/) | Servicio compartido sin proveedor externo, sesiones por propietario y herramientas de archivos |
 | [webui](examples/webui/) | Interfaz web integrada |
 | [dingtalk_channel](examples/dingtalk_channel/) | Mensajes y confirmaciones en DingTalk |
