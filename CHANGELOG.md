@@ -11,6 +11,27 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — hub
+
+- **`GitHubMCPRegistry.Get`/`Install` against live registries:** both GitHub's
+  MCP registry (`api.mcp.github.com`) and the official registry
+  (`registry.modelcontextprotocol.io`) have retired the legacy detail endpoint
+  `GET /v0/servers/{name}` (404 on the literal slash, 400 on the `%2F`
+  escape), so `Get` — and with it `Install` — always failed against live
+  registries while the fixture-based tests kept passing. `Get` now requests
+  `GET /v0.1/servers/{name}/versions/latest` and falls back to the legacy
+  endpoint only on a 404 (third-party registries may still serve it); 429/5xx
+  and network errors surface directly. When both endpoints fail, the error
+  keeps the primary endpoint's not-found semantics with the legacy failure in
+  the cause chain. Registry HTTP errors now carry the status code in a typed
+  (unexported) error so fallback decisions do not rely on message text, and
+  `toCard` reads the top-level `server.version` when `version_detail` is
+  absent (the v0.1 detail shape). Known remaining gap, tracked separately:
+  entries published under the 2025-09-29+ server schema rename package fields
+  to camelCase (`identifier`/`runtimeHint`), which `fromPackage` does not map
+  yet, so package-only servers on the new schema are skipped by both `List`
+  and `Get`.
+
 ### Added — Main Thread coordinator (experimental)
 
 - New experimental package `thread`, as proposed in

@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,8 +35,9 @@ type GitHubRegistryConfig struct {
 var _ Hub = (*GitHubMCPRegistry)(nil)
 
 // GitHubMCPRegistry implements Hub over GitHub's MCP registry
-// (GET /v0/servers). Card IDs are the registry server names, e.g.
-// "io.github.upstash/context7".
+// (list via GET /v0/servers; details via GET /v0.1/servers/{name}/versions/
+// latest, since the legacy detail endpoint was retired). Card IDs are the
+// registry server names, e.g. "io.github.upstash/context7".
 type GitHubMCPRegistry struct {
 	cfg    GitHubRegistryConfig
 	client *http.Client
@@ -120,10 +122,27 @@ func (h *GitHubMCPRegistry) List(ctx context.Context, opts *ListOptions) (*ListR
 }
 
 // Get fetches one registry entry by server name.
+//
+// The legacy detail endpoint (GET /v0/servers/{name}) has been retired by
+// both GitHub's registry (404 on the literal slash, 400 on the %2F escape)
+// and the official registry (404), so the primary path is the v0.1 endpoint
+// GET /v0.1/servers/{name}/versions/latest. A legacy fallback remains for
+// third-party registries that still serve the old endpoint; only a 404
+// triggers it, so rate limiting and server errors surface directly.
 func (h *GitHubMCPRegistry) Get(ctx context.Context, cardID string) (*Card, error) {
 	var payload map[string]any
-	if err := h.get(ctx, h.cfg.BaseURL+"/v0/servers/"+url.PathEscape(cardID), &payload); err != nil {
-		return nil, err
+	err := h.get(ctx, h.cfg.BaseURL+"/v0.1/servers/"+url.PathEscape(cardID)+"/versions/latest", &payload)
+	if err != nil {
+		var statusErr *httpStatusError
+		if !errors.As(err, &statusErr) || statusErr.status != http.StatusNotFound {
+			return nil, err
+		}
+		legacyErr := h.get(ctx, h.cfg.BaseURL+"/v0/servers/"+url.PathEscape(cardID), &payload)
+		if legacyErr != nil {
+			// Keep the primary endpoint's not-found semantics; the legacy
+			// failure is context only.
+			return nil, fmt.Errorf("%w (legacy endpoint: %v)", err, legacyErr)
+		}
 	}
 	card, ok := h.toCard(payload)
 	if !ok {
@@ -182,12 +201,24 @@ func (h *GitHubMCPRegistry) get(ctx context.Context, rawURL string, into any) er
 		return fmt.Errorf("hub: read body: %w", err)
 	}
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("hub: registry returned status %d: %s", resp.StatusCode, truncate(string(body), 300))
+		return &httpStatusError{status: resp.StatusCode, body: truncate(string(body), 300)}
 	}
 	if err := json.Unmarshal(body, into); err != nil {
 		return fmt.Errorf("hub: decode response: %w", err)
 	}
 	return nil
+}
+
+// httpStatusError carries the registry's HTTP status so callers can make
+// programmatic decisions (e.g., endpoint fallback on 404 only) instead of
+// matching on message text.
+type httpStatusError struct {
+	status int
+	body   string
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("hub: registry returned status %d: %s", e.status, e.body)
 }
 
 // runtimeArgs maps the registry's runtime_hint to the command that runs
@@ -433,6 +464,11 @@ func (h *GitHubMCPRegistry) toCard(entry map[string]any) (Card, bool) {
 	}
 	if versionDetail, ok := server["version_detail"].(map[string]any); ok {
 		card.Version, _ = versionDetail["version"].(string)
+	}
+	if card.Version == "" {
+		// The v0.1 detail payload carries a top-level version instead of
+		// version_detail.
+		card.Version, _ = server["version"].(string)
 	}
 	if github != nil {
 		if lang, ok := github["primary_language"].(string); ok && lang != "" {
