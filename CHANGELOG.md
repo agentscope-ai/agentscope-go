@@ -145,6 +145,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   offer, the one new field that does not raise the version (the trigger then
   compresses synchronously).
 
+### Fixed — Responses tool-call identifiers
+
+- Preserve original Responses `call_id` values through buffered/streamed
+  parsing and history replay, including tool results correlated by item ID.
+  Missing call IDs retain the existing fallback. Part of #125 (R1).
+
 ### Fixed — in-memory message bus replay
 
 - Replay reads return independent payload bytes, so changing a returned entry

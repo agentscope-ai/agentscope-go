@@ -65,6 +65,23 @@ cm, _ := model.NewOpenAIResponseModel(&model.OpenAIResponseConfig{
 
 Uses the Responses API (`/v1/responses`) instead of Chat Completions. Default timeout is 5 minutes for long reasoning tasks.
 
+Responses function calls carry an item `id` and a separate `call_id`.
+`ToolCallBlock.ID` remains the item ID used by agent execution, events and
+stored tool results. The adapter preserves a nonempty string `call_id` in
+`ToolCallBlock.Extra["call_id"]` in both call paths. Streaming argument
+fragments still correlate through `item_id`; a completed function-call
+item can supply the call ID if the initial item omitted it.
+
+When replaying history, the adapter uses that original call ID for the
+function call and its later results. A result's explicit nonempty string
+`Metadata["call_id"]` takes precedence over the preceding call's mapping;
+without either, the result's existing ID is used. Old histories and
+compatible responses without valid call-ID metadata retain the previous
+fallback. Existing metadata fields survive JSON message serialization;
+previously discarded IDs cannot be recovered from old checkpoints. This
+fix does not add server-side history continuation. Tests use local HTTP
+fixtures, not live-provider acceptance checks.
+
 A response whose `status` is not `completed` (for example `incomplete` at
 `max_output_tokens`, or `failed`) keeps its content, ID and usage and reports
 the status on `ChatResponse.Error`, from `Chat` and on the final `ChatStream`
