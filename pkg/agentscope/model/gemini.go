@@ -189,12 +189,17 @@ func (m *GeminiChatModel) buildRequest(msgs []*message.Msg, callOpts *CallOption
 				tcb := tc.(message.ToolCallBlock)
 				var args map[string]any
 				_ = json.Unmarshal([]byte(tcb.Input), &args)
-				parts = append(parts, geminiPart{
+				part := geminiPart{
 					FunctionCall: &geminiFunctionCall{
 						Name: tcb.Name,
 						Args: args,
 					},
-				})
+				}
+				// Echo the signature Gemini attached to this call (upstream #2463).
+				if sig, ok := tcb.Extra["thought_signature"].(string); ok && sig != "" {
+					part.ThoughtSignature = sig
+				}
+				parts = append(parts, part)
 			}
 			contents = append(contents, geminiContent{Role: "model", Parts: parts})
 			continue
@@ -269,6 +274,7 @@ type geminiContent struct {
 type geminiPart struct {
 	Text             string                  `json:"text,omitempty"`
 	Thought          bool                    `json:"thought,omitempty"`
+	ThoughtSignature string                  `json:"thoughtSignature,omitempty"`
 	FunctionCall     *geminiFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitempty"`
 }
@@ -349,13 +355,19 @@ func parseGeminiResponse(parsed geminiResponse) (*ChatResponse, error) {
 			})
 		} else if part.FunctionCall != nil {
 			argsJSON, _ := json.Marshal(part.FunctionCall.Args)
-			content = append(content, message.ToolCallBlock{
+			tc := message.ToolCallBlock{
 				Type:  "tool_call",
 				ID:    fmt.Sprintf("gemini-call-%s-%d", part.FunctionCall.Name, idx),
 				Name:  part.FunctionCall.Name,
 				Input: string(argsJSON),
 				State: message.ToolCallPending,
-			})
+			}
+			// Thinking models require this call's signature echoed back with
+			// the same history part (upstream #2463).
+			if part.ThoughtSignature != "" {
+				tc.Extra = map[string]any{"thought_signature": part.ThoughtSignature}
+			}
+			content = append(content, tc)
 		} else if part.Text != "" {
 			content = append(content, message.TextBlock{
 				Type: "text",
@@ -446,6 +458,11 @@ func processGeminiStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh
 					Name:  part.FunctionCall.Name,
 					Input: string(argsJSON),
 					State: message.ToolCallPending,
+				}
+				// Thinking models require this call's signature echoed back with
+				// the same history part (upstream #2463).
+				if part.ThoughtSignature != "" {
+					tc.Extra = map[string]any{"thought_signature": part.ThoughtSignature}
 				}
 				toolCallIdx++
 				toolCalls = append(toolCalls, tc)

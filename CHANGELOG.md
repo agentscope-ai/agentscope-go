@@ -150,6 +150,14 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 - Replay reads return independent payload bytes, so changing a returned entry
   cannot alter the log seen by later readers.
 
+### Fixed — Gemini tool-call thought signatures
+
+- Thinking models require a function-call part's `thought_signature` echoed
+  back with the same history part; the adapter now stashes it in
+  `ToolCallBlock.Extra` and restores it on the wire, for both buffered and
+  streamed responses. Local fixtures cover both call paths; no live API
+  result is claimed. Part of #138.
+
 ### Fixed — Anthropic tool-result history
 
 - Split merged assistant/tool-result history into Anthropic assistant/user
