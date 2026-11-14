@@ -119,6 +119,7 @@ func (m *openaiResponseModel) buildRequestBody(msgs []*message.Msg, opts *CallOp
 
 	// Convert messages to input items
 	var input []map[string]any
+	callIDs := make(map[string]string)
 	for _, msg := range msgs {
 		if msg == nil {
 			continue
@@ -129,7 +130,7 @@ func (m *openaiResponseModel) buildRequestBody(msgs []*message.Msg, opts *CallOp
 			}
 			continue
 		}
-		input = append(input, m.formatInputItems(msg)...)
+		input = append(input, m.formatInputItemsWithCallIDs(msg, callIDs)...)
 	}
 	body["input"] = input
 
@@ -177,6 +178,12 @@ func (m *openaiResponseModel) buildRequestBody(msgs []*message.Msg, opts *CallOp
 //   - accumulated text is flushed as a message item before the tool calls
 //     that follow it, matching the API's segment ordering.
 func (m *openaiResponseModel) formatInputItems(msg *message.Msg) []map[string]any {
+	return m.formatInputItemsWithCallIDs(msg, make(map[string]string))
+}
+
+// callIDs is request-local: results keep their library correlation ID while
+// the wire uses the original provider call ID from preceding call items.
+func (m *openaiResponseModel) formatInputItemsWithCallIDs(msg *message.Msg, callIDs map[string]string) []map[string]any {
 	role := string(msg.Role)
 
 	blocks := msg.GetContentBlocks()
@@ -222,18 +229,24 @@ func (m *openaiResponseModel) formatInputItems(msg *message.Msg) []map[string]an
 			})
 		case message.ToolCallBlock:
 			flushContent()
+			callID := responsesCallID(blk.Extra, blk.ID)
+			callIDs[blk.ID] = callID
 			items = append(items, map[string]any{
 				"type":      "function_call",
 				"id":        blk.ID,
-				"call_id":   blk.ID,
+				"call_id":   callID,
 				"name":      blk.Name,
 				"arguments": blk.Input,
 			})
 		case message.ToolResultBlock:
 			flushContent()
+			callID := blk.ID
+			if original, ok := callIDs[blk.ID]; ok {
+				callID = original
+			}
 			items = append(items, map[string]any{
 				"type":    "function_call_output",
-				"call_id": blk.ID,
+				"call_id": responsesCallID(blk.Metadata, callID),
 				"output":  formatToolResultOutput(&blk),
 			})
 		}
@@ -252,6 +265,22 @@ func (m *openaiResponseModel) formatInputItems(msg *message.Msg) []map[string]an
 		}}
 	}
 	return items
+}
+
+// responsesCallID accepts only nonempty provider IDs. Old histories and
+// compatible servers without this metadata retain their existing ID fallback.
+func responsesCallID(metadata map[string]any, fallback string) string {
+	if id, ok := metadata["call_id"].(string); ok && id != "" {
+		return id
+	}
+	return fallback
+}
+
+func responsesCallExtra(item map[string]any) map[string]any {
+	if id := responsesCallID(item, ""); id != "" {
+		return map[string]any{"call_id": id}
+	}
+	return nil
 }
 
 // reasoningItemSummaryText extracts the concatenated summary_text of a raw
@@ -439,6 +468,7 @@ func (m *openaiResponseModel) parseResponse(raw map[string]any) (*ChatResponse, 
 					ID:    id,
 					Name:  name,
 					Input: args,
+					Extra: responsesCallExtra(obj),
 				})
 			}
 		}
@@ -580,6 +610,13 @@ scanLoop:
 			if item, ok := event["item"].(map[string]any); ok {
 				if itemType, _ := item["type"].(string); itemType == "reasoning" {
 					reasoningItems = append(reasoningItems, stripJSONNullsMap(item))
+				} else if itemType == "function_call" {
+					id, _ := item["id"].(string)
+					if call, ok := toolCalls[id]; ok {
+						if extra := responsesCallExtra(item); extra != nil {
+							call.Extra = extra
+						}
+					}
 				}
 			}
 
@@ -593,6 +630,7 @@ scanLoop:
 					}
 					toolCalls[id] = &message.ToolCallBlock{
 						Type: "tool_call", ID: id, Name: name,
+						Extra: responsesCallExtra(item),
 					}
 				}
 			}
