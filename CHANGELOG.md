@@ -145,6 +145,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   offer, the one new field that does not raise the version (the trigger then
   compresses synchronously).
 
+### Fixed — JSON session write failures
+
+- A failed JSON session `Set` or `Delete` preserves the previous entries in
+  the open session, so later writes can continue from the saved state.
+
 ### Fixed — in-memory message bus replay
 
 - Replay reads return independent payload bytes, so changing a returned entry
