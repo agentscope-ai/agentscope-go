@@ -196,6 +196,14 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 - Encode a named tool choice as a function object in buffered and streamed
   Responses requests instead of sending the tool name as an invalid string.
   Part of #125 (O5).
+### Added — model card parity refresh
+
+- Cards from Python AgentScope at 3fef100e: the claude 5-5 family and
+  fable-5-1, the gpt-6 family, gemini 3.7/3.8-flash and 4-argon/carbon,
+  kimi-k3.1-pro/-highspeed, dashscope, ollama, deepseek and xAI additions,
+  MiniMax cards, and a new `volcengine` set. `claude-sonnet-4-5` is now
+  deprecated per upstream. 112 cards total across 10 providers. Part of #138.
+
 
 ### Fixed — Anthropic tool-result history
 
