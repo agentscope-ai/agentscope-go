@@ -196,6 +196,15 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 - Encode a named tool choice as a function object in buffered and streamed
   Responses requests instead of sending the tool name as an invalid string.
   Part of #125 (O5).
+### Fixed — Moonshot K3 wire shape
+
+- Kimi K3-series models now send their token budget as
+  `max_completion_tokens`, keep `temperature`/`top_p` and the `thinking`
+  switch off the wire, and offer no disable-thinking option to the
+  structured-output fallback (they always think). Older Moonshot models are
+  unchanged. Local fixtures cover both call paths; no live API result is
+  claimed. Part of #138.
+
 
 ### Fixed — Anthropic tool-result history
 
