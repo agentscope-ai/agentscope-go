@@ -1,0 +1,98 @@
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Go
+vendor/
+coverage.out
+coverage-pkg.out
+coverage.html
+*.test
+*.prof
+*.pprof
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project
+# CLAUDE.md is tracked and published, so it is not ignored here. A gitignore rule
+# has no effect on an already-tracked file, and keeping one misled readers into
+# thinking it was private.
+.claude/
+.remember/
+docs/superpowers/
+
+# Build artifacts
+/bin/
+/dist/
+
+# Example executables. `go build ./examples/<name>` writes an executable named
+# <name> into the current directory, so building from the repo root drops
+# ~20MB binaries there. Build into /bin instead (`go build -o bin/<name>
+# ./examples/<name>`). These root-anchored entries exist so a stray build can
+# never be committed; regenerate with:
+#   ls examples | sed 's|^|/|' >> .gitignore
+/a2a_http
+/access_control
+/agent_loop
+/agent_pool
+/agent_service
+/agent_team
+/agent_v2
+/agentic_memory
+/audit_logging
+/bench
+/console
+/dingtalk_channel
+/document_parser
+/edge_fleet
+/edge_offline
+/edge_sensor
+/edge_serial_robot
+/embedding
+/eval_harness
+/grpc_a2a
+/guardrail
+/hotreload
+/hub_install
+/k8s_workspace
+/long_term_memory
+/mcp
+/middleware
+/model_call
+/multi_provider
+/multiagent
+/multiagent_multimodal
+/multimodal
+/openai_response
+/permission
+/pipeline_multi_agent
+/rag_react
+/react_builtin_tools
+/react_tool
+/realtime_echo
+/replay
+/replayview
+/rundiff
+/scheduled_task
+/simple
+/skill_partitions
+/spend_cap
+/streaming
+/structured_output
+/tracing
+/tracing_otlp
+/wasm_sandbox
+/webui
+/werewolves
+/workspace_sharing
+
+# Internal working documents: porting plans, evaluator reports and design
+# drafts are review artifacts, not part of the published repo.
+/PORTING_PLAN*.md
+/EVALUATOR_REPORT*.md
+/HARNESS_DESIGN.md

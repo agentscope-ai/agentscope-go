@@ -1,0 +1,8 @@
+name: cosyvoice-v3-flash
+label: CosyVoice v3 Flash
+status: active
+sample_rate: 22050
+output_format: pcm
+languages:
+  - zh
+  - en

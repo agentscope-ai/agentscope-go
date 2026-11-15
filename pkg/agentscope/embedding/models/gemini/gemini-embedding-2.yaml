@@ -1,0 +1,5 @@
+name: gemini-embedding-2
+label: Gemini Embedding 2
+status: active
+dimensions: 3072
+max_tokens: 8192

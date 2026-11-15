@@ -1,0 +1,5 @@
+name: text-embedding-004
+label: Text Embedding 004
+status: active
+dimensions: 768
+max_tokens: 2048

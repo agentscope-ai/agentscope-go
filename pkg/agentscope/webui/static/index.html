@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentScope Studio</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x1F916;</text></svg>">
+</head>
+<body>
+  <div id="app">
+    <!-- Sidebar -->
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <h1 class="logo">AgentScope<span class="logo-accent">Studio</span></h1>
+        <span class="version">Go</span>
+      </div>
+
+      <button id="btn-new-session" class="btn btn-primary btn-block">
+        + New Session
+      </button>
+
+      <div class="sidebar-section">
+        <h3 class="section-title">Sessions</h3>
+        <div id="session-list" class="session-list">
+          <div class="empty-state">No sessions yet</div>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <button id="btn-models" class="btn btn-ghost btn-block btn-sm">
+          Models
+        </button>
+        <div class="footer-info">
+          <span id="connection-status" class="status-dot status-ok"></span>
+          <span class="footer-text">agentscope-go</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main id="main">
+      <!-- Welcome Screen -->
+      <div id="welcome-screen" class="welcome">
+        <div class="welcome-content">
+          <div class="welcome-icon">AS</div>
+          <h2>AgentScope Studio</h2>
+          <p>Create a new session to start chatting with an AI agent.</p>
+          <p class="welcome-sub">
+            Supports streaming responses, thinking blocks, tool calls, and human-in-the-loop confirmation.
+          </p>
+          <button class="btn btn-primary" onclick="showNewSessionDialog()">
+            Create Session
+          </button>
+        </div>
+      </div>
+
+      <!-- Chat View (hidden by default) -->
+      <div id="chat-view" class="chat-view hidden">
+        <div class="chat-header">
+          <div class="chat-header-info">
+            <h2 id="chat-session-name">Session</h2>
+            <span id="chat-session-id" class="session-id-badge"></span>
+          </div>
+          <div class="chat-header-actions">
+            <button id="btn-stop" class="btn btn-danger btn-sm hidden" onclick="stopGeneration()">
+              Stop
+            </button>
+            <button class="btn btn-ghost btn-sm" onclick="deleteCurrentSession()">
+              Delete
+            </button>
+          </div>
+        </div>
+
+        <div id="chat-messages" class="chat-messages">
+          <!-- Messages will be appended here -->
+        </div>
+
+        <div id="confirm-bar" class="confirm-bar hidden">
+          <div class="confirm-content">
+            <span class="confirm-label">Agent wants to execute tool calls:</span>
+            <div id="confirm-tools" class="confirm-tools"></div>
+            <div class="confirm-actions">
+              <button class="btn btn-primary btn-sm" onclick="confirmAllTools(true)">Approve All</button>
+              <button class="btn btn-danger btn-sm" onclick="confirmAllTools(false)">Reject All</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="chat-input-container">
+          <div class="chat-input-wrapper">
+            <textarea
+              id="chat-input"
+              placeholder="Type a message..."
+              rows="1"
+              onkeydown="handleInputKeydown(event)"
+              oninput="autoResize(this)"
+            ></textarea>
+            <button id="btn-send" class="btn btn-send" onclick="sendMessage()">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- New Session Dialog -->
+  <div id="dialog-overlay" class="dialog-overlay hidden" onclick="closeDialog(event)">
+    <div class="dialog" onclick="event.stopPropagation()">
+      <h3 class="dialog-title">New Session</h3>
+      <div class="form-group">
+        <label for="input-agent-name">Agent Name</label>
+        <input type="text" id="input-agent-name" value="assistant" placeholder="assistant">
+      </div>
+      <div class="form-group">
+        <label for="input-system-prompt">System Prompt</label>
+        <textarea id="input-system-prompt" rows="3" placeholder="You are a helpful assistant.">You are a helpful assistant.</textarea>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" onclick="hideDialog()">Cancel</button>
+        <button class="btn btn-primary" onclick="createSession()">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Models Dialog -->
+  <div id="models-overlay" class="dialog-overlay hidden" onclick="closeModelsDialog(event)">
+    <div class="dialog dialog-wide" onclick="event.stopPropagation()">
+      <h3 class="dialog-title">Available Models</h3>
+      <div id="models-content" class="models-content">
+        <div class="loading">Loading models...</div>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" onclick="hideModelsDialog()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

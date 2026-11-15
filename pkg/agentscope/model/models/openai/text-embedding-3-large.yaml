@@ -1,0 +1,9 @@
+type: embedding_model
+name: text-embedding-3-large
+label: Text Embedding 3 Large
+status: active
+input_types:
+  - text/plain
+output_types:
+  - application/x-embedding
+context_size: 8191

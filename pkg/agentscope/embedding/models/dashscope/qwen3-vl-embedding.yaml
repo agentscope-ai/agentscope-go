@@ -1,0 +1,5 @@
+name: qwen3-vl-embedding
+label: Qwen3 VL Embedding
+status: active
+dimensions: 2560
+max_tokens: 32000

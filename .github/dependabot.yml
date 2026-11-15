@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # Keep pinned GitHub Actions current; version pins without an update channel
+  # go stale.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

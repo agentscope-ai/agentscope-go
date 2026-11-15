@@ -1,0 +1,9 @@
+type: embedding_model
+name: text-embedding-3-small
+label: Text Embedding 3 Small
+status: active
+input_types:
+  - text/plain
+output_types:
+  - application/x-embedding
+context_size: 8191

@@ -1,0 +1,239 @@
+{
+  "Version": "managed-bilingual-seed-v1",
+  "Tuning": [
+    {
+      "ID": "tuning-extract-0",
+      "Category": "extract",
+      "Language": "en",
+      "Input": "Extract: return only a JSON object with key name from \"Name: Ada\".",
+      "Answer": "{\"name\":\"Ada\"}"
+    },
+    {
+      "ID": "tuning-classify-0",
+      "Category": "classify",
+      "Language": "en",
+      "Input": "Classify: \"I love this tea.\" Return only positive or negative.",
+      "Answer": "positive"
+    },
+    {
+      "ID": "tuning-rewrite-0",
+      "Category": "rewrite",
+      "Language": "en",
+      "Input": "Rewrite: politely request tea; include \"please\" and \"tea\", omit \"now\", at most 60 characters.",
+      "Answer": "please get tea.",
+      "Required": [
+        "please",
+        "tea"
+      ],
+      "Forbidden": [
+        "now"
+      ],
+      "MaxRunes": 60
+    },
+    {
+      "ID": "tuning-extract-1",
+      "Category": "extract",
+      "Language": "en",
+      "Input": "Find the name in \"Name: Bo\" and return only a JSON object with key name.",
+      "Answer": "{\"name\":\"Bo\"}"
+    },
+    {
+      "ID": "tuning-classify-1",
+      "Category": "classify",
+      "Language": "en",
+      "Input": "Determine the sentiment: \"This bread is terrible.\" Return only positive or negative.",
+      "Answer": "negative"
+    },
+    {
+      "ID": "tuning-rewrite-1",
+      "Category": "rewrite",
+      "Language": "en",
+      "Input": "Make \"get bread now\" polite; include \"please\" and \"bread\", omit \"now\", at most 60 characters.",
+      "Answer": "please get bread.",
+      "Required": [
+        "please",
+        "bread"
+      ],
+      "Forbidden": [
+        "now"
+      ],
+      "MaxRunes": 60
+    },
+    {
+      "ID": "tuning-extract-2",
+      "Category": "extract",
+      "Language": "zh",
+      "Input": "提取：从“姓名：梅”返回仅含 name 的 JSON 对象。",
+      "Answer": "{\"name\":\"梅\"}"
+    },
+    {
+      "ID": "tuning-classify-2",
+      "Category": "classify",
+      "Language": "zh",
+      "Input": "分类：“我很喜欢这杯茶。”只返回 positive 或 negative。",
+      "Answer": "positive"
+    },
+    {
+      "ID": "tuning-rewrite-2",
+      "Category": "rewrite",
+      "Language": "zh",
+      "Input": "改写：礼貌地请求购买茶，包含“请”和“茶”，不要使用“立刻”，最多20个字符。",
+      "Answer": "请买茶。",
+      "Required": [
+        "请",
+        "茶"
+      ],
+      "Forbidden": [
+        "立刻"
+      ],
+      "MaxRunes": 20
+    },
+    {
+      "ID": "tuning-extract-3",
+      "Category": "extract",
+      "Language": "zh",
+      "Input": "请从记录“姓名：林”找出姓名，只返回键 name 的 JSON 对象。",
+      "Answer": "{\"name\":\"林\"}"
+    },
+    {
+      "ID": "tuning-classify-3",
+      "Category": "classify",
+      "Language": "zh",
+      "Input": "判断这句话的情绪。“这面包太差了。”只返回 positive 或 negative。",
+      "Answer": "negative"
+    },
+    {
+      "ID": "tuning-rewrite-3",
+      "Category": "rewrite",
+      "Language": "zh",
+      "Input": "把“立刻买面包”变成礼貌请求，保留“面包”并包含“请”，不用“立刻”，最多20个字符。",
+      "Answer": "请买面包。",
+      "Required": [
+        "请",
+        "面包"
+      ],
+      "Forbidden": [
+        "立刻"
+      ],
+      "MaxRunes": 20
+    }
+  ],
+  "Acceptance": [
+    {
+      "ID": "acceptance-extract-0",
+      "Category": "extract",
+      "Language": "en",
+      "Input": "Extract: return only a JSON object with key name from \"Name: Cleo\".",
+      "Answer": "{\"name\":\"Cleo\"}"
+    },
+    {
+      "ID": "acceptance-classify-0",
+      "Category": "classify",
+      "Language": "en",
+      "Input": "Classify: \"I love this rice.\" Return only positive or negative.",
+      "Answer": "positive"
+    },
+    {
+      "ID": "acceptance-rewrite-0",
+      "Category": "rewrite",
+      "Language": "en",
+      "Input": "Rewrite: politely request rice; include \"please\" and \"rice\", omit \"now\", at most 60 characters.",
+      "Answer": "please get rice.",
+      "Required": [
+        "please",
+        "rice"
+      ],
+      "Forbidden": [
+        "now"
+      ],
+      "MaxRunes": 60
+    },
+    {
+      "ID": "acceptance-extract-1",
+      "Category": "extract",
+      "Language": "en",
+      "Input": "Find the name in \"Name: Dev\" and return only a JSON object with key name.",
+      "Answer": "{\"name\":\"Dev\"}"
+    },
+    {
+      "ID": "acceptance-classify-1",
+      "Category": "classify",
+      "Language": "en",
+      "Input": "Determine the sentiment: \"This milk is terrible.\" Return only positive or negative.",
+      "Answer": "negative"
+    },
+    {
+      "ID": "acceptance-rewrite-1",
+      "Category": "rewrite",
+      "Language": "en",
+      "Input": "Make \"get milk now\" polite; include \"please\" and \"milk\", omit \"now\", at most 60 characters.",
+      "Answer": "please get milk.",
+      "Required": [
+        "please",
+        "milk"
+      ],
+      "Forbidden": [
+        "now"
+      ],
+      "MaxRunes": 60
+    },
+    {
+      "ID": "acceptance-extract-2",
+      "Category": "extract",
+      "Language": "zh",
+      "Input": "提取：从“姓名：岚”返回仅含 name 的 JSON 对象。",
+      "Answer": "{\"name\":\"岚\"}"
+    },
+    {
+      "ID": "acceptance-classify-2",
+      "Category": "classify",
+      "Language": "zh",
+      "Input": "分类：“我很喜欢这杯米饭。”只返回 positive 或 negative。",
+      "Answer": "positive"
+    },
+    {
+      "ID": "acceptance-rewrite-2",
+      "Category": "rewrite",
+      "Language": "zh",
+      "Input": "改写：礼貌地请求购买米饭，包含“请”和“米饭”，不要使用“立刻”，最多20个字符。",
+      "Answer": "请买米饭。",
+      "Required": [
+        "请",
+        "米饭"
+      ],
+      "Forbidden": [
+        "立刻"
+      ],
+      "MaxRunes": 20
+    },
+    {
+      "ID": "acceptance-extract-3",
+      "Category": "extract",
+      "Language": "zh",
+      "Input": "请从记录“姓名：周”找出姓名，只返回键 name 的 JSON 对象。",
+      "Answer": "{\"name\":\"周\"}"
+    },
+    {
+      "ID": "acceptance-classify-3",
+      "Category": "classify",
+      "Language": "zh",
+      "Input": "判断这句话的情绪。“这牛奶太差了。”只返回 positive 或 negative。",
+      "Answer": "negative"
+    },
+    {
+      "ID": "acceptance-rewrite-3",
+      "Category": "rewrite",
+      "Language": "zh",
+      "Input": "把“立刻买牛奶”变成礼貌请求，保留“牛奶”并包含“请”，不用“立刻”，最多20个字符。",
+      "Answer": "请买牛奶。",
+      "Required": [
+        "请",
+        "牛奶"
+      ],
+      "Forbidden": [
+        "立刻"
+      ],
+      "MaxRunes": 20
+    }
+  ]
+}

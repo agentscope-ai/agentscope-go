@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "scenario": "short-answer-fixture",
+  "task_set_version": "short-answer-v1",
+  "quality_threshold": 1,
+  "tasks": [
+    {"ID": "arithmetic", "Input": "What is 2 + 2? Reply with the number only.", "Scorer": {"Ref": "contains", "Expect": "4"}},
+    {"ID": "go-keyword", "Input": "Which Go keyword starts a goroutine? Reply with the keyword only.", "Scorer": {"Ref": "contains", "Expect": "go"}}
+  ],
+  "arrivals": [
+    {"task_id": "arithmetic", "repeat": 1, "offset_ns": 0},
+    {"task_id": "go-keyword", "repeat": 1, "offset_ns": 20000000},
+    {"task_id": "arithmetic", "repeat": 2, "offset_ns": 40000000}
+  ]
+}

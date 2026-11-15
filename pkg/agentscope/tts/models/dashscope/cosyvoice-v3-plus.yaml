@@ -1,0 +1,8 @@
+name: cosyvoice-v3-plus
+label: CosyVoice v3 Plus
+status: active
+sample_rate: 22050
+output_format: pcm
+languages:
+  - zh
+  - en

@@ -1,0 +1,59 @@
+name: Labeler
+
+on:
+  issues:
+    types: [opened, edited]
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions: read-all
+
+jobs:
+  # Title-prefix triage for issues. Additive only: labels are never removed.
+  # A new issue with no recognized prefix gets needs-triage for a human;
+  # later edits only add prefix-matched labels.
+  issue-labels:
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const title = (context.payload.issue.title || '').toLowerCase();
+            const rules = [
+              [/^\[(bug|fix)\]/, 'bug'],
+              [/^\[(feature|feat|enhancement)\]/, 'enhancement'],
+              [/^\[rfc\]/, 'rfc'],
+              [/^\[discussion\]/, 'discussion'],
+              [/^\[(docs|doc)\]/, 'documentation'],
+              [/^\[question\]/, 'question'],
+            ];
+            const matched = [];
+            for (const [re, label] of rules) {
+              if (re.test(title) && !matched.includes(label)) matched.push(label);
+            }
+            if (matched.length === 0 && context.payload.action === 'opened') {
+              matched.push('needs-triage');
+            }
+            if (matched.length === 0) return;
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              labels: matched,
+            });
+            core.info(`Applied labels: ${matched.join(', ')}`);
+
+  # Path-based labels for PRs. pull_request_target runs the base-branch
+  # workflow, so fork PRs get labels without exposing secrets or running
+  # fork code; actions/labeler reads .github/labeler.yml from the base ref.
+  pr-labels:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/labeler@v7

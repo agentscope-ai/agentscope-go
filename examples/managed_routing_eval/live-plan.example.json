@@ -1,0 +1,44 @@
+{
+  "Version": 1,
+  "SourceRevision": "REPLACE_WITH_GIT_REVISION_AND_RECORD_LOCAL_DIFF",
+  "DatasetVersion": "managed-bilingual-seed-v1",
+  "RubricVersion": "managed-text-rubric-v1",
+  "Split": "acceptance",
+  "SampleSize": 12,
+  "MaxQualityLoss": 0.02,
+  "MaxP95LatencyMS": 5000,
+  "ConfirmEvaluationIsolation": false,
+  "FixedID": "baseline",
+  "DefaultID": "baseline",
+  "CategoryTargets": {"extract": "candidate", "classify": "candidate", "rewrite": "baseline"},
+  "Candidates": [
+    {
+      "ID": "baseline",
+      "BaseURL": "https://api.openai.com",
+      "Model": "gpt-4.1-2025-04-14",
+      "APIKeyEnv": "ROUTING_BASELINE_API_KEY",
+      "VersionEvidence": "",
+      "ContextWindow": 0,
+      "InputTokenUpperBound": 0,
+      "BoundEvidence": "",
+      "Prices": null
+    },
+    {
+      "ID": "candidate",
+      "BaseURL": "https://api.openai.com",
+      "Model": "gpt-4.1-mini-2025-04-14",
+      "APIKeyEnv": "ROUTING_CANDIDATE_API_KEY",
+      "VersionEvidence": "",
+      "ContextWindow": 0,
+      "InputTokenUpperBound": 0,
+      "BoundEvidence": "",
+      "Prices": null
+    }
+  ],
+  "Jev": {
+    "Endpoint": "https://api.typesafe.ai/v1/systemone",
+    "Model": "jev-1.13.0",
+    "MinConfidence": 0.8,
+    "Prices": null
+  }
+}

@@ -1,0 +1,196 @@
+[
+  {
+    "index": 0,
+    "agent_name": "golden-batch",
+    "model_name": "",
+    "reply_id": "golden-reply",
+    "messages": [
+      {
+        "content": [
+          {
+            "id": "id-2",
+            "text": "You are helpful.",
+            "type": "text"
+          }
+        ],
+        "id": "id-1",
+        "name": "golden-batch",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "id": "id-4",
+            "text": "run both tools",
+            "type": "text"
+          }
+        ],
+        "id": "id-3",
+        "name": "golden-batch",
+        "role": "user"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "echo_a",
+          "description": "echoes input",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "echo_b",
+          "description": "echoes input",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "response": {
+      "content": [
+        {
+          "id": "tc_a",
+          "input": "{\"x\":\"1\"}",
+          "name": "echo_a",
+          "state": "pending",
+          "type": "tool_call"
+        },
+        {
+          "id": "tc_b",
+          "input": "{\"x\":\"2\"}",
+          "name": "echo_b",
+          "state": "pending",
+          "type": "tool_call"
+        }
+      ],
+      "id": "",
+      "is_last": true
+    }
+  },
+  {
+    "index": 1,
+    "agent_name": "golden-batch",
+    "model_name": "",
+    "reply_id": "golden-reply",
+    "messages": [
+      {
+        "content": [
+          {
+            "id": "id-2",
+            "text": "You are helpful.",
+            "type": "text"
+          }
+        ],
+        "id": "id-1",
+        "name": "golden-batch",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "id": "id-4",
+            "text": "run both tools",
+            "type": "text"
+          }
+        ],
+        "id": "id-3",
+        "name": "golden-batch",
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "id": "tc_a",
+            "input": "{\"x\":\"1\"}",
+            "name": "echo_a",
+            "state": "finished",
+            "type": "tool_call"
+          },
+          {
+            "id": "tc_b",
+            "input": "{\"x\":\"2\"}",
+            "name": "echo_b",
+            "state": "finished",
+            "type": "tool_call"
+          },
+          {
+            "id": "tc_a",
+            "name": "echo_a",
+            "output": "echo:echo_a",
+            "state": "success",
+            "type": "tool_result"
+          },
+          {
+            "id": "tc_b",
+            "name": "echo_b",
+            "output": "echo:echo_b",
+            "state": "success",
+            "type": "tool_result"
+          }
+        ],
+        "id": "id-5",
+        "name": "golden-batch",
+        "role": "assistant"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "echo_a",
+          "description": "echoes input",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "echo_b",
+          "description": "echoes input",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "response": {
+      "content": [
+        {
+          "id": "",
+          "text": "batch done",
+          "type": "text"
+        }
+      ],
+      "id": "",
+      "is_last": true
+    }
+  }
+]

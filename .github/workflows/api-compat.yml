@@ -1,0 +1,48 @@
+name: API compatibility
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: ["*"]
+    # labeled/unlabeled re-check the breaking-change override. Re-running a
+    # job reuses the original event payload, including its label list.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions: read-all
+
+# A newer event for the same pull request (a push or a label change) cancels
+# the older run, so the result reflects the current labels.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  # Checks Stable-tier package APIs (STABILITY.md) against the latest v2 tag
+  # and fails a pull request that introduces incompatible changes the base
+  # does not already have, unless the PR carries the breaking-change label.
+  # Push runs report only: a labeled breaking PR must not leave main
+  # permanently red. An apidiff failure, such as a package that does not load,
+  # fails every run. Behavioral compatibility is out of scope for this check
+  # and remains a review responsibility. The logic is in
+  # .github/scripts/api-compat.sh so it can also run outside Actions.
+  apidiff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install apidiff
+        # Pinned to the last x/exp commit whose go.mod supports Go 1.25.
+        run: go install golang.org/x/exp/cmd/apidiff@c1d0aacb2297
+
+      - name: Check Stable-tier APIs
+        env:
+          BREAKING_CHANGE_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'breaking-change') }}
+        run: bash .github/scripts/api-compat.sh

@@ -1,0 +1,137 @@
+[
+  {
+    "index": 0,
+    "agent_name": "golden-ext",
+    "model_name": "",
+    "reply_id": "golden-reply",
+    "messages": [
+      {
+        "content": [
+          {
+            "id": "id-2",
+            "text": "You are helpful.",
+            "type": "text"
+          }
+        ],
+        "id": "id-1",
+        "name": "golden-ext",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "id": "id-4",
+            "text": "call external",
+            "type": "text"
+          }
+        ],
+        "id": "id-3",
+        "name": "golden-ext",
+        "role": "user"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "ext_tool",
+          "description": "Test tool for HITL",
+          "parameters": {
+            "type": "object",
+            "properties": {}
+          }
+        }
+      }
+    ],
+    "response": {
+      "content": [
+        {
+          "id": "tc_e",
+          "input": "{}",
+          "name": "ext_tool",
+          "state": "pending",
+          "type": "tool_call"
+        }
+      ],
+      "id": "",
+      "is_last": true
+    }
+  },
+  {
+    "index": 1,
+    "agent_name": "golden-ext",
+    "model_name": "",
+    "reply_id": "golden-reply",
+    "messages": [
+      {
+        "content": [
+          {
+            "id": "id-2",
+            "text": "You are helpful.",
+            "type": "text"
+          }
+        ],
+        "id": "id-1",
+        "name": "golden-ext",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "id": "id-4",
+            "text": "call external",
+            "type": "text"
+          }
+        ],
+        "id": "id-3",
+        "name": "golden-ext",
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "id": "tc_e",
+            "input": "{}",
+            "name": "ext_tool",
+            "state": "finished",
+            "type": "tool_call"
+          },
+          {
+            "id": "tc_e",
+            "name": "ext_tool",
+            "output": "external output",
+            "state": "success",
+            "type": "tool_result"
+          }
+        ],
+        "id": "id-5",
+        "name": "golden-ext",
+        "role": "assistant"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "ext_tool",
+          "description": "Test tool for HITL",
+          "parameters": {
+            "type": "object",
+            "properties": {}
+          }
+        }
+      }
+    ],
+    "response": {
+      "content": [
+        {
+          "id": "",
+          "text": "ext done",
+          "type": "text"
+        }
+      ],
+      "id": "",
+      "is_last": true
+    }
+  }
+]

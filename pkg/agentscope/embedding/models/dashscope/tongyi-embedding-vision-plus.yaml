@@ -1,0 +1,5 @@
+name: tongyi-embedding-vision-plus
+label: Tongyi Embedding Vision Plus
+status: active
+dimensions: 1152
+max_tokens: 1024

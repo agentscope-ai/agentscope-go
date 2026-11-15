@@ -1,0 +1,5 @@
+name: text-embedding-3-small
+label: Text Embedding 3 Small
+status: active
+dimensions: 1536
+max_tokens: 8191

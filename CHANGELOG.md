@@ -1,0 +1,1933 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+Version sections below correspond to git tags from `v2.0.4` onward. `[v2.0.3]`
+predates the tagging convention and has **no** tag, so it cannot be verified with
+`git log` — treat it as historical narrative. Per-version details for tagged
+releases can be verified with `git log <prev-tag>..<tag> --oneline`.
+
+## [Unreleased]
+
+### Added — Main Thread coordinator (experimental)
+
+- New experimental package `thread`, as proposed in
+  [#117](https://github.com/agentscope-ai/agentscope-go/issues/117): a cloud
+  participant and an edge participant share one session through an
+  append-only log (`MemoryStore`, or `FileStore` with one fsynced JSON line
+  per batch). A `Coordinator` is the only writer. It keeps one foreground
+  owner with an epoch that guards reply and owner-change writes, routes
+  at query boundaries through a `Router` (or stays with the owner), delivers
+  steering at the owner's next boundary, fails a failed owner's request over
+  to the other side and resumes the request a stopped process was answering.
+  It commits transfers, background tasks and reports, imports what a
+  participant lacks before each activation (a clear with the newest peer
+  summary for an edge handover, otherwise a budgeted or chunked import for
+  the edge and a full import for the cloud) and schedules summaries a
+  `Forker` writes. A shared usage ledger, an opt-in tool-output list and
+  leases come with it.
+- The report that ends a task records how it ended (`Task.End`: the
+  assignee's finish reason, or `TaskUnfinished` for a task recovery found
+  unfinished), and assign entries reach the event stream, so a host can
+  follow tasks from the log without parsing text. There is no task state
+  machine; see the
+  [note on `taskenvelope`](https://github.com/agentscope-ai/agentscope-go/issues/117#issuecomment-6769407061).
+- The log has no privacy classes: every participant reads every entry. The
+  adapters for `UnifiedAgent` (`thread/participant`) and the router
+  (`thread/route`) land separately. Tested offline with scripted
+  participants. See [Main Thread](docs/main-thread.md).
+
+### Added — agent seams for a session shared by several agents (experimental)
+
+
+- Opt-in `agent` seams for a host that runs several agents over one shared,
+  append-only log, as proposed in
+  [#117](https://github.com/agentscope-ai/agentscope-go/issues/117). They are
+  inert unless used: an agent that does not use them sends the same requests
+  and writes the same checkpoints as before.
+  - `ApplyThreadUpdate`, `WithThreadInput`, `WithBoundaryInput`, `ThreadView`
+    and `ThreadSeqOf` import log entries, install a summary another agent
+    wrote (`PeerSummary`) and move the agent's cursor
+    (`AgentState.ThreadCursor`) in one state update. Boundary input applies at
+    the certified reasoning boundary that `Conversation` steering uses.
+  - `WithForkCapture`, `ForkSnapshot` and `ForkSummary` write a summary from
+    a copy of the agent's last model request, so the provider can serve the
+    shared prefix from its cache, without touching the main context.
+    `ApplySummary` installs it between replies; `OfferSummary` (checkpointed
+    as `AgentState.SummaryOffer`) hands it to the next compression trigger,
+    which applies it like a background precompression result. A snapshot,
+    an offer or a background result applies only while the context still
+    holds the same messages up to its boundary, in the same order, so a
+    peer summary that removes entries before the boundary makes it stale.
+    Both ways of installing a summary keep its boundary message raw: a
+    reply that ran on after the snapshot added its later rounds to that
+    message, and the summary does not cover them. An offer whose bounds do
+    not fit the context, that keeps no message, whose summary is blank or
+    that carries no digest is dropped and the trigger compresses
+    synchronously. Like background precompression, offers are off under
+    `WithContentBlockCompaction`.
+  - `CompactStrict` compacts now and leaves the state unchanged on any
+    failure, an empty summary included.
+  - `ContextConfig.ThreadSummaryTokens` and `SetThreadSummaryTokens` set the
+    budget the agent's own summary shares with a peer summary.
+  - `MarkHandedOff` ends the reply with the new `types.ReplyHandedOff`
+    (`"handed_off"`) after the current tool step, without another model
+    call. Like an interrupted end it cannot be swallowed by `OnReply`
+    middleware; `TeamRun` treats it as a normal end, the goal pipeline as
+    not completed, and reply recovery does not resume it.
+    `WithExclusiveTools` answers a model response that mixes an exclusive
+    tool with other calls with error results, running none of them.
+  - `SubmitExternalResultContext` and `SubmitUserConfirmContext` submit an
+    answer with a context, replacing a value that a finished reply left
+    unread.
+
+  The between-replies seams return `ErrReplyInProgress` while any reply core
+  still runs, even after its event stream closed. Tested offline with
+  scripted models.
+
+### Added — shadow-mode permission advice
+
+- An offline-first `permission_advisory` example combines classifier advice with
+  unchanged interactive permission confirmation, with optional local inference
+  and redacted lifecycle auditing.
+- `permission.Decision.Origin` identifies only the Default-mode fallback Ask
+  (`default_ask`); other engine outcomes have unknown origin. Eligible decisions
+  now serialize this additional field. See the [guide](docs/permission-advisory.md)
+  for compatibility and host ownership limits.
+
+### Added — plan after the newest user message (experimental)
+
+- `agent.WithPlanAfterLatestInput()` injects the `WithPlanTool` plan message
+  right after the newest user message in the context instead of after the
+  summary. With the plan ahead of the history, every plan update made the
+  whole history miss the provider's prefix cache on the next call; now the
+  history before the current turn stays cached. The plan never follows a
+  reply's tool steps, so they keep following their own user message; on a
+  reply's first call it directly follows the new input.
+  `GenerateStructuredResponseWithUsage` uses the same layout; the default is
+  unchanged, and the effect on answer quality has not been measured.
+
+### Added — stale-write check for shared workspaces (experimental)
+
+- `tool.ReadCache.SetRejectStaleWrites(true)` makes `Write` refuse to replace
+  a file whose content is not the version the agent last read or edited, so
+  agents with separate caches sharing a workspace cannot overwrite each
+  other's changes from an old copy. `Read` records the content's SHA-256
+  (`ReadCacheEntry.Hash`) and, while the check is on, always reads the file;
+  the edit tools record their own results. Edits are not refused. The check
+  runs just before the write and is not a lock. The setting is off by default
+  and is not saved with the cache; `Read` records the hash either way.
+  `ReadCacheEntry.Hash` is omitted when empty, and an older build ignores it
+  when it loads a saved cache. See
+  [stale writes](docs/tools.md#stale-writes-on-a-shared-workspace-experimental).
+
+### Changed — checkpoint schema version 3
+
+- **BREAKING (constant value)** `agent.StateSchemaVersion` is now 3 (it was 2
+  on `main` and 1 in `v2.0.11`); `apidiff` reports the value change. It is
+  the newest schema `LoadCheckpoint` accepts, not the version every
+  checkpoint carries: `SaveCheckpoint` and `ForkSession` still stamp the
+  lowest version that holds the state, 1 by default, 2 with reply-recovery
+  counters, and 3 only when the agent holds thread state (a peer summary or
+  a thread cursor). Checkpoints of agents that do not use the thread seams
+  are written as before, so older builds keep reading checkpoints stamped 1,
+  and those stamped 2 wherever they read reply recovery's schema today. A
+  build from before this change rejects a checkpoint stamped 3.
+  **Migration:** code that stamps `SchemaVersion: agent.StateSchemaVersion`
+  on a state it persists itself now writes 3; stamp the version the state
+  needs (1 for plain conversation state) if older builds must read it. Code
+  that compares a loaded version with `StateSchemaVersion` to recognize a
+  current checkpoint should compare with the version it needs. The new
+  `AgentState` fields (`summary_offer`, `peer_summary`, `thread_cursor`) are
+  omitted when empty; an older build ignores them, which drops a summary
+  offer, the one new field that does not raise the version (the trigger then
+  compresses synchronously).
+
+### Fixed — in-memory message bus replay
+
+- Replay reads return independent payload bytes, so changing a returned entry
+  cannot alter the log seen by later readers.
+
+### Fixed — Anthropic tool-result history
+
+- Split merged assistant/tool-result history into Anthropic assistant/user
+  messages, preserving parallel results and subsequent assistant segments.
+  Multi-agent sender labels no longer precede tool results. This fixes tool
+  continuation with UnifiedAgent; public formatter output can contain multiple
+  messages per input. Local fixtures cover both call paths; no live API result
+  is claimed. Part of #125.
+
+### Fixed — Anthropic thinking history
+
+- Preserve redacted thinking data in buffered and streamed responses and retain
+  empty thinking blocks carrying signatures when formatting follow-up history.
+  Existing message types and serialization are unchanged. Part of #125 (A2).
+
+### Fixed — buffered Chat Completions stop reasons
+
+- Preserve normalized `finish_reason` on buffered OpenAI-compatible responses,
+  including length truncation, tool calls and content filtering, matching the
+  streaming path. Partial content and usage remain intact; unknown nonempty
+  reasons pass through. Part of #125 (O1).
+### Fixed — Anthropic manual-thinking budgets
+
+- Clamp automatic thinking budgets to the 1024-token minimum. The default
+  thinking call now uses a 2048-token output limit and 1024-token thinking
+  budget. Reject explicit budgets below 1024 and overflowing limit growth
+  before dispatch. Configured/default limits may grow to fit a budget plus
+  1024 tokens; explicit per-call output ceilings remain hard limits. Other
+  thinking modes and MiniMax policy are unchanged. Part of #125 (A4).
+
+### Fixed — explicit Messages tool-choice none
+
+- Anthropic and MiniMax Messages requests now retain an explicit
+  `tool_choice: {"type":"none"}` when tools are supplied, rather than silently
+  falling back to the provider default. Unset choice and no-tools behavior are
+  unchanged. Part of #125 (A3).
+
+### Fixed — summary over an empty fork snapshot
+
+- `UnifiedAgent.ApplySummary` (experimental) now refuses a fork snapshot
+  taken (`ForkSnapshot`) while the agent's context was empty, as
+  `OfferSummary` already did, and changes nothing. Before, it replaced the
+  agent's summary and reported success although the snapshot covered no
+  message to replace.
+
+### Fixed — background precompression
+
+- With `ContextConfig.PrecompressRatio` set, a context that is still at the
+  compression trigger after a ready background summary is applied now also
+  compresses synchronously, instead of continuing above the trigger. This
+  applies to the automatic trigger and to the `compress_context` tool at its
+  lower threshold; `Compact` and context-overflow recovery still apply the
+  ready summary alone.
+- A blank (whitespace-only) background summary is discarded like a failed
+  generation instead of replacing the summarized history; the trigger then
+  compresses synchronously. As after a failure, the next round starts a new
+  background generation. The synchronous path still accepts a blank summary,
+  so a model that always returns blank fields still ends with one.
+
+### Fixed — CI API compatibility gate
+
+- The `api-compat` workflow now fails pull requests on incompatible changes to
+  Stable-tier APIs; the pinned apidiff exits 0 when it reports them, so the check
+  had failed only on package-load errors (#118). A pull request fails only for
+  changes since the latest v2 tag that its base does not already have, unless
+  it carries the `breaking-change` label; pushes to `main` still only report.
+  Any apidiff failure now fails the run after every package is checked,
+  including labeled pull requests and pushes. The check runs locally with
+  `bash .github/scripts/api-compat.sh origin/main`.
+
+### Changed — OpenAI Responses status
+
+- The OpenAI Responses adapter now sets `ChatResponse.Error` when a response's
+  `status` is present and not `completed` (for example cut at
+  `max_output_tokens`), in `Chat` and in the final `ChatStream` response;
+  `response.incomplete` and `response.failed` stream events end the stream.
+  Content, response ID and usage are kept; the error names the status and the
+  incomplete reason or the error code and message, so a `response.failed` with
+  `context_length_exceeded` is recognized by `model.IsContextLimitExceeded`.
+  Before, a buffered `Chat` response, or a `response.completed` event reporting
+  another status, looked complete; a stream ending in `response.incomplete` or
+  `response.failed` already failed, with a generic truncation error and without
+  usage. On the buffered agent path (`agent.WithModelStreaming(false)` or any
+  middleware installed) such a response now emits `model_partial_response`, so
+  `TeamRun` and the goal pipeline fail a partial answer they used to accept.
+
+### Fixed — host answers matched by reply ID
+
+- `UnifiedAgent` drops an external result or a user confirmation whose
+  `ReplyID` names a reply other than the waiting one, and the call keeps
+  waiting for its own answer. Tool-call IDs can repeat across replies (Gemini
+  numbers them per response), so a late answer to a canceled reply could
+  answer, or approve, a later reply's call with the same ID. An empty `ReplyID`
+  still matches, so hosts that leave it empty keep tool-call-ID matching, and
+  with it this exposure; in this repository, the `app` confirm handler and the
+  legacy `service` confirm endpoint send none. A call that a reply resumed
+  from a plain checkpoint asks again also accepts the reply ID the checkpoint
+  held, so an answer to the request seen before the restart still reaches it;
+  entries of such a batch parked for other calls answer only calls that accept
+  the same reply ID. Hosts must set `ReplyID` to the request event's `ReplyID`
+  or leave it empty: an answer carrying any other value is now dropped.
+- A waiter whose reply context ended before it reads no longer takes a queued
+  answer. Before, a canceled reply could take one at random, running an
+  approved tool after cancellation or, while its core outlived its stream,
+  consuming an answer meant for the next reply.
+
+### Fixed — loop hooks around resumed tool calls
+
+- The loop hooks' `BeforeToolExec` and `AfterToolExec` (`agent.WithLoopHooks`)
+  now also run around the awaiting calls a reply re-prompts after a restore:
+  asking or submitted calls restored with `WithState`, picked up by the next
+  reply or, for submitted calls, by `ResumeReplyStream`. As on the ordinary tool
+  path, they bracket the confirmation wait or external handshake and a denied
+  outcome, and receive `StateAct`; no transition to `StateAct` is reported for
+  these calls. `MetricsHook` and `TracingHook` now count and trace them.
+
+### Added — `OpenAIConfig.Formatter`
+
+- `OpenAIChatModel` now accepts an optional `Formatter` (defaults to
+  `formatter.NewOpenAIFormatter()`, so existing callers are unaffected).
+- Motivation: thinking models such as DeepSeek require the previous turn's
+  `reasoning_content` to be passed back. The default formatter has
+  `SupportsThinking == false` and never emits the field, so multi-turn tool calling
+  fails with `The reasoning_content in the thinking mode must be passed back to the API.`
+  Passing `formatter.NewDeepSeekFormatter()` fixes it. Response parsing already turned
+  `reasoning_content` into a `ThinkingBlock`; only the request side was missing a hook.
+
+### Added — local Piccolo example
+
+- `examples/piccolo` demonstrates Binary, Choice and Score decisions through the
+  existing Jev adapter, using synthetic HTTP fixtures by default and an explicit
+  local live opt-in. The [guide](docs/piccolo.md) pins the W1-tested CPU setup and
+  records runtime-specific HTTP behavior and the observed Metal startup failure.
+
+### Fixed — UnifiedAgent permission middleware wiring
+
+- **Behavior change:** registered `OnCheckPermission` hooks now wrap deterministic
+  engine checks for fresh sequential non-external `ReplyStream`/Conversation
+  tool calls. Previously these hooks were ignored. No-middleware defaults are
+  unchanged. Buffered Reply, resumed/restored work, external tools, concurrent-dispatch
+  batches and loop/orchestrator checks retain their prior behavior. Hook input
+  snapshots are read-only and errors, cancellation and invalid decisions prevent
+  execution. This adds no classifier or automatic-approval policy; see the
+  [coverage contract](docs/middleware.md#oncheckpermission).
+
+### Changed — Anthropic stream accumulation
+
+- Long, fragmented Anthropic-compatible streams (the parser is shared with MiniMax)
+  now accumulate text, thinking, tool input and signatures through per-block buffers
+  instead of repeated string copying. Incremental deltas and final responses are
+  unchanged.
+
+### Fixed — Anthropic buffered stop reason
+
+- Buffered `Chat` responses no longer drop the normalized provider stop reason.
+
+### Fixed — Anthropic per-call output limits
+
+- Per-call `WithMaxTokens` is now honored by `Chat` and `ChatStream`; thinking
+  budgets conflicting with an explicit per-call cap are rejected before dispatch.
+
+### Added — opt-in local System One verification
+
+- Jev's live contract test and the managed routing evaluation example accept
+  explicit loopback endpoint/served-model overrides via `SYSTEMONE_LOCAL_*`.
+  Hosted defaults and generation endpoint validation remain unchanged. Local
+  HTTP fixtures cover configuration plumbing; live Piccolo verification remains
+  separate. See [local verification](docs/jev.md#local-system-one-configuration-w0).
+
+### Added — MiniMax Messages adapter
+
+- `model.NewMiniMaxChatModel` supports direct text/tool calls, adaptive thinking,
+  output effort and streaming through MiniMax's Anthropic-compatible endpoint.
+  Per-call output limits, stop reasons, thinking signatures and cache usage
+  are retained. Positive thinking budgets are rejected. App credential/provider
+  registration remains deferred. See [provider configuration](docs/model-providers.md#minimax)
+  and the [example](examples/minimax/).
+
+### Added — Volcengine Ark chat
+
+- `model.NewVolcengineChatModel` supports direct Ark Chat Completions calls,
+  SSE streaming, tool calls and explicit thinking/reasoning-effort controls.
+  Positive thinking-token budgets are rejected; use a zero budget for the toggle.
+  App credential/provider registration is deferred. See
+  [provider configuration](docs/model-providers.md#volcengine-ark) and the
+  [example](examples/volcengine/).
+
+### Added — owner-scoped Agent Service
+
+- Experimental `service.NewScoped` combines request-aware agent construction
+  with owner-scoped session access and listing. Identity resolution precedes
+  body reads/limits; scoped JSON requests are bounded complete documents.
+  Scoped streams retain server tool-call metadata for owner confirmation and
+  use reply-owned input. A session admits one scoped reply until its cores exit.
+  Existing `New`/`AgentFactory` defaults remain unchanged. See
+  [the guide](docs/scoped-service.md) and offline `scoped_service` example.
+
+### Fixed — file memory delete failures
+
+- Keep the live `middleware/memory.FileStore` snapshot unchanged when a delete
+  cannot be persisted, so reads stay consistent and the deletion can be retried.
+
+### Added — OpenAI-compatible agent serving
+
+- Experimental `openaiserver` exposes streamed/non-streamed text Chat
+  Completions and model discovery through a standard `http.Handler`. Each
+  request owns its agent and hydrated history; deployment tools retain their
+  permission checks. Body/concurrency/deadline limits and disconnect
+  cancellation bound execution, with admission held through core cleanup.
+  See [the guide](docs/openai-serving.md) and offline `openai_server` example.
+
+### Added — serial named-member teams
+
+- Experimental `pipeline.TeamPipeline` runs named-member assignments serially,
+  retaining member history within a run and routing participant confirmation
+  and external results through a validated host input API. Only the final model
+  round's text returns to the leader; member errors, interruption and iteration
+  exhaustion remain non-success results. Factories create fresh agents per run,
+  and cancellation joins accepted cores before ownership is released.
+  See [the guide](docs/team-pipeline.md) and offline `team_pipeline` example.
+
+### Fixed — JSON repair string preservation
+
+- Preserve commas inside quoted strings when repairing trailing commas in
+  malformed JSON, including schema-guided tool arguments.
+
+### Added — bounded goal execution
+
+- Experimental `pipeline.GoalPipeline` runs an executor and verifier with
+  bounded attempts, explicit outcomes and partial result history. UnifiedAgent
+  adapters correct report/verdict output without re-executing work and create a
+  fresh verifier per check. This first stage supports non-interactive text goals.
+- Experimental `UnifiedAgent.GenerateStructuredResponseWithUsage` generates
+  reports through model-call middleware from an internal conversation snapshot,
+  preserving known usage across compatibility attempts and errors. Each call
+  isolates its middleware context so reply metadata cannot leak into the caller.
+  See [the guide](docs/goal-pipeline.md) and offline `goal_pipeline` example.
+
+### Fixed — provider retry cancellation
+
+- OpenAI and Anthropic `Chat` calls honor caller cancellation and deadlines
+  during retry delays, and check cancellation before sending an attempt.
+
+### Changed — agent loop resilience
+
+- **Model-call retry policy (behavior change):** with `ModelConfig.MaxRetries`
+  unset, `UnifiedAgent` now attempts a model call up to 3 times (was 1) before
+  failing the reply, with full-jitter exponential backoff starting from
+  `RetryDelay`. Only errors classified as transient (`model.IsRetryableError`)
+  are retried; permanent errors (4xx other than 429) fail fast on the primary
+  and still fall through to `FallbackModel`. Buffered and streaming paths share
+  the policy.
+- **Established stream replay:** a provider stream that fails before publishing
+  any text/thinking delta is re-attempted, since replay is invisible to
+  consumers. A stream that fails after publishing deltas still fails the reply
+  (partial output cannot be replayed without duplication); this narrows the
+  previous "established streams are never retried" behavior from #17.
+- **Context-window overflow recovery:** when a provider rejects a request as
+  too large (detected via the new `model.IsContextLimitExceeded`, which honors
+  `errors.ErrModelContextLimit` and the documented Anthropic/OpenAI/Gemini/
+  Ollama/DashScope/Moonshot wordings), the reply loop shrinks the context —
+  truncating oversized tool results first, then forcing a summarizing
+  compaction — and retries the same step, bounded at 3 recoveries per round.
+  Previously the reply failed immediately. Emits a `context_overflow_recovery`
+  custom event per attempt. When the agent never configured a `ContextConfig`,
+  the recovery arms the default one, so auto-compaction stays enabled for the
+  agent's remaining lifetime after the first overflow.
+- **Streamed tool calls with broken arguments** (e.g. JSON truncated mid-stream)
+  are committed and answered with a parse-error tool result so the model can
+  re-issue the call, instead of failing the whole reply; formatters already
+  repair such arguments for wire validity on later rounds. Tool calls without a
+  name still fail the reply as stream corruption. This narrows the #17
+  "incomplete tool calls are not committed" behavior.
+- **Tool-result truncation keeps head and tail:** `agent.TruncateToolResult`
+  now elides the middle with a `<<<TRUNCATED: N bytes elided>>>` marker instead
+  of cutting at a prefix `<<<TRUNCATED>>>` marker, since shell-log errors live
+  at the tail and file structure at the head. Cuts land on rune boundaries so
+  truncated output stays valid UTF-8. `agent.SplitToolResultForCompression`
+  keeps its prefix contract.
+- **Compression trigger grounded in actual usage:** the automatic compression
+  estimate now takes the max of the byte heuristic and the provider-reported
+  total input tokens of the last successful model call
+  (`ChatUsage.EffectiveInputTokens`; the new `ChatUsage.TotalInputTokens` field
+  carries Anthropic's cache-inclusive total, which its `input_tokens`
+  excludes), so CJK/JSON-heavy or cache-hit contexts — both systematically
+  under-counted — compact before the provider rejects the request. The floor
+  resets on every compaction.
+
+### Changed — permission rule matching
+
+- **BREAKING (behavior)** **Bash/Shell permission rules match conjunctively
+  across subcommands:** an allow rule for `git status:*` no longer covers
+  `git status && rm -rf /` — every subcommand of a compound command
+  (`&&`/`||`/`;`/`|`, command substitutions included) must match an allow rule
+  for the invocation to be allowed, while a deny rule fires when ANY
+  subcommand matches it. `tool.MatchRule` gains the sibling entry points
+  `MatchAllSubcommands`/`MatchAnySubcommand`, and the permission engine uses
+  them through the new `permission.CompoundRuleMatcher` interface when a
+  checker's tool supports AST analysis. Commands that fail to parse no longer
+  fall back to substring matching: they simply do not match, so unparseable
+  invocations degrade to Ask instead of inheriting an allow rule. Plain
+  single commands are unaffected.
+
+### Changed — project instructions
+
+- **Layered instruction files (behavior change, codex AGENTS.md parity):**
+  `LoadProjectConfig` now collects instruction files (CLAUDE.md / AGENTS.md /
+  README.md, first match per directory) from the project root down to the
+  working directory and concatenates them root→cwd, so deeper, more specific
+  instructions land last. The layering anchors at the nearest ancestor with a
+  `.git` entry instead of stopping at the first directory carrying an
+  instruction file — a nested CLAUDE.md stacks on the root one rather than
+  replacing it. Without any `.git`, the historical single-file lookup via
+  `FindProjectRoot` applies. The concatenated payload is capped at 32 KiB
+  (rune-boundary cut with a truncation marker) to keep oversized docs from
+  crowding out the working context.
+
+### Added
+
+- Experimental `classifier/bailian` for Alibaba Cloud Model Studio System One:
+  typed Binary/Choice/Score decisions, Bailian-specific limits, guarded single
+  HTTP attempts and unknown-usage preservation. Shares an internal wire codec
+  with Jev, retaining Jev's existing API and limits. Includes offline fixtures,
+  executable examples and an opt-in live check; see the [guide](docs/bailian.md)
+  (#69, #16).
+- **Background pre-compression** (`ContextConfig.PrecompressRatio`): when set
+  below `TriggerRatio`, the agent starts generating the compaction summary in
+  a background goroutine once the estimated context crosses the lower ratio,
+  off the reply's critical path. When the hard trigger later fires (or
+  `Compact` is called), a result whose snapshot is still valid — same base
+  summary, context prefix intact — applies instantly; stale or missing
+  results fall back to the synchronous path. The applied summary covers the
+  snapshot prefix, so messages appended since stay raw (a slightly earlier
+  next compaction in exchange for hidden latency). Background usage flows
+  through the same per-reply accounting as synchronous compression, with a
+  final drain at reply end so a generation finishing during the last model
+  call is still attributed to the reply that caused it. Disabled by default
+  and unavailable with `WithContentBlockCompaction`; a failed background
+  generation is discarded (the synchronous path owns retries and fallback).
+
+- **MCP elicitation** (codex `Op::ResolveElicitation` parity): MCP servers
+  can now ask for user input in the middle of a tool call. Set
+  `ElicitationHandler` (`mcp.ElicitationHandler`, with transport-neutral
+  `ElicitRequest`/`ElicitResponse` carrying accept/decline/cancel plus form
+  content) on `mcp.StdioConfig` or `streamablehttp.Config`; the client then
+  declares the elicitation capability during initialize and resolves
+  `elicitation/create` requests through the handler. Without a handler the
+  capability stays undeclared and such requests fail fast with -32601, as do
+  unknown server-initiated methods on stdio — previously a server request
+  with a string ID was silently dropped, hanging the server's in-flight tool
+  call. The stdio handler runs synchronously on the wire read loop (other
+  calls block meanwhile); the bare-POST `mcp.HttpClient` has no inbound
+  channel and does not support elicitation.
+
+- **`web_search` tool** (`tool.NewWebSearchTool`, codex parity): the model
+  searches the web through a host-injected `SearchFunc`, keeping provider
+  credentials and ranking outside the library — no new dependency. Read-only
+  and concurrency-safe; results are ranked title/URL/snippet hits, with
+  `limit` defaulting to 5 and capped at 10.
+
+- **User shell commands** (`Conversation.RunUserShellCommand`, codex `!`
+  parity): a user-typed shell command runs outside the model loop through
+  the platform shell with process-group isolation; merged stdout/stderr
+  stream as `user_shell_output` conversation events and a `user_shell_end`
+  event carries exit code and duration. The command never enters model
+  context and, being user-initiated, runs without the permission engine —
+  never route model-generated commands through it.
+
+- **Model stream idle timeout** (`ModelConfig.StreamIdleTimeout`, codex
+  `stream_idle_timeout` parity): a stream silent past the timeout — between
+  setup and the first chunk, or between chunks — is treated as a transport
+  failure: retried while nothing was published, failing the reply once
+  partial output escaped (never replaying rendered deltas). Unset selects a
+  5-minute default, so a wedged provider stream can no longer hang a reply
+  forever; a negative value disables the guard. Buffered (`Chat`) calls are
+  unaffected — provider transport timeouts govern those.
+
+- **Per-reply `turn_stats` custom event** (codex token-count parity): every
+  reply now reports its aggregate usage alongside the terminal ReplyEndEvent —
+  model calls, tool calls, iterations, duration, summed input/output/cache
+  tokens and the final provider-reported context fill
+  (`last_input_tokens`). Failed and interrupted replies report partial usage
+  so hosts can account burned tokens. Emitted before the end event on direct
+  terminal paths and right after the delivered end event when middleware
+  round-swallowing is in play (a swallowed round never publishes
+  partial-turn stats as final).
+
+- **`update_plan` tool** (`agent.WithPlanTool`, codex parity): the model
+  maintains a visible step plan — `{explanation?, plan: [{step, status}]}`,
+  at most one `in_progress` — stored in `AgentState.Plan` (new checkpointed
+  field), so the tracker survives compression and crash-resume. The plan is
+  re-injected into the model input after the summary on every call (and
+  counted in the compression split accounting), and each successful update
+  emits a `plan_updated` custom event for hosts to render live. The tool is
+  read-only for permission purposes (explore mode does not gate planning) and
+  deliberately not concurrency-safe: updates are ordered state transitions.
+
+- **`get_context_remaining` tool** (`agent.WithContextRemainingTool`, codex
+  parity): reports `{"tokens_left": N|null}` — the usage-grounded estimate
+  (max of the byte heuristic and the last provider-reported input tokens)
+  subtracted from the resolved context window. The model can check its budget
+  before starting an expensive subtask or deciding to compress early.
+
+- **Compression quality knobs** (`ContextConfig.CompactStrategy`,
+  `ContextConfig.SummaryMaxTokens`): `CompactStrategyFreshWindow` folds the
+  entire history into the summary instead of reserving a tail of recent
+  messages (codex `/compact` parity; default stays `reserve_tail`).
+  `SummaryMaxTokens` bounds the generated summary (default: window/32 clamped
+  to [1024, 8192]) with middle-elision on overflow, so a runaway summary
+  cannot silently re-inflate the window it freed. The default compression
+  prompt now carries a budget sentence and instructs preserving exact file
+  paths, commands and error messages verbatim. Fresh-window compaction never
+  strands an in-flight tool call: the split reserves the trailing open pair
+  (a zero reserve would orphan the result that lands right after, which
+  providers reject outright) — with nothing in flight at most the trailing
+  message survives.
+
+- **`UnifiedAgent.ForkSession`** (codex thread-fork parity): branches the
+  current session by snapshotting state through the checkpoint serialization
+  path and persisting it under a new session ID — context, summary, plan and
+  permission grants included — without touching the live session or its
+  checkpoint. The fork starts at a clean reply boundary (reply ID and
+  recovery counters cleared) and is a between-replies operation by contract.
+  Pair with `LoadCheckpoint` + `WithState` to run the branch.
+
+- **Durable permission rules learned from approvals**
+  (`permission.RuleStore`, `Engine.SetRuleStore`,
+  `Engine.AddRulePersistent`, `config.NewSettingsRuleStore`): when a user
+  approves a tool call with "always allow"-style rules, the agent writes the
+  rule through the configured store — the settings implementation appends to
+  `.agentscope/settings.local.json` (local overrides, not committed with
+  shared project settings) in the same format `LoadProjectConfig` reads back,
+  so learned rules apply to future sessions. On store failure the rule is NOT
+  applied in memory by the engine (a believed-persisted policy silently
+  reverting next session is the dangerous failure); the agent logs a warning
+  and falls back to in-memory so the approved call can still proceed.
+  `Engine.AddRule` keeps its in-memory-only behavior for configuration-loaded
+  rules — they must not be written back.
+
+- **Workspace-jail grants for file tools** (`tool.WithWorkspaceGrants`,
+  `tool.WorkspaceEscapeError`/`WorkspaceEscapeInfo`, grant suggested rules via
+  `permission.NewGrantDirRule`, `Engine.AddWorkingDirectory`/
+  `GrantedDirectories`/`SnapshotContext`/`MergeWorkingDirectories`): when a
+  file tool under a `tool.WithWorkspaceRoot` jail rejects a path outside the
+  root, the error response now carries typed escape metadata
+  (`tool.WorkspaceEscapeMetaKey`) and the agent intercepts it BEFORE emitting
+  a result: it prompts the user to grant access to the path (the path itself
+  when it exists — a file grant does not widen to its whole directory — or the
+  parent directory for a path yet to be created; a session-scoped
+  `grant:dir:<path>` suggested rule), records the grant in
+  `permission.Context.WorkingDirectories` — a field that was previously dead
+  — and re-executes the call once with the widened jail. Every working
+  directory in permission scope (host-declared and granted) now widens the
+  jail on every tool execution. Grants are checkpointed with the agent state
+  (checkpoints now sync `PermissionCtx` from the engine, previously it was
+  never saved) and merged back on resume; they are intentionally NOT written
+  to the rule store, matching per-session sandbox-escalation semantics.
+  Concurrent tool batches cannot prompt (their event channel is nil) — the
+  escape error stands there and the model can retry the call on its own.
+  Denied prompts return the escape error with a denial note so the model can
+  pick another approach. Bash/Shell commands are unaffected: their escape
+  surface is the command text, which the permission rules already cover.
+
+- Experimental persistent shell sessions (`tool.ShellManager` with the
+  `Shell`/`ShellStdin` tools, codex unified_exec parity): a long-running
+  shell process per named session whose working directory, exported variables
+  and foreground command survive across tool calls. Commands returning within
+  `yield_time_ms` report done with their exit code; longer commands keep
+  running and are polled or fed via `ShellStdin` (e.g. answering `read`
+  prompts). Output keeps head and tail within a byte budget, eliding the
+  middle. Cancelling a turn kills the session's process group (the session is
+  dropped and transparently recreated on next use). `Shell` reuses the `Bash`
+  permission pipeline (injection/danger heuristics, rule matching, rule
+  suggestions) under its own tool name. Requires a POSIX shell;
+  `NewShellManager` fails on Windows shells. The tools are opt-in: register
+  them via `Toolkit.AddGroup` (they are not in `NewEnhancedToolkit`'s default
+  set). Known limitations: commands must be single-line (heredoc bodies can be
+  fed via `ShellStdin`); `exit`/`exec` terminate the session and reset its
+  state; there is no PTY, so control bytes are literal input; `ShellStdin`
+  inherits the session command's earlier permission check rather than applying
+  codex-style per-write approval. See STABILITY.md for the Experimental tier
+  note.
+
+- Experimental `agent.Conversation` (`UnifiedAgent.NewConversation`): a
+  persistent turn kernel with session semantics for chat-style hosts.
+  `Submit` queues user input — starting a turn when idle, or steering it into
+  the active turn at the certified boundary (a StateReason iteration, where no
+  tool call awaits its result, so injection can never split a
+  tool_call/tool_result pair) — with an immediate checkpoint and a
+  `conversation_input_injected` event per batch. `Interrupt` cancels the turn
+  context (killing in-flight tool processes), still delivers the terminal
+  `ReplyEnd` on the session-lifetime stream, appends a model-visible
+  interruption marker, and retains pending input for the next turn — a
+  deliberate divergence from codex, which discards pending input on
+  interrupt. `Compact` queues a forced compression to the same boundary, or
+  runs immediately between turns. While a conversation is active, direct
+  `Reply`/`ReplyStream`/`ResumeReplyStream` calls are rejected; `Close`
+  releases the agent. See STABILITY.md for the Experimental tier note.
+- Experimental `taskenvelope` package: the subtask-envelope delegation-state
+  contract from issue #67, as a self-contained reference implementation. It
+  models the v2 state machine (T1–T12 + T2b; see `taskenvelope/DESIGN.md`) with
+  a single-writer decision point, an atomic on-disk ledger, the
+  settle-don't-refund allowance model, attempt reservations persisted before
+  any external call, and crash-window/restart reconciliation — all exercised by
+  fault tests that map 1:1 to the transition table, including adversarial
+  executors reporting out-of-bounds usage. Executor-reported usage is
+  bounds-checked on every outcome path, and `Resolve` validates before it
+  mutates. The package shares no state with `agent`, `storage` or
+  `managedtask`, and its API is not Stable-tier.
+- Experimental `tierrouter` package: the routing-side sibling from issue
+  #67 — three-tier (device/edge/cloud) fake providers plus an
+  operation-level routing policy, as a self-contained reference
+  implementation. It models the routing contract (see `tierrouter/DESIGN.md`):
+  a serialized decision point that rechecks task epoch and TTL at admission
+  and at every dispatch, and again when a successful call settles — a stale
+  success settles the record `superseded` instead of being returned — a persisted
+  decision log with a commit boundary before any provider call, guarded
+  fallback with failure evidence, a local-only guard that binds regardless of
+  policy preference, unknown-outcome attempts that are never auto-retried,
+  and crash-window reconciliation on reopen — all exercised by fault tests
+  that map 1:1 to the invariants. The package also adds an experimental
+  plain-text, non-streaming `ChatRouter` for actual buffered `UnifiedAgent.Reply`
+  calls with fake device/edge/cloud ChatModels. It freezes call options once,
+  guards every dispatch and result admission with the original epoch/TTL,
+  rejects invalid responses without fallback, and supports only process-local
+  idempotent response replay. An offline example compares fixed tiers with the
+  routed Agent path without claiming live-provider or hardware performance.
+  Selecting another model endpoint creates no subtask envelope; the API is not
+  Stable-tier.
+- Experimental `embodied` package for issue #67 milestone 2A: versioned
+  observations with per-tier disclosure, structured plans and skills, complete
+  persisted action identities, and a simulated action gateway/controller.
+  `Gateway` composes `taskenvelope` for lifecycle and recovery, revalidates
+  current state before replay and recovery, and performs final local admission
+  before any simulated effect. Durable controller evidence covers duplicate
+  delivery, lost ACK reconciliation, partial effects and crash windows without
+  blind redispatch. Plan ordering remains host-owned; no media fetching,
+  hardware, real-time or exactly-once physical behavior is claimed. The
+  `embodied_demo` offline example adds the milestone-2B single-device loop:
+  a real buffered device Agent, edge coordination and an optional read-only
+  cloud planner, bounded text-only observation projection, structured actions,
+  no-cloud degradation and lost-ACK recovery. Edge-only and edge+cloud
+  comparisons report request/effect evidence without performance claims.
+  The embodied API now rejects nil/invalid inputs, returns explicit scope and
+  world-state errors, refuses to overwrite controller finalize hooks, keeps
+  recovery cancellation metadata consistent, supports honest metadata-write
+  retries and rolls back failed controller admission records.
+
+- `mcp/streamablehttp` provides a Streamable HTTP client for MCP (#55, #63),
+  backed by the official `modelcontextprotocol/go-sdk` (pinned v1.8.0) — the
+  repository's first protocol-class dependency. It implements the existing
+  `mcp.Client` interface, so `NewMCPToolkit` and agents work unchanged, with
+  automatic version negotiation across the 2026-07-28 revision and legacy
+  (2025-03-26 onward) Streamable HTTP. The subpackage keeps the dependency
+  opt-in; `mcp.HttpClient` remains for bare JSON-RPC POST servers.
+- Experimental `classifier/openai` adapter for OpenAI Decisions: typed text/JSON
+  classification, complete probability-distribution validation, single guarded
+  HTTP attempts, bounded bodies and preserved failure usage. Includes examples,
+  offline tests and an opt-in live contract test; images and public refusal
+  answers are deferred. See the [guide](docs/openai-decisions.md) (#25).
+
+- `UnifiedAgent.Compact` triggers context compression on demand — the
+  host-side equivalent of a `/compact` command. It runs the same
+  structured-summary path as automatic compression but skips the trigger
+  threshold, reports whether the context actually changed, and requires
+  `WithContextConfig`. Call it between replies; see
+  [manual compaction](docs/tools.md#manual-compaction).
+
+- Experimental `agent.WithContentBlockCompaction` retains recent complete tool
+  exchanges inside an accumulated assistant message when they fit the estimated
+  reserve target. Keeps cross-message reasoning preludes, parallel pairs, owned
+  fragments and reply recovery, with the existing wholesale emergency fallback. Defaults and
+  checkpoint schemas are unchanged. See the [compaction guide](docs/context-compaction.md).
+
+- `memory.ReMeStore`: a `MemoryStore` backend talking to a self-hosted ReMe
+  HTTP service (#49). `Search` maps to `/search` (TopK→`limit`,
+  Threshold→`min_score`, optional `session_id` filter via
+  `ReMeConfig.FilterBySession`) and `Add` to `/auto_memory` with per-call
+  deadlines (30s search / 120s add defaults). ReMe answers business errors as
+  HTTP 200 with `success:false`, so the envelope is parsed on every call; a
+  successful add with `created=false` is normal (the server-side LLM declined
+  to persist) and not an error. `List`/`Delete` return the new
+  `memory.ErrStoreUnsupported` sentinel. See the
+  [middleware guide](docs/middleware.md#remestore) for the security and
+  indexing caveats.
+- Experimental `agent.WithToolConcurrencyLimit(n)` for opt-in bounded concurrent
+  tool dispatch in UnifiedAgent replies (#58). Idle workers refill in call order;
+  cancellation records never-admitted calls as interrupted while retaining actual
+  admitted outcomes and cleanup ownership. Defaults, interactive/unsafe barriers,
+  result order and checkpoint/recovery contracts remain unchanged. See the
+  [tool guide](docs/tools.md#bounded-tool-dispatch-experimental).
+
+- Opt-in UnifiedAgent reply recovery (`agent.WithReplyRecovery`) with owned,
+  versioned built-in reply-budget counters, remaining-iteration tracking and
+  observable checkpoint failures via `SaveCheckpoint` and `ResumeReplyStream`.
+  Legacy checkpoint writes remain schema 1; opt-in recovery writes use schema 2.
+  See the [reply recovery guide](docs/reply-recovery.md).
+
+- Experimental `evalkit.Runner.RunManagedLoad` evaluates fixed/rules/classifier
+  execution directly through managed task entry points, preserving all planned
+  outcomes, separate scoring, attempt kinds and incomplete costs. Includes a
+  [bilingual offline comparison and opt-in live pilot](examples/managed_routing_eval/)
+  with [evaluation guide](docs/managed-routing-evaluation.md). Fixtures do not
+  establish live quality, savings or production qualification.
+
+- Experimental `managedtask.Router` with a deployment registry, category-qualified
+  weighted pools, optional guarded Jev/Choice classification, explicit defaults
+  and fallback within shared admission/deadline/attempt limits. Includes unified
+  failed-attempt accounting and an [offline routing example](examples/managed_routing/)
+  with [usage guide](docs/managed-routing.md). No live quality or savings claim.
+
+- `model.OllamaNativeChatModel` talks to a local Ollama instance through the
+  native `/api/chat` endpoint instead of the OpenAI-compatible one (#28, first
+  stage). It is opt-in and additive: `OllamaChatModel` is unchanged. The native
+  transport can set per-request options the compatible endpoint cannot —
+  `OllamaNativeConfig.NumCtx` is sent as `options.num_ctx` on every request and
+  reported through `ContextSizer` (zero means server default / unknown) — and
+  maps `WithThinking`/`WithThinkingDisabled` to the native `think` toggle (the
+  thinking budget argument has no native counterpart and is ignored) and
+  `WithResponseFormat` to `format` (`"json"` or an embedded schema object).
+  Reasoning the server reports in `message.thinking` surfaces as a
+  `ThinkingBlock` on both `Chat` and `ChatStream`, published before text
+  within a chunk and assembled before the `TextBlock` in the final response.
+  Usage comes from the final stream frame's `prompt_eval_count`/`eval_count`;
+  base64 image blocks ride the native `images` field. Native tool calling is
+  supported (#56): `WithTools` maps to the native `tools` field and responses
+  carrying `tool_calls` surface as `ToolCallBlock` with `StopReason`
+  `tool_calls` (the server reports done_reason `stop` even then, so the calls
+  take priority). A server-returned call ID is kept; an empty one (older
+  Ollama) falls back to a generated UUID — a deliberate difference from the
+  Python adapter, which always generates client-side IDs. `tool_choice` has no
+  native counterpart: its tool whitelist filters the sent tools and a
+  non-default mode only logs a warning. Tool call/result blocks in history are
+  replayed (arguments round-trip as JSON objects); an orphan tool result whose
+  call is no longer in history is skipped. Streaming uses a new
+  NDJSON transport (`internal/httpx.DoNDJSONRequest`); a stream that ends
+  without a `done` frame surfaces as `ChatResponse.Error` with the partial
+  content preserved.
+
+- Experimental fixed-deployment `managedtask` text execution and opt-in
+  `model.OpenAITextClient`: host authorization/projection, qualification, trusted
+  context bounds, finite admission/deadlines/retries and attempt/cost uncertainty.
+  Includes an [offline example](examples/managed_task/) and [guide](docs/managed-task.md).
+  Ordinary Chat/Agent behavior is unchanged; the optional router reuses this boundary.
+
+- Experimental `classifier/jev` adapter with single-attempt TypeSafe HTTP
+  conversion, bounded payloads, context cancellation, preserved attempt usage
+  and opt-in live protocol tests. See the [Jev guide](docs/jev.md).
+
+- Experimental `classifier` typed Binary/Choice/Score contracts, validation,
+  explicit attempt/unknown-usage reporting and offline fake, with an offline
+  example and [usage guide](docs/classifier.md). This documents PR #22; Jev
+  integration and model routing remain separate implementation stages.
+
+- Typed Qdrant metadata equality/range filters, applied before topK through
+  `QueryVector` and `QueryWithFilter`, with copied host-required conditions.
+- Experimental `evalkit.Runner.RunLoad`: versioned task/arrival manifests,
+  independent bounded scoring, retained workspaces, immutable joined outcomes
+  and quality goodput. Includes offline quality/load and local Qdrant examples.
+
+- Experimental `bench.Runner.RunOpenLoop` for finite arrival schedules, bounded
+  callback concurrency, and per-arrival outcomes including rejection, timeout,
+  cancellation, unfinished work, and arrivals not offered before interruption.
+  Reports retain scheduled-arrival latency and remain unchanged after return.
+  This supplies the first load-generation building block for RFC #11.
+
+- `model.OllamaConfig.ContextSize` declares the Ollama server's configured
+  window (`num_ctx`) so context compression measures against it (#8). It is
+  reported through `ContextSizer`, is not sent to the server and defaults to
+  zero (unknown, leaving the agent's 128000-token default). Python AgentScope
+  defaults its Ollama `context_size` to 32768
+  ([`42410af`](https://github.com/agentscope-ai/agentscope/blob/42410aff0c007f6fb1687bb749d657108ec48af5/src/agentscope/model/_ollama/_model.py));
+  Go keeps zero so existing agents keep their compression thresholds. Model
+  cards are not consulted, because a card's maximum is not the server's
+  `num_ctx`.
+
+- `model.ChatModelUnwrapper`, an optional interface with
+  `Unwrap() ChatModel`, lets a wrapper whose calls are all served by one inner
+  model expose that model (#8). `model.ResolveContextSize` resolves the inner
+  model, with the caller's fallback, when the wrapper reports no window or
+  model card of its own.
+
+### Fixed
+
+- MCP tool results carrying `structuredContent` without any text block now
+  surface it as a JSON text block in `ToolResponse` instead of dropping it, on
+  both the stdio/HTTP JSON-RPC clients and the Streamable HTTP client. Results
+  that already include a text block are unchanged, matching upstream AgentScope
+  (agentscope-ai/agentscope#3389).
+- App session cancellation now signals active ordinary and streaming chats as
+  well as registered background tasks (#48). Session admission stays exclusive
+  until accepted Agent cores finish after cancellation, including synchronous
+  tool cleanup; late middleware cannot start work after request cleanup. Parent
+  request cancellation and deadlines remain effective. Background cancellation
+  updates task state under a write lock and invokes cancel callbacks outside it.
+
+- Skill frontmatter parsing recognizes closing `---` only on an unindented
+  delimiter line, preserving inline hyphens and YAML block-scalar content so
+  added skills remain discoverable and removable.
+- Skill hub installs accept standard tar root directory entries (`.` and `./`)
+  while preserving rejection of unsafe archive paths and root files or links.
+- **Streaming behavior change (#17):** `UnifiedAgent.ReplyStream` now forwards
+  provider thinking/text deltas before the model completes, for ordinary rounds
+  and forced finalization without middleware. `Reply` drains the same path and
+  propagates terminal reply errors. `agent.WithModelStreaming(false)` restores
+  buffered calls; existing middleware chains stay buffered to preserve filtering.
+  Established streams are not retried, incomplete tool calls are not committed,
+  and final content/usage are not emitted twice.
+- OpenAI-compatible streams reject malformed chunks and EOF without a completion
+  marker, and preserve cache-read usage. Gemini streams retain final tool calls
+  and reject missing/unsuccessful completion; Anthropic streams preserve stop
+  reasons so truncated generation cannot be mistaken for completed tool input.
+
+- Synchronous agent replies propagate cancellation and select only the current
+  reply; retries and fallback stop after cancellation in both execution entries.
+- Qdrant ingestion no longer panics by passing `[]float32` vectors as payload
+  metadata. It validates vectors, stores them in the native vector field and
+  returns unsupported metadata errors before submitting a batch.
+- Evaluation rejects failed, partial, canceled or incomplete replies before
+  scoring, preserves multi-turn usage, and waits for tool completion before
+  workspace cleanup.
+- Tool-result requests retain all text and bounded media placeholders; token
+  estimates include later tool text. Responses retains native tool images.
+- Toolkit registration copies caller slices. Grep sorts by path and keeps its
+  per-file limit independent of pagination. Text chunking drops blank windows.
+- Embedding file caches skip individually oversized writes without evicting valid
+  entries, handle size-limit overflow, and atomically replace accepted JSON files.
+  Skipped same-key writes intentionally preserve the old value.
+
+- CI fuzz smoke uses execution-count budgets to avoid spurious Go 1.25 deadline
+  failures, with a separate 10-minute timeout for the combined fuzz step.
+- OpenAI-compatible chat formatting preserves assistant tool calls, every tool
+  result and subsequent replies in merged agent history (#7). This fixes requests
+  that contained a tool result without its preceding assistant `tool_calls`.
+- Multi-agent formatting keeps sender attribution after message expansion and
+  preserves message boundaries carrying tool calls, reasoning or media.
+- `model.WithMaxTokens` now reaches Ollama, DashScope, DeepSeek, Moonshot and
+  xAI as `max_tokens` (#8). The shared OpenAI-compatible request struct had no
+  JSON tag on the field, so those five adapters sent a supplied limit as
+  `"MaxTokens":<value>`, a key no server reads, and every request from the
+  family (OpenAI included) carried a stray `"MaxTokens":null` when no limit was
+  set. The `providercontract` wall now decodes the captured request and checks
+  the max-tokens value at the provider's wire path on both `Chat` and
+  `ChatStream` for providers with `MaxTokensKey` configured (Anthropic
+  deliberately skips it: its adapter does not apply the per-call option), and
+  registers Ollama and xAI, which were missing from the wall.
+- `model.ResolveContextSize` resolves a `ConnectivityAwareModel` to the smaller
+  of its local and cloud models' resolved windows, independent of circuit
+  state (#8). It previously reported no window, so compression used the
+  128000-token default even though one cloud call can fall back to a smaller
+  local model. Behavior change: when both members report windows above 128000,
+  the wrapper now resolves to the smaller of them instead of 128000.
+- `model.ResolveContextSize` resolves a `FallbackChatModel` to the smallest
+  resolved window among all the models it may call, and context compression
+  takes the smaller of the agent model's window and that of
+  `agent.ModelConfig.FallbackModel` when one is set (#8). Both previously
+  ignored the models tried after the first, so a request that fell back to a
+  smaller model could exceed its window before compression ran.
+  `FallbackChatModel.ContextSize` and `ModelName` still report the first model
+  only. Behavior change: a chain can now resolve to a smaller window, because
+  later members count, or to a larger one. With a `ConnectivityAwareModel` as
+  its first model, a chain previously fell back to the 128000-token default
+  because that wrapper implements neither `ContextSizer` nor `ModelNamer`; it
+  now uses the wrapper's resolved window, which can exceed 128000 when both of
+  its models report larger windows.
+- Ollama thinking models no longer lose their reasoning (#8). Ollama returns it
+  in a string `reasoning` field (0.11 and later; thinking is on by default for
+  models such as `qwen3` from 0.12.4), which the shared OpenAI-compatible parser
+  ignored. `Chat` and `ChatStream` now read that field as thinking when
+  `reasoning_content` is empty; non-string `reasoning` values are ignored
+  instead of failing the response. The parser is shared, so other
+  OpenAI-compatible servers that send a string `reasoning` (not tested here)
+  also yield thinking. Within one stream chunk, thinking is now published before
+  text, matching the final response. Thinking blocks count toward the agent's
+  token estimate, so compression can start earlier; they are not sent back to
+  the server.
+- `model.WithSeed` now reaches Ollama as `seed` on `Chat` and `ChatStream`
+  (#8); it was the only OpenAI-compatible adapter that dropped it.
+- A negative `agent.ContextConfig.ContextSize` is now treated like 0 and
+  resolves the window from the model. It previously bypassed that check: the
+  compression threshold and reserve became zero or negative, so every round
+  summarized the whole context, including in-flight tool calls, and cleared
+  it, and an empty context reported a non-positive threshold error.
+- `resilience.Wrap` with a circuit breaker or rate limiter now reports the
+  window of the model it wraps to `model.ResolveContextSize`, through
+  `model.ChatModelUnwrapper` (#8). It previously resolved to the caller's
+  fallback, the 128000-token default in compression, so a wrapped local model
+  with a smaller window could overflow before compression ran. Behavior change:
+  a model that implements `Unwrap() model.ChatModel` and reports no window or
+  model card of its own now resolves to its inner model's window, which can
+  exceed 128000. A `ConnectivityAwareModel` or `FallbackChatModel` with such a
+  member, and compression with such a `ModelConfig.FallbackModel`, can therefore
+  resolve to a smaller or larger window. Calling the unwrapped model directly
+  bypasses the circuit breaker and rate limiter.
+- Tool response `Metadata` (for example the Edit/Write unified diff or a custom
+  tool's audit payload) is now preserved on the persisted `ToolResultBlock` and
+  the `tool_result_end` event for normal, streaming and concurrent-batch tool
+  executions. Streaming tools keep the last non-nil chunk metadata, matching
+  `tool.CollectStream`, so a payload sent before the final chunk is not dropped.
+  Previously `emitToolResultWithExtra` emitted metadata on the event but dropped
+  it from the returned `toolOutcome`, so `executeAndRecord` saved a result block
+  with a nil `Metadata` field. `executeStreamingTool` never set metadata on the
+  end event or the returned `toolOutcome`. The concurrent path also failed to
+  forward metadata to the end event. Consumers that rebuild history from the
+  event stream and the model both now see the same metadata.
+
+## [v2.0.11] - 2026-09-19
+
+### Added
+
+- Opt-in `tool.AskUserTool()` with typed questions and answers, semantic input
+  validation and successful external-result validation. Hosts collect responses
+  through `UnifiedAgent.ReplyStream` and `SubmitExternalResult`; a permission
+  context is required. The offline `examples/ask_user` uses a simulated model
+  and answer. The stock console and loop runner do not supply an AskUser UI.
+- Optional `tool.InputValidator` and `tool.ExternalResultValidator` interfaces,
+  without changing the required `Tool` interface. AskUser rejects mismatched,
+  duplicate or missing answers; invalid successful results become error results.
+
+### Fixed
+
+- External tool metadata now survives recorded agent state, terminal events and
+  message reconstruction. Multi-block external output retains all text and data
+  in state, including on checkpoint resume; supported events keep their order.
+- Restored submitted calls now check the current active external tool, input and
+  permissions before handoff. A missing, inactive or no-longer-external tool
+  produces an error result rather than prompting for permission or running locally.
+- Anthropic/Gemini formatters omit empty text and hints while preserving supported
+  hint media, nonempty whitespace and sender attribution after filtering. Gemini
+  request construction also filters empty ordinary/system text before joining it.
+  This does not add general multimodal hints to the Gemini model adapter.
+- `console.Launch` returns caller cancellation/deadline errors at the input prompt,
+  during confirmation and while consuming a reply, without waiting for the event
+  producer to close. SIGINT during a reply still interrupts only that reply.
+
+### Changed — repository and module path move
+
+- **BREAKING (import path):** the repository and module moved from
+  `github.com/alanfokco/agentscope-go/v2` to
+  `github.com/agentscope-ai/agentscope-go/v2`. `v2.0.11` is the first tag declaring
+  the new module path; `v2.0.4`–`v2.0.10` declare the former path.
+- Change imports from `github.com/alanfokco/agentscope-go/v2/pkg/agentscope/...`
+  to `github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/...`, then run:
+
+  ```bash
+  go get github.com/agentscope-ai/agentscope-go/v2@v2.0.11
+  go mod tidy
+  ```
+
+  The path rename itself is mechanical. This release also changes behavior as
+  listed above; see [STABILITY.md](STABILITY.md#v2011-behavior-and-compatibility).
+  Avoid mixing old-path and new-path packages: their Go types are distinct.
+- Deleted old-path tags `v2.1.0` and `v2.1.1` remain available from the Go proxy
+  and can outrank `v2.0.x` for `@latest`. The existing retractions cannot correct
+  that from the new module path. Consumers staying on the old path should pin
+  a real tag such as `v2.0.10`; consumers migrating should use the new path above.
+
+### Changed — documentation and contribution checks
+
+- Reorganize the English and Spanish READMEs, installation and examples guides,
+  contributor instructions and architecture map. Document the AskUser host
+  contract, validation and current implementation limits.
+- Add a library coverage gate, PR checklist and reproducible local coverage
+  commands. Raise the initial 65.0% floor to 66.5% in CI, Makefile and contributor
+  instructions; examples remain outside the library coverage measurement.
+  Expand package-local stream reconstruction tests and print package coverage
+  in CI, retaining coverage profiles for diagnosing platform differences.
+- Correct release history: entries already present in the `v2.0.10` tag are
+  grouped under that version below instead of remaining under `[Unreleased]`.
+
+Upstream references, selected ports and deferred capabilities are recorded in
+[the v2.0.11 design](docs/design/upstream-sync-v2.0.11.md).
+
+## [v2.0.10] - 2026-09-09
+
+### Added — upstream sync batch (Python 8/14–9/7 window)
+
+Nineteen upstream PRs ported. The rest were triaged as not applicable or
+deferred; `STABILITY.md` records the reason for each under "Deliberately not
+ported".
+
+- **Real cron scheduling** (`app/cron.go`, #2442): five-field cron with steps,
+  ranges, comma lists, month and day names, and the `@` aliases is parsed and
+  validated before a schedule is persisted. `POST /api/schedule` rejects an
+  invalid or never-firing expression with HTTP 400 through the typed
+  `*CronValidationError`. Previously every unrecognized expression, including
+  standard cron such as `0 9 * * *`, was folded into an hourly interval and
+  recorded as active. API note: the endpoint used to answer 201 for any string,
+  so expressions it accepted and the new parser rejects now answer 400. That
+  covers six-field and other Quartz forms (`0 0 9 * * *`, `?`, `L`, `W`, `#`),
+  `@every_*` values outside `5m`/`10m`/`30m`/`1h`/`12h`, `@reboot`, and any
+  string that is not five fields
+- **`schedule.TaskRemover`**: optional `Scheduler` capability for dropping a
+  task entry that has already fired. `InMemoryScheduler` implements it. A cron
+  chain re-arms by scheduling a fresh one-shot task per fire, so without a
+  removal path a per-minute schedule accumulated one dead map entry and one
+  `context.CancelFunc` per fire for the life of the process
+- **`workspace.ExecPathResolver`**: optional capability returning the path
+  spelling a backend's `Execute` resolves, so `ToolBackend.StatFile` measures
+  the same file `ReadFile` read. `DockerWorkspace`, `DaytonaWorkspace` and
+  `AppleContainerWorkspace` implement it and return an absolute in-sandbox path.
+  LocalWorkspace, K8s, E2B, OpenSandbox and bubblewrap do not implement it: their
+  `Execute` uses the caller-relative path, and bubblewrap binds its host root to
+  `/`
+- **`tool.BackendStatter`**: optional `Backend` capability (`StatFile`) letting
+  the read cache judge freshness against the backend's own filesystem instead of
+  the host's (#2092). `workspace.ToolBackend` implements it with POSIX `stat`,
+  trying the GNU `-c %Y` and BSD/busybox `-f %m` forms, behind a path
+  containment check
+- **Read returns images** (`tool`, #2114): `.png .jpg .jpeg .gif .webp .bmp
+  .tiff .tif .ico` come back as base64 `DataBlock`s on both the host and backend
+  paths, preceded by a text placeholder such as `[shot.png: image/png, 12345
+  bytes]` so consumers that only read text still get a meaningful result. New
+  `tool.MaxInlineImageBytes` (256 KB): above it the image is reported as text
+  rather than inlined, because the token estimator decodes base64 back to raw
+  bytes and divides by four, making an inlined image cost roughly fileSize/4
+  tokens. PDF page rendering is not ported; it needs a rasterizer dependency
+- **Agent-driven compression** (`tool.NewCompressContextTool`,
+  `agent.WithAgentDrivenCompression`, #2143): registers a `compress_context`
+  tool the model can call itself
+- **`ContextConfig.MaxImageNum`** (#2362): the oldest context images beyond the
+  limit are replaced with text reminders before token counting. URL-backed
+  images keep a pointer
+- **`ContextConfig.AgentDrivenTriggerRatio`**: the threshold at which the
+  model-invoked `compress_context` may compress. Defaults to `TriggerRatio/2`
+  and is clamped to at most `TriggerRatio`. At the automatic threshold the agent
+  would always compress first and the model could never trigger the tool
+- **`rag.LLMReranker`** (`NewLLMReranker`, #1975): a `Reranker` over any
+  `ChatModel` using structured-output judging, with a per-(query, document)
+  score cache. Options are `WithLLMRerankerDocChars` (truncates by rune, so a
+  multi-byte character is never split), `WithLLMRerankerCacheMax`,
+  `WithLLMRerankerPrompt`, and `WithLLMRerankerPromptRunes`, which bounds the
+  whole judge prompt by shrinking the per-document budget rather than dropping
+  candidates (a dropped candidate scores 0 and sinks in the ranking)
+- **`rag.Document.Score`** (#2486): retrieval relevance, normalized so higher
+  means more relevant across Elasticsearch, Qdrant, MongoDB and Milvus. Milvus
+  L2 distance is negated, so callers that negated it themselves must stop.
+  `RerankedIndex` overwrites the field with the rerank score
+- **`ChunkConfig.Unit` and `Validate()`** (`rag/parser`, #2083 core): explicit
+  `ChunkUnitChars` / `ChunkUnitApproxTokens` so an API boundary can reject a bad
+  config instead of relying on a silent fallback
+- **`model.GenerateStructuredOutputWithUsage`** (#2433): accumulates usage
+  across structured-output strategy attempts. Compression usage is recorded and
+  emitted as a model-call-end event so budgets and cost tracking include it
+- **`permission.Context.TargetShell`, `Engine.CheckPermissionInContext`,
+  `tool.BackendPermissionContext`** (#2366 residual): shell-specific permission
+  checks follow the execution backend, so host-detected PowerShell patterns no
+  longer misfire on POSIX containers
+- **`tool_result_data_delta` emission**: an image tool result is now also emitted
+  as an event between the text delta and `tool_result_end`, so a consumer
+  rebuilding a message from the stream alone (`Msg.AppendEvent`: channel
+  gateways, console renderer, replay tapes) matches the agent's own context. The
+  event type and merge path already existed; nothing produced them
+- **`SchedulerManager.Update`**: mutates a record under its entry lock and
+  returns a copy. `Get` and `List` now return copies, so patching their result
+  has no effect
+- **Deployment scheduling documentation** (`docs/deployment.md`): the HTTP
+  schedule API, the accepted cron syntax, timezone behavior (expressions are
+  evaluated in the process's `time.Local` and the API has no per-schedule
+  timezone field, so pin `TZ` in the container), non-hour-offset and DST
+  behavior, `DELETE` versus `PATCH` for stopping a schedule, and what a custom
+  `Scheduler` implementation needs to know
+
+### Changed — upstream sync batch
+
+- `tool.NewCompressContextTool` takes a `tool.CompressFunc`
+  (`func(ctx) (tool.CompressionResult, error)`). This is new in this release: the
+  tool, `CompressFunc` and `CompressionResult` did not ship in any tagged
+  version. The tool reports whether anything was actually summarized, and says
+  so when the context was below the threshold, instead of claiming success on a
+  no-op. It is `ConcurrencySafe: false` because it rewrites the shared message
+  history, and returns `permission.BehaviorAllow` so an ASK-mode engine does not
+  stall every model-initiated compression
+- **BREAKING (behavior)** `cron_expr` is now parsed as cron. The previous parser
+  recognized only `@hourly`, `@daily`, `@every_5m`, `@every_10m` and
+  `@every_30m`; everything else, including `@every_1h`, `@every_12h`, `@weekly`,
+  `@yearly` and any five-field expression, became an hourly interval. Recognized
+  values became a `schedule.Interval` with no `RunAt`, and the in-memory
+  scheduler runs an Interval task immediately, so every cron schedule also fired
+  once at creation. Both halves changed. `@every_5m` created at 10:03 now fires
+  at 10:05 rather than at 10:03 and then 10:08, `@every_12h` means 00:00 and
+  12:00 rather than hourly, `0 9 * * *` means daily at 09:00 rather than hourly,
+  and nothing fires at creation any more. Persisted schedules keep their stored
+  expression and fire on the new grid; `docs/deployment.md` has the upgrade table
+- **BREAKING (behavior)** `CreateScheduleRequest.RunOnce` was accepted by the API
+  and read by nothing, so a schedule created with it re-armed like any other cron.
+  It now fires once at the next matching slot and does not re-arm. A client already
+  sending `run_once: true` therefore sees a repeating schedule become one-shot with
+  no change to the request, the response, or the status code. The expression is
+  still validated, since a malformed one is a client error either way. After that
+  single fire the record reports `completed` and the spent task is dropped through
+  `schedule.TaskRemover`; nothing marked a one-shot as finished before, so a listing
+  could not tell a schedule that fires tomorrow from one that fired yesterday and
+  never fires again. This also corrects the pre-existing no-`cron_expr` path, not
+  only `run_once`
+- **BREAKING (behavior)** `message.ToolResultBlock.Output` holds a
+  `[]message.ContentBlock` when a tool returned non-text blocks, and a plain
+  `string` otherwise. The field was already typed `any` and `GetOutputText()`
+  already existed, so this compiles unchanged, but a bare `.(string)` assertion
+  now panics on an image tool result. Read the field with `GetOutputText()` or a
+  comma-ok assertion
+- **BREAKING (behavior)** `SchedulerManager.Get` and `List` return copies rather
+  than live pointers, because the scheduler callback rewrites `TaskID` and
+  `Status` from another goroutine while HTTP handlers marshal them. Code that
+  mutated the returned record now writes to a throwaway copy and sees no effect,
+  with no compile error and no panic. `PATCH /api/schedule/{id}` goes through
+  `Update` and answers 409 when a status transition is refused, instead of 200
+  with a body that disagrees with the store
+- **BREAKING (behavior)** `ReadCache.GetCache` and `GetCacheWithMtime` return
+  copies. The signatures are unchanged, so nothing fails to compile, but
+  mutating the returned `*ReadCacheEntry` used to change the cache and now does
+  not. `removeAt` shifts elements inside the shared backing array, and the new
+  `Remove` (called by Write and Edit) made the previously returned internal
+  pointer race under concurrent tool batches
+- **BREAKING (behavior)** schedule status is one-way. Pausing, completing,
+  failing or blanking the status stops the re-arm chain, and `Update` refuses to
+  set `active` again from any non-active status, including an empty one, so two
+  PATCH calls cannot reopen the path. Only a record that is active has an armed
+  task behind it. Resuming means creating a new schedule. Sibling fields in the
+  same patch are still applied
+- **Tracing finish reasons** (#2450) are marshaled with `encoding/json`, because
+  a provider `StopReason` containing a quote produced an invalid attribute value.
+  The three failure shapes are now distinguishable: a canceled context reports
+  `interrupted`, a transport or handler failure reports `error`, and a partial
+  reply reported through `ChatResponse.Error` reports `incomplete`. All three
+  previously reported `interrupted`. Dashboard note: an alert filtering on
+  `interrupted` will see fewer hits and should match all three
+- **OpenAI Responses streaming** (#2426) emits blocks in the same order as the
+  non-streaming path: reasoning, then text, then tool calls. Replay follows block
+  order, and emitting text first replayed a reasoning item with nothing after it,
+  which is what #2426 exists to prevent. Tool calls keep the order the API
+  produced them in rather than map order. An empty replayable reasoning item is
+  skipped rather than sent as `{}`, and a turn whose blocks the API cannot carry
+  is emitted as an explicit placeholder instead of being dropped
+- **Schema-guided argument coercion** (`jsonx`, #2496) runs on every tool call,
+  not only when JSON parsing fails. Internal note: `jsonx.CoerceToSchema`
+  returns the coerced map and is copy-on-write, so it never rewrites the caller's
+  map, nested maps or slices. `internal/` carries no compatibility guarantee (see
+  `STABILITY.md`), so this is not a consumer-facing break
+- **Backend reads consult the cache.** A backend that does not implement
+  `BackendStatter` caches nothing, because a host `os.Stat` of a
+  workspace-relative path is meaningless or matches an unrelated host file. A
+  stat round-trip costs at most one exec per read: one on a miss to obtain the
+  mtime the entry is cached with, one on a hit to validate it
+- **Compression splitting** never sweeps an unfinished tool call into the
+  summarized portion and never leaves a call on the opposite side from its own
+  result (`pullSplitBackForToolPairs`, iterated to a fixpoint after
+  `adjustSplitForToolPairs`). Both repairs move the split backward, because
+  moving it forward can drag an in-flight call into the summary
+- **`limitContextImages` is copy-on-write.** `state.Context` shares its `*Msg`
+  pointers and nested tool-result block lists with snapshots handed out earlier
+  under the lock and read afterwards
+- **`RepetitionBreakerMiddleware`** (#1816) gained an independent error-streak
+  dimension. Error-state responses no longer count as successes
+- **xAI usage** (#2461) adds `completion_tokens_details.reasoning_tokens` for xAI
+  only. The shared OpenAI-family parse path is untouched, so other providers
+  cannot double-bill
+- **Gemini schemas** (#2437): nullable type arrays such as `["string","null"]`
+  are sanitized and multi-type arrays become `anyOf`. A combination that cannot
+  be sanitized is left for the API to reject rather than dropped
+- **`approxTokenChars` documentation corrected** (documentation only; chunking
+  behavior is unchanged): four characters per token under-counts CJK, where one
+  token is roughly one to one-and-a-half characters, so a chunk sized in
+  `approx_tokens` comes out larger in real tokens than configured. The previous
+  comment claimed the opposite
+- **`.gitignore`** covers root-level example executables, since
+  `go build ./examples/<name>` writes a binary of about 20 MB into the current
+  directory, and the internal planning and review documents
+
+### Fixed — upstream sync batch
+
+Two kinds of fix appear below. The first group corrects behavior that shipped in
+`v2.0.9` or earlier. The second group corrects defects this batch introduced and
+adversarial review caught before the commit; those never shipped, and are recorded
+because they explain the shape of the new code.
+
+**Shipped in `v2.0.9` or earlier**
+
+- **Anthropic mid-stream `error` events were skipped.** They arrive inside an
+  otherwise successful HTTP 200 stream, so the only visible symptom was the
+  misleading "stream ended without message_stop (truncated)". They are now parsed
+  into `ChatResponse.Error`, and the agent reply loop reads that field, logging a
+  warning and emitting a `model_partial_response` event. Nothing outside tracing
+  read it before, so a truncated reply was indistinguishable from a complete one
+- **OpenAI Responses streams that ended cleanly without `response.completed` were
+  silent**: `Error` was only set on a scanner failure. Same class as #2350
+- **`exceed_max_iters` was emitted on a successfully finished last iteration.**
+  It is now emitted only when the reply ran out of budget
+- **Agentic-memory default instructions** no longer carry the malformed
+  `</search>` tag (#2513)
+- **`WakeupDispatcher.Wakeup`** sends under the registry lock, closing a
+  send-on-closed-channel race with `Unregister` (#2476 class)
+
+**Introduced by this batch, fixed before the commit**
+
+- **Cron would have been unusable in every timezone whose UTC offset is not a whole hour.**
+  `next()` advanced with `time.Truncate`, which aligns to absolute UTC
+  boundaries, so in Asia/Kolkata (+5:30), Asia/Tehran (+3:30), Asia/Yangon
+  (+6:30), Australia/Darwin (+9:30), America/St_Johns (-3:30) and Asia/Kathmandu
+  (+5:45) an hour boundary landed on local HH:30 and no expression could match.
+  Schedule creation would have returned HTTP 400 for all of them. It now rebuilds from local
+  calendar fields with `time.Date`. The test suite and CI both ran on whole-hour
+  offsets and every test used `time.Local`, so nothing caught it
+- **`next()` could have spun forever on a DST fall-back day.** `time.Date` resolves an
+  ambiguous local hour to its first occurrence, so rebuilding hour+1 at 01:00 EST
+  returned 01:00 EST again. Every step now carries an absolute-time fallback
+- **`next()` could have returned a time in the past** on a fall-back day, because
+  rebuilding from local fields can move backward by the offset span. It now steps
+  until strictly after, so `Create` cannot hand the scheduler an already-due
+  `RunAt`
+- **A valid leap-day expression would have been rejected.** `0 0 29 2 *` fires at most once
+  every four years and the first cut of the scan window was one year, so it was refused as never
+  firing. The window is now eight years, which also covers the gap around a
+  century year that is not a leap year: from 2097 the next 29 February is 2104
+- **Canceling a schedule could have left it running.** A `Cancel` landing while a
+  re-arm was in flight canceled only the task it had already seen, so the freshly
+  armed one survived and ran one more chat after the user canceled. Re-arm and
+  cancel are now serialized on a per-record lock with a re-arm sequence number,
+  and the callback cancels a task armed during the race. The record is also
+  published before `Schedule`, so a scheduler that runs the callback
+  synchronously can no longer make the first fire see no record and degrade a
+  cron to a one-shot
+- **`PATCH /api/schedule/{id}` would have had no effect.** Making `Get` return
+  copies without updating the handler left it mutating a local copy and answering
+  200 with a body the store never saw, which also removed the ability to pause a chain
+- **`forcedFinalSummary` would have stored tool calls that never execute.**
+  `tool_choice: none` is a request rather than a guarantee, and Ollama, vLLM and
+  many OpenAI-compatible gateways ignore it. The stored pending calls were picked
+  up by the next reply and run as ghost tool calls (#2443)
+- **A typed slice would have been corrupted by argument coercion.** `ValidateInput` accepts
+  `[]string`, `[]float64` and `[]int` as arrays and Go callers pass those
+  directly, but the coercion branch only type-asserted `[]any`, so anything else
+  reached the lone-value wrapper and a list of N items became a one-item list
+  containing the list
+- **String-to-number coercion would have accepted non-finite values.** `strconv.ParseFloat`
+  parses `"NaN"`, `"Inf"` and `"1e999"`, which cannot be marshaled back to JSON.
+  The float64 branch already refused them; the string branch did not
+- **`ToolBackend.StatFile` would have had no path containment check.** It interpolated the
+  path straight into a shell command, which would have exposed the mtime and
+  existence of any reachable file had it been wired ahead of `ReadFile`
+
+### Not ported (reasons in `STABILITY.md`)
+
+GoalPipeline (#2428), team enhancements (#2386, #2379), the full A2AAgent
+protocol (#2142, pending an SDK decision), the workspace prewarm pool (#1755,
+needs isolation-policy and storage/lifecycle prerequisites), MCP SSE transport
+(#2311), and the channel and app Phase E items. Mid-stream failover is also
+still unimplemented: `FallbackChatModel` fails over on stream setup errors only,
+so a truncated stream is reported but not retried.
+
+### Changed — evaluator-followup hardening (Phase 3 cleanup)
+- **`skill.ErrInvalidInput` sentinel**: `Store.Add` validation failures
+  (missing name / instructions) are typed; the add route maps them to 400
+  via `errors.Is` instead of string matching; escaping `agent_id` now has
+  HTTP-level 400 coverage on all skill routes
+- **`skill.Store` YAML rendering escapes all C0 controls** (`\u00XX`),
+  not just `\n`/`\r`/`\t` — a description with raw controls can no
+  longer produce unparseable frontmatter
+- **`memory.FileStore` atomic load**: an unreadable stream (e.g. an
+  over-long line) fails the whole load and commits nothing instead of
+  leaving partial data; multi-instance sharing caveat documented on the
+  type
+- **`workspace.ErrPathEscape` sentinel**: `LocalWorkspace` and
+  `BubblewrapWorkspace` containment failures are typed; artifact-route
+  status mapping uses `errors.Is`; `BubblewrapWorkspace` containment also
+  became separator-aware (same sibling-prefix class as the Local fix)
+- **`app.WorkspaceInfoResponse` gains `workspace_id`** (additive; the
+  historical `session_id` field still carries the workspace ID)
+- **`WorkspaceManager` does workspace creation outside the manager lock**
+  (concurrent creators of the same ID adopt one instance); covered by a
+  20-goroutine `-race` test
+- **`hub` client-name sanitization collapses invalid-character runs**
+  (exact Python `re.sub` parity: `a..b` → `a-b`)
+
+
+### Added — workspace sharing + artifacts (Phase 3)
+- **Workspace sharing** (Python #1951 semantics): `WorkspaceManager` now
+  tracks session↔workspace bindings with refcounts — `GetOrCreate` binds a
+  session to a private workspace named after itself, `Share` rebinds it
+  onto a named workspace other sessions can join (workspace IDs validated
+  against escaping), `BoundWorkspaceID` / `GetByID` / `RefCount` expose
+  the binding state, and a workspace is released from memory when its
+  last session unbinds (files persist on disk; the next reference
+  recreates it over the same directory). The `workspace.Workspace`
+  interface is unchanged — sharing lives entirely in the manager layer
+- **Artifact endpoints** (Python #2187): `POST /api/workspace/share`
+  binds a session onto a shared workspace; `GET /api/workspace/{id}/list_dir`
+  and `GET /api/workspace/{id}/read_file` give read-only artifact access
+  to live workspaces (workspace jail enforced; size checked through the
+  directory listing BEFORE content is read — 10 MiB cap, `413` above;
+  `nosniff` on responses)
+- **`LocalWorkspace` path containment hardened**: the jail check is now
+  separator-aware — the previous bare prefix match admitted sibling
+  directories (`/tmp/ws123/...` passed for base `/tmp/ws1`), a hole the
+  new HTTP-exposed artifact endpoints would have surfaced — and
+  symlink-aware: contained paths are resolved through their links (and
+  the nearest existing ancestor for not-yet-created targets) and
+  re-checked, so a link planted inside the workspace cannot serve or
+  receive content outside it; both covered by regression tests
+
+### Added — agentic memory (Phase 3)
+- **`memory.FileStore`**: the file-based long-term memory store completing
+  the InMemory / Mem0 / Vector / File store set — memories persist as JSON
+  Lines (`memories.jsonl`) under a directory (workspace-friendly);
+  crash-tolerant loading (a torn final line is skipped), atomic rewrite on
+  delete, append-friendly adds, and the same keyword search semantics as
+  `InMemoryStore`
+- **`memory.AgenticMemoryMiddleware`**: file-backed long-term memory where
+  the LLM decides when and what to save (port of Python's
+  AgenticMemoryMiddleware, #2263) — keeps a workspace-local Markdown memory
+  store (`<workdir>/Memory/MEMORY.md`, directory configurable) and injects
+  the Auto-Memory instructions (faithful port of the Python text,
+  `{memory_dir}` substituted) plus a token-budgeted `MEMORY.md` snapshot
+  (default 4000 tokens; `<<<TRUNCATED>>>` with a Read-offset reminder on
+  overflow, empty-store placeholder otherwise) into the system prompt; the
+  agent maintains the store with its regular file tools. Deliberate delta:
+  the asynchronous LLM-driven relevance retrieval is not ported yet — the
+  selection text is kept as `DefaultAgenticRetrievalInstructions` for the
+  future port
+- **`app.WorkspaceAgentFactory`**: optional workspace-aware agent factory
+  (`AppConfig.WorkspaceAgentFactory`, requires `WorkspaceDir`) that hands
+  the session's workspace to the factory when creating session agents —
+  parity with Python's workspace-aware agent middleware factories, enabling
+  per-session filesystem-backed middleware such as agentic memory
+
+### Added — workspace skill isolation (Phase 3)
+- **`skill.Store`**: per-agent skill partitions under a workspace
+  (`skills/<agent_id>/<skill-dir>/SKILL.md`, Python #2283 semantics) —
+  first access equips a partition from the `skills/.seed` template
+  exactly once (the partition's existence is the marker, so a deleted
+  seed skill stays deleted), idempotent migration of the pre-partition
+  layout into the seed, content-based `Add` and directory-copy `AddDir`,
+  `Remove` by skill name, `PurgeAgent`; agent IDs are validated against
+  partition escaping (leading dots, separators), and only
+  `<partition>/<dir>/SKILL.md` counts as a skill
+- **`skill.SkillManager` agent partitions**: `RegisterForAgent` /
+  `GetForAgent` / `ListForAgent` / `PurgeAgent` /
+  `LoadAgentFromStore` / `FormatInstructionsForAgent` alongside the
+  unchanged global registry; `skill.FilterByName` for session skill
+  selection
+- **Workspace skill routes implemented** (previously stubs):
+  `GET/POST/DELETE /api/workspace/skill` now read and write the
+  session's workspace partition (`session_id` + optional `agent_id`
+  query parameters); `SessionRecord`/`SessionResponse` carry
+  `active_skills` (settable via `SetActiveSkills` and the session PATCH
+  route) so agent factories can assemble per-session toolkits
+
+### Added — hub built-in sources (Phase 3)
+- **`hub.GitHubMCPRegistry`**: GitHub's public MCP registry
+  (`api.mcp.github.com`, `GET /v0/servers`) as a `hub.Hub` source —
+  cursor pagination, client-side query filter (the registry has no
+  search parameter), cards mapped from remote or package entries with
+  sanitized model-safe names. Stdio commands follow the registry's
+  `runtime_hint` (`npx`/`uvx`/`uv`/`docker`) with per-runtime arguments
+  and `name@version` pinning for npx (Python `_RUNTIMES` parity);
+  remote entries carry their auth headers, with `{TOKEN}` placeholders
+  rewritten to `${TOKEN}` and registered as required install inputs.
+  `Install` atomically writes the MCP client config as
+  `<client-name>.json` (`{"<client-name>": <config>}`) preserving the
+  install-input surface: `${KEY}` placeholders plus per-input specs
+  (description / is_required / is_secret) embedded under `inputs`
+  (Python #2230 semantics). Deliberate shape divergence from
+  `MCPHub.Install`, which persists the upstream registry's raw body as
+  `<cardID>.json` — each hub writes its own upstream's native install
+  shape. Optional token only raises rate limits
+- **`hub.ClawHub`**: the ClawHub skill registry (`clawhub.ai`) as a
+  `hub.Hub` source — catalog (`/api/v1/skills`, cursor-paginated) or
+  search (`/api/v1/search`, single page), owner-scoped card IDs
+  (`owner/slug` whenever the record names an owner, because slugs are
+  not unique — Python #2214). `Install` validates the slug against a
+  safe charset, downloads and unpacks the ZIP archive into
+  `<targetDir>/<slug>/` with zip-slip protection plus zip-bomb
+  defense (64 MiB per-file and 512 MiB aggregate extraction caps,
+  truncation detected rather than silently applied), and removes a
+  freshly created destination directory when unpacking fails
+
+### Added — reply lifecycle semantics (Phase 3)
+- **`ReplyEndEvent` parity**: `FinishedReason` (completed / interrupted /
+  exceed_max_iters / error) plus structured `Error` (`types.ReplyErrorInfo`,
+  classified authentication/permission/rate_limit/invalid_request/upstream/
+  connection/internal/setup/unknown); `NewReplyEndEventWithReason` /
+  `NewReplyEndEventWithError` constructors; model-call failures now end the
+  reply with reason `error` instead of a bare end (classified into
+  rate_limit / connection / invalid_request / upstream / unknown);
+  iteration exhaustion ends with reason `exceed_max_iters`
+- **Swallowable `ReplyEndEvent`** (port of Python #2322): an `OnReply`
+  middleware that receives a completed reply's `ReplyEndEvent` without
+  forwarding it forces another reasoning-acting round (the iteration
+  counter restarts, unblocking a swallowed exceed-max-iters end);
+  interrupted ends cannot be swallowed; a busy-loop guard ends the reply
+  when end events keep getting swallowed without any reasoning/acting in
+  between. Middleware must forward `CustomEvent` values named
+  `agentscope.*` (internal round-boundary sentinels)
+- Console renderer prints error/interrupted ends; `Launch` no longer
+  double-notices interruptions; DingTalk channel surfaces reply errors
+
+### Added — channels (Phase 2, DingTalk first)
+- **`channel` package**: `Channel` interface + normalised `Event` /
+  `ConfirmationEvent` inbound types, `Capability`, connection `Status`,
+  and `SplitText` line-aware message splitting; `Gateway` orchestrates
+  inbound events — per-chat session agents, one reply at a time with
+  drop-with-notice for concurrent messages, reply event streams tee'd to
+  the channel's `SendResponse`, and tool-call confirmation round-trips:
+  text-mode answers (y/n/a plus common Chinese equivalents) apply to all
+  parked calls, while native confirmation UIs deliver
+  `ConfirmationEvent`s answered per call; optional `Notifier` for
+  housekeeping notices
+- **`channel/dingtalk` package**: DingTalk enterprise robot channel over
+  the official Stream SDK (long-lived inbound connection, no public
+  endpoint); replies and confirm prompts sent as Markdown through the
+  per-message session webhook (expiry-checked); group chats answered
+  only when @-mentioned by default (`ReplyWithoutAt` to change); v1
+  scope: text/Markdown + text-mode confirmations — AI-card streaming,
+  media, and user search not ported yet (`examples/dingtalk_channel`)
+
+### Added — console (Phase 1)
+- **`console` package** (port of Python agentscope's `console` module):
+  `console.Renderer` turns an agent event stream into line-based terminal
+  output (three verbosity levels, tool-result truncation, HITL notices,
+  token usage, auto-detected ANSI color honoring `NO_COLOR`) and exposes
+  the accumulated reply via `LastMsg`; `console.Launch` is an interactive
+  chat loop bound to one agent — stdin prompt, streamed rendering,
+  tool-call confirmation (`y`/`N`/`a`, where `a` accepts suggested
+  permission rules), Ctrl+C interrupts the current reply at the stream or
+  the confirmation prompt and exits at the input prompt, `exit`/`quit`/
+  Ctrl+D to leave. Interruption is context cancellation; confirmations
+  are submitted out-of-band via `SubmitUserConfirm` while the reply
+  stream stays open (`examples/console`)
+
+### Added — harness engineering batch
+- **Flight recorder** (`replay/`): `NewRecorder` gains `WithRingLimit`,
+  `WithRecordSizeLimit` (oversized inputs stored as summaries),
+  `WithDumpOnError` (atomic `flight-<reply_id>-<unixnano>.jsonl` on failed
+  replies, tape + event tail) and `WithRedactor`; `Entry` gains `reply_id` and
+  `usage` fields (additive JSON)
+- **Run correlation**: reply IDs flow from the agent through MiddleContext
+  into recorders and audit entries (`audit.Entry.reply_id`), and into
+  tracing spans via the new optional `tracing.LateAttributer` extension
+- **`event/streamcheck`**: single implementation of event-stream invariants
+  (reply/block/tool-call/tool-result pairing, no orphan deltas); `agenttest`
+  delegates to it, and `middleware.NewStreamValidator` offers opt-in runtime
+  validation for development
+- **Provider contract wall** (`providercontract/`, test-only): usage
+  accounting, streaming lifecycle (exactly one IsLast), truncation-error
+  surfacing, ctx-cancel stops, error taxonomy (429 retryable / 401 not),
+  and thinking wire formats — harnesses for openai, anthropic, dashscope,
+  gemini, deepseek, moonshot
+- **Golden replay seeds** (`agent/testdata/golden/`): multi-tool batch,
+  HITL park/resume, external tool, compression summary; randomized
+  ids/timestamps normalized; regenerate with `-golden-update`
+- **Repetition breaker** (`middleware.NewRepetitionBreaker`): detects
+  identical successful tool-call spins (name+input hash; failed calls reset the
+  success streak — superseded within this same unreleased cycle by the
+  independent error-streak dimension in the "upstream sync batch" section
+  above), injects a change-strategy reminder at threshold, and past the
+  threshold the typed `ErrToolRepetition` replaces the tool result (the
+  over-threshold call itself still executes — side effects cannot be
+  un-run — but its actual result is discarded and the model sees the
+  error). Streaks are keyed per reply, so concurrent replies on one agent
+  do not reset each other. Allowlist exempts read-only/idempotent tools.
+  Spins whose inputs vary by timestamps/random values are out of scope
+- **Reply watchdog** (`middleware.NewReplyWatchdog`): wall-clock and idle
+  timeouts cancel stalled replies
+- **Evaluation kit** (`replay/evalkit/`): YAML task suites with fixtures
+  and budgets, a runner with pinned sampling (default temperature 0),
+  scorers (contains / json_field / text_contains / trajectory / budget /
+  LLM judge with result caching), multi-turn tasks, Markdown suite reports,
+  and A/B `Compare` reports (flips + token deltas + verdict)
+- **Cost governance**: `model.ResolvePrice` pricing overlay (`SetPrice`
+  overrides win; kept separate from upstream card sync), `CostLedger` +
+  `CostTrackingMiddleware` cross-session aggregation (session-safe query
+  API; low-cardinality labels only for metrics), and
+  `ReplyCostBudgetMiddleware` (80% soft warning hint + hard stop with
+  `ErrBudgetExceeded`)
+- **Run logs**: `middleware.NewRunJSONL` (with redactor hook) writes the
+  full event stream + middleware-routed model-call records as JSONL
+  (compression summary calls bypass middleware and are not recorded); `replay.ParseRunLog` /
+  `DiffRunLogs` align two runs by LCS over event types;
+  `examples/replayview` terminal viewer
+- **Fault injection** (`agenttest/faults/`): deterministic model-error /
+  tool-failure / latency injection for resilience chaos testing
+- **Crash recovery**: `agent.WithStateSaver` auto-checkpoints at tool-batch
+  boundaries and park points; `AgentState` gains `schema_version`;
+  `agent.LoadCheckpoint` loads resumable state (rejects newer schemas);
+  resumed replies re-emit `RequireUserConfirmEvent` /
+  `RequireExternalExecutionEvent` for pending calls and wait again.
+  Contract: a crash mid-batch resumes by re-executing the whole batch
+  (side effects are not exactly-once across crashes)
+- **Bench v2**: `Battery` + `Baseline` save/load + `CheckBaseline`
+  regression detection (p95 latency with fractional-ms precision + success
+  rate, 10% slack)
+- **`model.WithSeed`**: sampling seed pass-through for the OpenAI-family
+  providers (evaluation determinism)
+
+### Changed
+- Resumed conversations with pending ASKING calls are detected even when a
+  fresh user input follows the restored assistant message; a confirmed call
+  is executed inline through the normal acting path so resumed HITL work
+  actually runs. Batch confirmations AND batched external execution
+  results are stashed per call ID, so a single event answering several
+  pending calls is never lost; the state checkpoint is refreshed right
+  after resumed calls execute, so a crash just after resume cannot
+  re-execute an already-executed tool. Behavior change: a
+  `SubmitExternalResult` event matching no pending call no longer ends
+  the wait — it is stashed, and the affected reply blocks until a
+  matching result arrives or its context ends (previously it
+  fast-errored with a tool-result error)
+
+### Fixed
+- Reprompted confirmations force the ALLOWED call state regardless of the
+  state echoed back by the confirmer (previously an echoed asking-state
+  block could loop the re-prompt forever)
+
+## [v2.0.9] - 2026-08-26
+
+### Added
+- **Structured output strategy ladder** (`model/`): `GenerateStructuredOutput`
+  now walks `forced → auto → no_think → none`; provider request-shape
+  rejections and missing structured results advance the ladder, other errors
+  stop it; failures wrap the typed `errors.ErrStructuredOutput` (port of
+  upstream fix #2140)
+- **`model.WithThinkingDisabled()`** call option + `ThinkingDisabler`
+  provider interface: DashScope sends `enable_thinking=false`;
+  DeepSeek/Moonshot/Anthropic send `thinking:{"type":"disabled"}`
+  (upstream #2140)
+- **`gen_ai.input.messages` chat-span attribute** (`middleware/tracing`):
+  bounded `role: text` serialization of what the model saw (port of upstream
+  fix #2391)
+- **`ToolResultDataDeltaEvent.Validate()`** (`event/`): enforces exactly one
+  of Data/URL (port of upstream fix #2370)
+
+### Changed
+- **Gemini usage accounting**: tool-use prompt tokens count as input, thought
+  tokens as output, cached-content tokens feed cache accounting (port of
+  upstream fix #2406)
+- **Audio input formats**: explicit `wav|mp3|mpeg→mp3` map for `input_audio`;
+  unsupported audio subtypes produce a clear `Format` error instead of being
+  passed through to the API (port of upstream fix #2301). Note: the exported
+  `FormatDataBlockForOpenAI`/`FormatDataBlockForDashScope` helpers keep their
+  signatures and return nil for invalid audio (dropping the block); the
+  `Format` paths surface the error
+- **Compression trigger ratio** `0.9` is now accepted; only values above it
+  fall back to the 0.8 default (port of upstream fix #2396)
+
+### Fixed
+- **OpenAI Responses streams close deterministically**: `processStream`
+  honors ctx on every send; scan errors and streams ending without
+  `response.completed` surface as a final `IsLast` response instead of
+  ending silently (port of upstream fix #2349)
+- **`ReadCache` refreshes recency on hit**: repeatedly-read files no longer
+  evict first under FIFO (port of upstream fix #1811)
+- **Compression falls back to truncation** when summary generation fails —
+  the context is truncated to the reserve set, the previous summary is kept
+  (a truncation notice substitutes an empty one) and the dropped content is
+  offloaded when an offloader is configured, instead of staying wedged above
+  the threshold (port of upstream fix #2140)
+- **Chat SSE handler releases the session registry via defer**: a panic
+  mid-handler can no longer wedge the session slot permanently
+
+## [v2.0.8] - 2026-08-18
+
+### Added
+- **Model cards synced with the upstream AgentScope Python v2.0.6 refresh**:
+  24 cards added (claude-fable-5/opus-5/sonnet-5, qwen-flash and
+  qwen3.5/3.6/3.7-flash, qwen3.8-max, gemini flash-lite family,
+  gemini-3.5/3.6-flash, kimi-k2.7-code(-highspeed), gpt-5.6 luna/sol/terra,
+  grok-4.20 family, grok-4.5, grok-build-0.1); 48 existing cards refreshed to
+  upstream values; Go-exclusive embedding cards preserved
+- **`ModelCard` lenient `deprecated_at` parsing** (`UnmarshalYAML`): accepts
+  RFC3339, naive ISO, space-separated, and plain-date timestamps, matching the
+  upstream Python card format (previously sunset cards were silently dropped)
+- **`Toolkit.HasGroup` / `IsGroupActive` / `GroupNames`** for group inspection
+- **`StdioClient.Reconnect`** (`mcp/`): reconnect a closed or failed MCP
+  stdio client; `Close` is now idempotent and calls on a closed client return
+  a clear error (port of upstream fix #2308). `Close`/`Reconnect` stay
+  responsive even while a `CallTool` is hung on an unresponsive server — the
+  subprocess is killed outside the wire mutex, which unblocks the in-flight
+  read
+- **`platform.Command`**: build an `exec.Cmd` through the platform-detected
+  shell (bash/zsh/sh on Unix; pwsh, powershell.exe, or cmd.exe on Windows)
+- **`FormatDataBlockForDashScope`** (`formatter/`): DashScope audio variant —
+  base64 audio wrapped in a `data:;base64,` URL (port of upstream fix #2315).
+  The mpeg→mp3 format mapping lives in the shared data-block formatter and
+  applies to the OpenAI path as well (its `input_audio` API only accepts
+  `wav|mp3` labels)
+- Regression test locking in Moonshot/OpenAI-compatible trailing usage-only
+  chunk handling (upstream #2314; verified not affected)
+
+### Changed
+- **DashScope requests now use `DashScopeFormatter`**: base64 audio sent as
+  data URLs (upstream fix #2315), video DataBlocks emitted as `video_url`
+  parts (previously dropped), and `reasoning_content` preserved in request
+  history
+- **Shell execution is platform-aware**: `LocalWorkspace.Execute`,
+  `workspace.LocalBackend.ExecCommand`, `tool.LocalBackend.ExecShell`, and the
+  legacy shell tool run commands through `platform.Command` instead of
+  hardcoded `sh -c` — Windows workspaces execute via PowerShell/cmd
+  (port of upstream feature #2132). On Unix, execution now follows the
+  detected shell (bash/zsh/sh): a non-POSIX `$SHELL` (fish, tcsh, xonsh, …)
+  is skipped in favor of the bash→zsh→sh chain so `-c` commands keep POSIX
+  semantics
+
+### Fixed
+- **ResetTools validates all group names before changing any state**: unknown
+  or `basic` group names now return an error listing the invalid names and
+  available groups instead of partially resetting activations; non-string
+  array elements (e.g. `activate: [1]`) are rejected instead of being
+  silently dropped (port of upstream fix #2302)
+- **`CollectStream` preserves ERROR state**: a trailing INTERRUPTED/DENIED
+  final chunk no longer overwrites an earlier ERROR (port of upstream fix
+  #2178)
+- **External tool results no longer emit a duplicate `ToolResultStart`**: a
+  SUBMITTED external call already emits its start event at submission, so a
+  wait that ends without a matching result (canceled, timed out, or unmatched
+  submission) now emits only the delta/end (upstream #2167 class)
+
+## [v2.0.7] - 2026-08-11
+
+### Added
+- **K8s workspace hardening** (`workspace/k8s.go`): `PodSecurityContext`
+  (RunAsNonRoot, RunAsUser, RunAsGroup, FSGroup), `ResourceRequirements`
+  (CPU/Memory limits and requests), `ServiceAccountName`, Labels + Annotations
+  on created Pods, `PodTTLSeconds` (default 3600, anti-leak cleanup via
+  `activeDeadlineSeconds`), `ImagePullPolicy` (default `IfNotPresent`),
+  `DisableServiceAccount` (`automountServiceAccountToken: false`), and
+  `SecretToken` (`model.SecretStr`) alongside the plain `Token` field
+- **Read-only Kubernetes cluster tools** (`workspace/k8s_tools.go`):
+  `NewKubectlGetTool` (15 resource types; `secrets` BLOCKED) and
+  `NewKubectlLogTool` (tail/since/container) — 30s timeout, no cluster mutation
+- `examples/k8s_workspace` demonstrating the usage pattern
+
+### Changed
+- Extracted `buildPodManifest()` for testability
+
+### Fixed
+- Duplicate timeout in `runKubectl` (now respects the parent context deadline)
+- Replaced GNU `find -printf` with a POSIX-compatible alternative
+
+## [v2.0.6] - 2026-08-10
+
+### Added
+- **Web UI Studio** (`webui/`): embedded single-page web interface for agent
+  interaction; zero-dependency SPA served via `go:embed` with streaming chat,
+  thinking-block display, tool-call visualization, human-in-the-loop
+  confirmation, session management, and model browser; mount with
+  `service.HandlerWithWebUI` or use `webui.Handler` directly
+- **Reranker interface + RerankedIndex** (`rag/`): `Reranker` interface and
+  `RerankedIndex` wrapper that re-scores retrieval results for improved
+  precision
+- **Eval harness** (`replay/`): `Scorer` interface, `EvalTape`, and
+  `AssertTape` for replay-based agent evaluation with pluggable scoring
+  functions
+- **CostTrackerMiddleware**: hard USD spend cap via `WithMaxCostUSD`; currency-conversion
+  display support (`WithExchangeRate`, e.g. CNY)
+- **GuardrailMiddleware** (`middleware/`): output content safety filtering
+  with three actions — `Block` (rejects with `ErrGuardrailBlocked`), `Redact`
+  (replaces with placeholder), `Warn` (allows with metadata flags); built-in
+  rules: `KeywordBlockRule`, `KeywordRedactRule`, `MaxLengthRule`,
+  `CustomRule`
+- **RedisFullStorage** (`storage/`): 28-method `FullStorage` implementation
+  backed by Redis with TTL, prefix isolation, and atomic operations
+- **SecretStr**: `UnmarshalJSON` support + dual-field (`APIKey`/`SecretAPIKey`)
+  across all 22 API-key configs (model, TTS, embedding, workspace, hub, and storage adapters) for safe key handling
+- **`errors.AgentError.Is()` method**: sentinel matching via `errors.Is`;
+  `AgentMessage()` for LLM-facing error descriptions
+- Spanish README (`README.es-ES.md`) — first community PR from a human
+  contributor (@webbrain-one, #3)
+- Werewolves multi-agent game demo (`examples/werewolves`) plus 3 more
+  examples; 35 new tests from the adversarial-review pass
+
+### Added — Edge & Embedded Intelligence
+- **ConnectivityAwareModel** (`model/connectivity.go`): wraps local + cloud
+  ChatModel with internal circuit breaker; routes to cloud when online, falls
+  back to local (Ollama) when offline, auto-recovers via single-probe half-open
+- **PubSub interface** (`messagebus/pubsub.go`): minimal pub/sub contract for
+  IoT protocols with QoS (0/1/2), retain, configurable buffer size
+- **MQTT adapter** (`messagebus/mqtt/`): Eclipse Paho-based PubSub
+  implementation with auto-reconnect, topic prefix, credentials; build tag
+  `mqtt` to avoid bloating non-MQTT builds
+- **Device framework** (`device/`): `Connector` interface + 4 pure-Go hardware
+  drivers (Serial via termios, GPIO via chardev, CAN via SocketCAN, I2C via
+  i2c-dev) — all `//go:build linux`, zero CGO
+- **DeviceTool**: wraps any Connector as `tool.Tool`; sensors auto-allowed,
+  actuators require bypass-immune ASK; integrated watchdog kick on success
+- **SensorTool**: read-only sensor tool with JSON output and auto-allow
+  permissions
+- **SensorMiddleware**: injects live sensor readings into system prompt
+  (`[SENSOR DATA]...[/SENSOR DATA]`) with configurable max-token budget to
+  prevent context bloat
+- **Watchdog**: timer-based safety; if `Kick()` not called within timeout,
+  triggers safe-state callback (motor off, valve close, etc.)
+- **CI cross-arch job**: build verification for linux/arm64, arm, mips64le,
+  riscv64 with binary size check (< 18MB)
+- 4 edge examples: `edge_offline`, `edge_sensor`, `edge_serial_robot`,
+  `edge_fleet`
+- 4 docs: edge-deployment.md, device-tools.md, offline-operation.md,
+  multi-device.md
+
+### Added — Security & Audit
+- **Audit logging** (`audit/`): new package with structured `Logger` interface
+  and 4 implementations (InMemory, File/JSON-Lines, Multi fan-out, Nop); 10
+  action types; context propagation via `WithLogger`/`GetLogger`
+- **Sandbox execution events**: 3 new event types — `tool_exec_start`,
+  `tool_exec_end`, `tool_policy_denied` — providing visibility into the
+  orchestrator execution layer
+- **Sandbox Policy enforcement**: `sandbox.Policy` now actually controls tool
+  execution; `OrchestratorConfig.Policy` blocks tool calls that violate
+  filesystem/network/process policies before execution
+- **Process-group isolation** (`proc_unix.go`/`proc_windows.go`): child
+  processes killed as a group on timeout via `Setpgid` + `SIGKILL` to process
+  group, preventing orphans and fork-bombs
+- **Interpreter attack detection** (`CheckInterpreterAttack`): detects
+  dangerous API calls hidden inside interpreter inline-code flags
+  (`python -c`, `node -e`, `perl -e`, `ruby -e`, `lua -e`, `php -r`); checks
+  for `os.system`, `subprocess`, `child_process`, etc.
+- **Write hardening**: 10 MB size cap (`MaxWriteBytes`), atomic writes via
+  `fsutil.WriteFileAtomic`, executable-extension detection triggers
+  bypass-immune ASK for .sh/.py/.exe/.dll etc.
+- **Expanded dangerous paths**: added 20+ credential files (.kube/config,
+  .aws/credentials, .docker/config.json, SSH private keys, .gnupg/*) and 4
+  directories (.kube, .aws, .docker, .gnupg) to the safety layer
+- **awk removed from read-only allowlist**: `awk` can execute arbitrary
+  commands via `system()` and write files
+
+### Changed
+- **`exception` package removed**: all types consolidated into `errors/`; no
+  more split hierarchy
+
+### Fixed
+- Data race in `a2a/grpc` `Server.Close` vs the Listen accept loop
+- Watchdog timer race in device tests
+- `TextBlock` JSON serialization in the werewolves example
+- `/static/` prefix path resolution for CSS/JS assets in webui
+
+## [v2.0.5] - 2026-08-04
+
+### Added
+- **Ported 25 features from AgentScope Python**, including:
+  - **5 workspace backends**: Kubernetes (`workspace/k8s.go`), OpenSandbox,
+    Daytona, Apple Container, Bubblewrap
+  - **Gemini TTS** (`tts/gemini.go`): text-to-speech via the Gemini
+    generateContent API with audio response modality; default model
+    `gemini-2.5-flash-preview-tts`
+  - **Document parsers** (`rag/parser/`): Parser interface with 5
+    implementations — `TextParser`, `PDFParser`, `WordParser`, `ExcelParser`,
+    `PPTParser` — all producing `rag.Document` slices with configurable text
+    chunking and overlap
+  - **Multi-tenant RBAC** (`access/`): four permission levels
+    (`none`/`read`/`write`/`admin`) across four resource kinds
+    (`credential`/`agent`/`knowledge_base`/`session`); principals can be
+    users, groups, or organizations; pluggable `Store` interface
+  - **Component Hub** (`hub/`): `Hub` interface for browsing, searching, and
+    installing MCP tools and skills from remote registries; `MCPHub`,
+    `SkillHub` adapters; multi-hub `Registry` for unified search
+  - **More retrieval and storage backends**: Elasticsearch, Milvus, and
+    MongoDB indexes (`rag/`); SQL storage backend (`storage/sql.go`);
+    cursor-based pagination for `list_messages`
+  - **Model cards**: Kimi K3 (256K context, 64K output, vision + video +
+    thinking), qwen3.7-plus (131K context, thinking), GLM-5.2 (131K context)
+  - **`OnCheckPermission` middleware hook**: wraps the permission check before
+    tool execution; enables custom authorization, audit logging, or dynamic
+    permission policies (middleware hook count 6 → 7)
+- **Six Go-native capabilities**:
+  - **Deterministic Replay** (`replay/`): record/replay middleware capturing
+    model-call request/response pairs into JSON tapes; replay without calling
+    the LLM for offline CI/CD testing
+  - **Hot-reload Config** (`hotreload/`): polling-based file watcher with
+    generic `Reloader[T]` and atomic pointer swap; JSON/YAML/TOML parsers
+  - **WASM Sandbox** (`wasm/`): execute WebAssembly modules with strict
+    resource limits (memory, time, instruction count/fuel); auto-discovers
+    `wasmtime`, `wasmer`, or `wasm3` CLI runtimes
+  - **gRPC-style TCP A2A transport** (`a2a/grpc/`): bidirectional
+    agent-to-agent communication over newline-delimited JSON on TCP; `Server`
+    + `Client` with streaming support
+  - **Agent Load Testing** (`bench/`): scenario-based benchmarking with
+    configurable concurrency, duration, and ramp-up; throughput, latency
+    percentiles (p50/p95/p99), and error breakdowns
+  - **Generic Pool with backpressure**: bounded queue (`ErrPoolFull`) and
+    atomic `PoolStats`, building on the fan-out `AgentPool` introduced in
+    v2.0.4
+
+## [v2.0.4] - 2026-07-13
+
+### Added
+- **v3 production infrastructure layer**: `protocol`, `loop`, `runtime`,
+  `metrics`, `tracing`, `sandbox`, `platform` packages; universal agent loop
+  with state machine and event streaming
+- **Coding agent infrastructure**: fan-out `AgentPool`, `agenttest` mock-model
+  harness, project/settings config, MCP stdio server, CostTracker + metrics
+  middleware, prompt composer/providers, resilience primitives (circuit
+  breaker, rate limiter, model wrapper)
+- **6 new built-in tools (15 total)**: MultiEdit, ApplyPatch, WebFetch, Spawn,
+  LSP, Notebook
+- **Tool backend routing**: read/write/edit tools route through a configured
+  workspace backend (`tool.WithBackend`), closing sandbox isolation for file
+  tools
+- **AgentManager** for subagent lifecycle; **SkillManager**; Windows safety
+  checks; `InMemoryProvider`
+- **Anthropic prompt caching** (opt-in) + prompt-cache token accounting in
+  loop events and budget
+- **JSON-Schema tool input validation**
+- **Prometheus metrics provider** + optional `/metrics` endpoint
+- **OpenAI TTS** (`tts/openai.go`): OpenAI Audio Speech API
+  (`/v1/audio/speech`) with streaming support
+- **Streaming error propagation**: `ChatResponse` carries `Error` and
+  `StopReason`
+- **Production hardening (first pass)**: WebFetch SSRF guard (blocks
+  loopback/private/link-local incl. cloud metadata), MCP subprocess env
+  isolation, per-tool timeout + result cap, opt-in workspace-root jail for
+  file tools, token and duration budgets on the loop path, atomic file writes,
+  HTTP server hardening (`ReadHeaderTimeout`/`IdleTimeout`/body caps) +
+  `/healthz` + `/readyz` + graceful shutdown, credential redaction in URLs and
+  logs, OTEL span attributes and per-label metrics, fuzz targets + coverage
+  step in CI
+- Gemini schema sanitizer (const→enum, removes `$ref`/`$schema`/
+  `additionalProperties`), JSON repair utility for truncated tool-call inputs,
+  Ollama formatter `tool_name` field, Gemini synthetic tool-call ID generation
+- STABILITY.md documenting versioning and stability tiers
+
+### Changed
+- **BREAKING**: module path migrated to `/v2` — import
+  `github.com/alanfokco/agentscope-go/v2/pkg/agentscope/...` (the repository has
+  since moved to `github.com/agentscope-ai/agentscope-go`; see `[v2.0.11]` →
+  "Changed — repository and module path move")
+- Deprecated `ReActAgent`; examples migrated to `UnifiedAgent`
+
+### Fixed
+- OpenAI-compatible API: use `max_completion_tokens` instead of the deprecated
+  `max_tokens` wire field
+- Anthropic formatter: drop empty text/thinking blocks (fixes 400 responses)
+- Gemini formatter: drop empty text/thinking blocks (fixes 400 responses)
+- Event-forwarder goroutine leaks and torn reads in managers/schedulers
+- Kept HITL/external tools off the concurrent batch path
+- 10 code-review fixes (middleware bypass, HITL backfill, safety regex, races,
+  panics)
+- Credential leakage via URLs and logs
+
+### Security
+- Closed the bash read-only classification bypass (write redirects are no
+  longer auto-allowed) plus 8 further hardening fixes
+- Removed `curl`/`wget` from the read-only bash allowlist
+
+## [v2.0.3] - 2026-06-25
+
+### Added
+- 9 model provider adapters (OpenAI, Anthropic, DashScope, DeepSeek, Gemini,
+  Ollama, Moonshot, xAI, OpenAI Responses API)
+- 54 bundled model cards with context sizes, capabilities, and status
+- UnifiedAgent (v2) with native API-level tool calling and streaming
+- ReActAgent (v1) with text-based tool calling protocol
+- 9 built-in tools: Bash, Read, Write, Edit, Glob, Grep, ResetTools,
+  TaskCreate/Get/List/Update, Schedule (Create/Delete/List/View)
+- Bash safety analysis with AST-level injection detection
+- 6-hook middleware system (OnReply, OnReasoning, OnModelCall, OnActing,
+  OnSystemPrompt, OnCompressContext)
+- Per-tool middleware support
+- Built-in middleware: TracingMiddleware, TTSMiddleware,
+  ReplyBudgetControlMiddleware, LongTermMemoryMiddleware
+- Permission engine with 5 modes (Default, AcceptEdits, Explore, Bypass,
+  DontAsk)
+- MCP client (Stdio + HTTP JSON-RPC) with MCPTool adapter. There has never been
+  an SSE/streamable-HTTP transport; an earlier revision of this line claimed one
+- A2A (Agent-to-Agent) HTTP protocol
+- Agent Teams with Leader/Worker coordination tools
+- Pipeline with Then/If combinators + MsgHub for multi-agent routing
+- Embedding models (OpenAI, DashScope, Gemini, Ollama) with batch processing
+  and caching
+- RAG with InMemoryIndex and Qdrant vector store
+- TTS (DashScope standard + CosyVoice realtime)
+- Audio caption streaming (PCM to WAV) for OpenAI/DashScope omni models
+- Context compression with structured summaries and tool result truncation
+- Workspace sandboxing (Local, Docker, E2B)
+- HTTP Agent Service with REST + SSE streaming + AG-UI protocol
+- InMemory + File + Redis storage backends
+- InMemory + Redis message bus with registry operations
+- Scheduled task execution (one-shot and recurring)
+- Configurable ID factory (GenerateID/SetIDFactory)
+- ClientOptions for all model providers (Timeout, DefaultHeaders, Transport)
+- mem0 REST API memory store adapter
+- SubagentHitlProjector with durable storage and 5 event types
+- 25 examples covering all major features

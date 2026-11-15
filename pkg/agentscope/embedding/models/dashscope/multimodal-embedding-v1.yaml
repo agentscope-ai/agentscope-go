@@ -1,0 +1,5 @@
+name: multimodal-embedding-v1
+label: Multimodal Embedding v1
+status: active
+dimensions: 1024
+max_tokens: 512

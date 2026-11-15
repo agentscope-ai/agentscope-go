@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: ["*"]
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go: ['1.25']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: Build
+        run: |
+          go build ./...
+          go build ./examples/...
+
+      - name: Module tidiness
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+      - name: Coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.go == '1.25'
+        env:
+          # Statement-coverage floor for the library (./pkg/...). Ratchet only:
+          # raise it in the same PR that raises coverage, never lower it.
+          # Keep in sync with `make cover-check` and AGENTS.md.
+          COVERAGE_MIN: '68.6'
+        run: |
+          # Two runs on purpose: coverage is attributed per tested package, so
+          # the ./pkg/... gate needs its own run; reusing the ./... profile or
+          # -coverpkg would measure a different (cross-package) metric.
+          # Dump the log on failure: with stdout discarded a failing package
+          # exited 1 silently, so the failure could not be diagnosed.
+          go test -coverprofile=coverage.out ./... > coverage-test.log 2>&1 || { cat coverage-test.log; exit 1; }
+          printf "total ./...     : "; go tool cover -func=coverage.out | tail -1
+          go test -coverprofile=coverage-pkg.out ./pkg/...
+          total=$(go tool cover -func=coverage-pkg.out | tail -1 | awk '{print $NF}' | tr -d '%')
+          echo "total ./pkg/... : ${total}% (floor ${COVERAGE_MIN}%)"
+          awk -v t="$total" -v min="$COVERAGE_MIN" 'BEGIN { if (t+0 < min+0) { print "ERROR: coverage below floor"; exit 1 } }'
+
+      - name: Upload coverage profiles
+        if: always() && matrix.os == 'ubuntu-latest' && matrix.go == '1.25'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-ubuntu-go1.25
+          path: |
+            coverage.out
+            coverage-pkg.out
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Fuzz smoke (safety parsers)
+        if: matrix.os == 'ubuntu-latest' && matrix.go == '1.25'
+        # Count budgets avoid Go 1.25's timed-fuzz cancellation race:
+        # https://github.com/golang/go/issues/75804
+        # A stalled run still fails this independent step timeout.
+        timeout-minutes: 10
+        run: |
+          go test -run=x -fuzz='FuzzBashSafety$' -fuzztime=1000000x ./pkg/agentscope/tool/
+          go test -run=x -fuzz='FuzzUnmarshalContentBlocks$' -fuzztime=5000000x ./pkg/agentscope/message/
+
+      - name: Benchmark
+        if: matrix.os == 'ubuntu-latest' && matrix.go == '1.25'
+        run: go test -bench=. -benchmem ./pkg/agentscope/loop/
+
+  cross-arch:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [arm64, arm, mips64le, riscv64]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cross-compile (linux/${{ matrix.arch }})
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          go build ./...
+          go build ./examples/...
+
+      - name: Check edge binary size
+        if: matrix.arch == 'arm64'
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: arm64
+        run: |
+          go build -ldflags="-s -w" -o /tmp/edge-agent ./examples/edge_offline/
+          SIZE=$(stat --format=%s /tmp/edge-agent)
+          echo "Binary size: $SIZE bytes ($(( SIZE / 1024 / 1024 ))MB)"
+          if [ "$SIZE" -gt 18874368 ]; then
+            echo "ERROR: Binary exceeds 18MB limit"
+            exit 1
+          fi
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Prebuilt binary via the official action: building golangci-lint from
+      # source needs Go 1.26 while this job tests the Go 1.25 module, and
+      # setup-go v7 pins GOTOOLCHAIN=local, which blocks toolchain switching.
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.14.0

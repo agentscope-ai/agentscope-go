@@ -1,0 +1,9 @@
+name: gemini-2.5-flash-preview-tts
+label: Gemini 2.5 Flash TTS
+status: preview
+voices:
+  - Kore
+  - Charon
+  - Fenrir
+  - Aoede
+  - Puck

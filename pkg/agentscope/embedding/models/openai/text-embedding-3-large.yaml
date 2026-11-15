@@ -1,0 +1,5 @@
+name: text-embedding-3-large
+label: Text Embedding 3 Large
+status: active
+dimensions: 3072
+max_tokens: 8191

@@ -1,0 +1,45 @@
+[
+  {
+    "index": 0,
+    "agent_name": "golden-compress",
+    "model_name": "",
+    "reply_id": "golden-reply",
+    "messages": [
+      {
+        "content": [
+          {
+            "id": "id-2",
+            "text": "You are helpful.",
+            "type": "text"
+          }
+        ],
+        "id": "id-1",
+        "name": "golden-compress",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "id": "id-4",
+            "text": "[Previous context summary]: \u003csystem-info\u003eHere is a summary of your previous work\n# Task Overview\nt\n\n# Current State\ns\n\n# Important Discoveries\nd\n\n# Next Steps\nn\n\n# Context to Preserve\nc\u003c/system-info\u003e",
+            "type": "text"
+          }
+        ],
+        "id": "id-3",
+        "name": "golden-compress",
+        "role": "user"
+      }
+    ],
+    "response": {
+      "content": [
+        {
+          "id": "",
+          "text": "after compress",
+          "type": "text"
+        }
+      ],
+      "id": "",
+      "is_last": true
+    }
+  }
+]

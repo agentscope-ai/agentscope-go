@@ -1,0 +1,8 @@
+name: qwen3-tts-flash
+label: Qwen3 TTS Flash
+status: active
+sample_rate: 24000
+output_format: pcm
+languages:
+  - zh
+  - en

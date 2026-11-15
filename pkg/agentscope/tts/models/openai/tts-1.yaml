@@ -1,0 +1,13 @@
+name: tts-1
+label: TTS-1
+status: active
+sample_rate: 24000
+output_format: mp3
+languages:
+  - en
+  - zh
+  - ja
+  - ko
+  - fr
+  - de
+  - es

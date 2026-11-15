@@ -1,0 +1,145 @@
+[
+  {
+    "index": 0,
+    "agent_name": "golden-hitl",
+    "model_name": "",
+    "reply_id": "golden-reply",
+    "messages": [
+      {
+        "content": [
+          {
+            "id": "id-2",
+            "text": "You are helpful.",
+            "type": "text"
+          }
+        ],
+        "id": "id-1",
+        "name": "golden-hitl",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "id": "id-4",
+            "text": "use the tool",
+            "type": "text"
+          }
+        ],
+        "id": "id-3",
+        "name": "golden-hitl",
+        "role": "user"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "echo_a",
+          "description": "echoes input",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "response": {
+      "content": [
+        {
+          "id": "tc_h",
+          "input": "{\"x\":\"h\"}",
+          "name": "echo_a",
+          "state": "pending",
+          "type": "tool_call"
+        }
+      ],
+      "id": "",
+      "is_last": true
+    }
+  },
+  {
+    "index": 1,
+    "agent_name": "golden-hitl",
+    "model_name": "",
+    "reply_id": "golden-reply",
+    "messages": [
+      {
+        "content": [
+          {
+            "id": "id-2",
+            "text": "You are helpful.",
+            "type": "text"
+          }
+        ],
+        "id": "id-1",
+        "name": "golden-hitl",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "id": "id-4",
+            "text": "use the tool",
+            "type": "text"
+          }
+        ],
+        "id": "id-3",
+        "name": "golden-hitl",
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "id": "tc_h",
+            "input": "{\"x\":\"h\"}",
+            "name": "echo_a",
+            "state": "finished",
+            "type": "tool_call"
+          },
+          {
+            "id": "tc_h",
+            "name": "echo_a",
+            "output": "echo:echo_a",
+            "state": "success",
+            "type": "tool_result"
+          }
+        ],
+        "id": "id-5",
+        "name": "golden-hitl",
+        "role": "assistant"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "echo_a",
+          "description": "echoes input",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "response": {
+      "content": [
+        {
+          "id": "",
+          "text": "hitl done",
+          "type": "text"
+        }
+      ],
+      "id": "",
+      "is_last": true
+    }
+  }
+]

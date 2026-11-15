@@ -1,0 +1,9 @@
+type: embedding_model
+name: gemini-embedding-001
+label: Gemini Embedding 001
+status: active
+input_types:
+  - text/plain
+output_types:
+  - application/x-embedding
+context_size: 2048

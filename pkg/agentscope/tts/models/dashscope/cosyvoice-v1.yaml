@@ -1,0 +1,8 @@
+name: cosyvoice-v1
+label: CosyVoice v1
+status: active
+sample_rate: 22050
+output_format: pcm
+languages:
+  - zh
+  - en

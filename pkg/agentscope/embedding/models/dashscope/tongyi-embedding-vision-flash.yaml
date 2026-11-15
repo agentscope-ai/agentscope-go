@@ -1,0 +1,5 @@
+name: tongyi-embedding-vision-flash
+label: Tongyi Embedding Vision Flash
+status: active
+dimensions: 768
+max_tokens: 1024

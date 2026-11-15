@@ -1,0 +1,5 @@
+name: text-embedding-v3
+label: Text Embedding v3
+status: active
+dimensions: 1024
+max_tokens: 8192
