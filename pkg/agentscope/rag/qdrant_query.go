@@ -29,6 +29,10 @@ func (i *QdrantIndex) queryVector(ctx context.Context, vector []float32, topK in
 	if topK <= 0 {
 		topK = 10
 	}
+	scoreSign, err := i.collectionScoreSign(ctx)
+	if err != nil {
+		return nil, err
+	}
 	limit := uint64(topK)
 	points, err := i.client.Query(ctx, &qdrant.QueryPoints{CollectionName: i.collection, Query: qdrant.NewQuery(vector...), Limit: &limit, Filter: filter, WithPayload: qdrant.NewWithPayload(true)})
 	if err != nil {
@@ -40,11 +44,37 @@ func (i *QdrantIndex) queryVector(ctx context.Context, vector []float32, topK in
 		for k, v := range p.Payload {
 			meta[k] = v
 		}
-		doc := Document{ID: p.GetId().GetUuid(), Meta: meta, Score: float64(p.GetScore())}
+		doc := Document{ID: p.GetId().GetUuid(), Meta: meta, Score: scoreSign * float64(p.GetScore())}
 		if value := p.Payload["content"]; value != nil {
 			doc.Content = value.GetStringValue()
 		}
 		out = append(out, doc)
 	}
 	return out, nil
+}
+
+// collectionScoreSign makes scores higher-is-better for the unnamed dense
+// vector used by queryVector. Read the collection with each query so the score
+// reflects the server's configuration.
+func (i *QdrantIndex) collectionScoreSign(ctx context.Context) (float64, error) {
+	info, err := i.client.GetCollectionInfo(ctx, i.collection)
+	if err != nil {
+		return 0, fmt.Errorf("qdrant: get collection %q: %w", i.collection, err)
+	}
+	vectors := info.GetConfig().GetParams().GetVectorsConfig()
+	params := vectors.GetParams()
+	if params == nil {
+		params = vectors.GetParamsMap().GetMap()[""]
+	}
+	if params == nil {
+		return 0, fmt.Errorf("qdrant: collection %q has no unnamed dense vector", i.collection)
+	}
+	switch metric := params.GetDistance(); metric {
+	case qdrant.Distance_Euclid, qdrant.Distance_Manhattan:
+		return -1, nil
+	case qdrant.Distance_Cosine, qdrant.Distance_Dot:
+		return 1, nil
+	default:
+		return 0, fmt.Errorf("qdrant: collection %q has unsupported distance metric %v", i.collection, metric)
+	}
 }

@@ -81,10 +81,17 @@ func (p *WordParser) Parse(_ context.Context, r io.Reader, filename string) ([]r
 	return docs, nil
 }
 
-// extractDocxText parses the XML and extracts text from <w:t> elements,
-// inserting newlines at paragraph boundaries (<w:p>).
+// extractDocxText preserves text, tabs and breaks in runs, and separates paragraphs.
 func extractDocxText(r io.Reader) (string, error) {
+	const (
+		transitionalNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+		strictNS       = "http://purl.oclc.org/ooxml/wordprocessingml/main"
+	)
+	isWordNamespace := func(space string) bool {
+		return space == transitionalNS || space == strictNS
+	}
 	var sb strings.Builder
+	var elements []xml.Name
 	decoder := xml.NewDecoder(r)
 	inParagraph := false
 	paragraphHasText := false
@@ -100,18 +107,36 @@ func extractDocxText(r io.Reader) (string, error) {
 
 		switch t := tok.(type) {
 		case xml.StartElement:
-			// w:p marks a paragraph boundary
-			if t.Name.Local == "p" && t.Name.Space == "http://schemas.openxmlformats.org/wordprocessingml/2006/main" {
-				if inParagraph && paragraphHasText {
-					sb.WriteString("\n")
+			if isWordNamespace(t.Name.Space) {
+				switch t.Name.Local {
+				case "p":
+					if inParagraph && paragraphHasText {
+						sb.WriteByte('\n')
+					}
+					inParagraph = true
+					paragraphHasText = false
+				case "tab", "br":
+					// A tab stop under paragraph properties is not run content.
+					if len(elements) > 0 && elements[len(elements)-1] == (xml.Name{Space: t.Name.Space, Local: "r"}) {
+						if t.Name.Local == "tab" {
+							sb.WriteByte('\t')
+						} else {
+							sb.WriteByte('\n')
+						}
+						paragraphHasText = true
+					}
 				}
-				inParagraph = true
-				paragraphHasText = false
 			}
+			elements = append(elements, t.Name)
+		case xml.EndElement:
+			elements = elements[:len(elements)-1]
 		case xml.CharData:
-			text := strings.TrimSpace(string(t))
-			if text != "" {
-				sb.WriteString(string(t))
+			if len(elements) < 2 {
+				continue
+			}
+			name, parent := elements[len(elements)-1], elements[len(elements)-2]
+			if name.Local == "t" && isWordNamespace(name.Space) && parent == (xml.Name{Space: name.Space, Local: "r"}) {
+				sb.Write(t)
 				paragraphHasText = true
 			}
 		}

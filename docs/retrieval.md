@@ -6,6 +6,14 @@ precomputed vector. Existing `QdrantTextIndex.Query` calls remain valid and use 
 caller filter. The low-level `QdrantIndex.Query` cannot embed text and returns an
 error directing the caller to `QueryVector`.
 
+## Qdrant query requirements
+
+Vector and text queries read collection metadata before searching to determine
+the metric of the unnamed dense vector. Each query makes one extra RPC, so the
+query credentials must also allow reading the collection configuration. A
+failed metadata request or a collection without an unnamed dense vector
+returns an error.
+
 ## Typed metadata conditions
 
 A `MetadataFilter` is an AND list of conditions constructed with:

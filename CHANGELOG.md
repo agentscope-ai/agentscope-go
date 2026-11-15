@@ -11,6 +11,14 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — RAG retrieval and parsing
+
+- In-memory retrieval rejects non-positive `topK`. The text parser drops a
+  leading UTF-8 BOM, and the Word parser extracts WordprocessingML run text
+  with its tabs and breaks.
+- Qdrant queries use the collection's vector metric so larger document
+  scores consistently represent greater relevance.
+
 ### Added — Main Thread coordinator (experimental)
 
 - New experimental package `thread`, as proposed in
