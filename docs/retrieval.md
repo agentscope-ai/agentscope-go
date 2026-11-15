@@ -12,7 +12,8 @@ Vector and text queries read collection metadata before searching to determine
 the metric of the unnamed dense vector. Each query makes one extra RPC, so the
 query credentials must also allow reading the collection configuration. A
 failed metadata request or a collection without an unnamed dense vector
-returns an error.
+returns an error. Queries also return an error if the unnamed dense vector
+uses an unsupported distance metric.
 
 ## Typed metadata conditions
 
