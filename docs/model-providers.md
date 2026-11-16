@@ -33,6 +33,15 @@ cm, _ := model.NewOpenAIChatModel(model.OpenAIConfig{
 
 Models: `gpt-4o`, `gpt-4o-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`, `gpt-5.4`, `gpt-5.5`, `gpt-audio-mini`, `o3`, `o4-mini`
 
+Both `Chat` and `ChatStream` return message-formatting errors before sending
+an HTTP request. Unsupported input such as base64 `audio/ogg`, or an error
+from `OpenAIConfig.Formatter`, no longer silently converts the entire history
+to plain text. Wrapped errors preserve the original cause for `errors.Is`.
+The same policy applies to DashScope, DeepSeek, Moonshot, OpenAI-compatible
+Ollama, xAI and Volcengine, which share the conversion helper. Correct or
+remove the unsupported input before retrying; the adapters do not rewrite
+stored history on a formatting failure.
+
 Buffered Chat Completions responses now retain the normalized `StopReason`
 (unreleased O1 fix), matching the existing streaming path. For example,
 `finish_reason: "length"` becomes `model.StopReasonLength`; stop, tool calls,
@@ -73,6 +82,16 @@ are skipped. A turn with no replayable content keeps the existing
 content-omitted placeholder. Tool-result image conversion is unchanged.
 These request shapes are tested with local HTTP fixtures, not live vision
 calls.
+
+To select a specific function from the supplied tools, use
+`model.WithToolChoice(&model.ToolChoice{Mode: "get_weather"})`. Both `Chat`
+and `ChatStream` encode this as
+`{"type":"function","name":"get_weather"}` in `tool_choice`, keeping
+all supplied tool definitions. The `auto`, `none` and `required` modes stay
+strings; an unset tool choice stays omitted. This fix does not add tool-name
+validation or support for `ToolChoice.Tools` filtering to the Responses
+adapter. Request serialization is covered by local HTTP fixtures; live
+provider behavior has not been tested.
 
 A response whose `status` is not `completed` (for example `incomplete` at
 `max_output_tokens`, or `failed`) keeps its content, ID and usage and reports

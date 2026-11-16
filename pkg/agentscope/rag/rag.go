@@ -47,8 +47,12 @@ func (i *InMemoryIndex) AddDocuments(_ context.Context, docs []Document) error {
 // Query currently just returns the first topK documents and does not compute
 // similarity; Document.Score stays 0 (no embeddings are stored here). Use a
 // text index (e.g. QdrantTextIndex) or a Reranker when scores matter.
+// topK must be positive.
 func (i *InMemoryIndex) Query(_ context.Context, _ string, topK int) ([]Document, error) {
-	if topK <= 0 || topK > len(i.docs) {
+	if topK <= 0 {
+		return nil, fmt.Errorf("rag: topK must be positive, got %d", topK)
+	}
+	if topK > len(i.docs) {
 		topK = len(i.docs)
 	}
 	out := make([]Document, topK)

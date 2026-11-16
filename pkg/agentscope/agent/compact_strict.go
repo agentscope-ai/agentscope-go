@@ -178,7 +178,7 @@ func (a *UnifiedAgent) compactStrictImpl(ctx context.Context, cfg *ContextConfig
 		return errors.New("agent: strict compaction: the summary is empty")
 	}
 	if budget := a.ownSummaryBudget(cfg, ctxSize); budget > 0 {
-		if truncated, did := TruncateToolResult(newSummary, budget); did {
+		if truncated, did := truncateSummary(newSummary, budget); did {
 			newSummary = truncated
 		}
 	}

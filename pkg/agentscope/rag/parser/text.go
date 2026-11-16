@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/rag"
 )
@@ -30,7 +31,7 @@ func (p *TextParser) Parse(_ context.Context, r io.Reader, filename string) ([]r
 		return nil, fmt.Errorf("text parser: read failed: %w", err)
 	}
 
-	text := string(data)
+	text := strings.TrimPrefix(string(data), "\uFEFF")
 	if len(text) == 0 {
 		return nil, nil
 	}

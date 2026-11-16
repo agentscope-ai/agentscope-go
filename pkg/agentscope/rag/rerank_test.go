@@ -64,22 +64,21 @@ func (r *errorReranker) Rerank(_ context.Context, _ string, _ []Document, _ int)
 	return nil, fmt.Errorf("reranker failed")
 }
 
-func TestRerankedIndex_TopKZero(t *testing.T) {
+func TestRerankedIndexPropagatesInMemoryTopKError(t *testing.T) {
 	ctx := context.Background()
 	base := NewInMemoryIndex()
-	_ = base.AddDocuments(ctx, []Document{
+	if err := base.AddDocuments(ctx, []Document{
 		{ID: "1", Content: "hello"},
 		{ID: "2", Content: "world"},
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	idx := NewRerankedIndex(base, &substringReranker{}, 0)
 	results, err := idx.Query(ctx, "hello", 0)
-	if err != nil {
-		t.Fatalf("Query with topK=0: %v", err)
+	if err == nil || results != nil {
+		t.Fatalf("Query with topK=0: results=%v err=%v, want base index error", results, err)
 	}
-	// topK=0 → base.Query returns all docs, reranker returns all.
-	// Should not panic.
-	_ = results
 }
 
 func TestRerankedIndex_FewCandidates(t *testing.T) {

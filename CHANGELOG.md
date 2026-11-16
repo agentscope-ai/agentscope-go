@@ -161,6 +161,18 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   offer, the one new field that does not raise the version (the trigger then
   compresses synchronously).
 
+### Fixed — embedding cache endpoint isolation
+
+- Scope OpenAI-compatible and Gemini cache keys to their endpoint and adapter
+  family so a shared cache cannot return a different endpoint's vectors. Entries
+  written with old keys are repopulated on demand.
+
+### Fixed — Chat Completions formatter errors
+
+- Return formatter errors before HTTP dispatch in buffered and streamed
+  OpenAI-compatible calls, preserving the cause instead of flattening the
+  entire history to plain text. Part of #125 (O4).
+
 ### Fixed — Responses image and hint input
 
 - Preserve direct URL/base64 images and hints in buffered and streamed
@@ -179,6 +191,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   keep the plain `tool_result` shape. Local fixtures cover the formatter and
   both call paths; no live API result is claimed. Part of #138.
 
+### Fixed — Responses named tool choice
+
+- Encode a named tool choice as a function object in buffered and streamed
+  Responses requests instead of sending the tool name as an invalid string.
+  Part of #125 (O5).
+
 ### Fixed — Anthropic tool-result history
 
 - Split merged assistant/tool-result history into Anthropic assistant/user
@@ -188,11 +206,26 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   messages per input. Local fixtures cover both call paths; no live API result
   is claimed. Part of #125.
 
+### Fixed — Gemini tool error results
+
+- The Gemini formatter and model request converter send `ToolResultError`
+  details under `functionResponse.response.error`. Other states retain the
+  existing `result` key for compatibility. Tool names, output conversion and
+  stored history are unchanged. This follows the error mapping in
+  [Python #3947](https://github.com/agentscope-ai/agentscope/pull/3947), while
+  deliberately retaining Go's existing success key instead of Python's `output`.
+
 ### Fixed — Anthropic thinking history
 
 - Preserve redacted thinking data in buffered and streamed responses and retain
   empty thinking blocks carrying signatures when formatting follow-up history.
   Existing message types and serialization are unchanged. Part of #125 (A2).
+
+### Fixed — tool text truncation
+
+- Tool text uses a more conservative estimate for non-ASCII content. The
+  retained head and tail, truncation marker, and any offload reference share
+  the same estimated budget.
 
 ### Fixed — buffered Chat Completions stop reasons
 
@@ -210,12 +243,25 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   1024 tokens; explicit per-call output ceilings remain hard limits. Other
   thinking modes and MiniMax policy are unchanged. Part of #125 (A4).
 
+### Fixed — JSON session write failures
+
+- A failed JSON session `Set` or `Delete` preserves the previous entries in
+  the open session, so later writes can continue from the saved state.
+
 ### Fixed — explicit Messages tool-choice none
 
 - Anthropic and MiniMax Messages requests now retain an explicit
   `tool_choice: {"type":"none"}` when tools are supplied, rather than silently
   falling back to the provider default. Unset choice and no-tools behavior are
   unchanged. Part of #125 (A3).
+
+### Fixed — RAG retrieval and parsing
+
+- In-memory retrieval rejects non-positive `topK`. The text parser drops a
+  leading UTF-8 BOM, and the Word parser extracts WordprocessingML run text
+  with its tabs and breaks.
+- Qdrant queries use the collection's vector metric so larger document
+  scores consistently represent greater relevance.
 
 ### Fixed — summary over an empty fork snapshot
 

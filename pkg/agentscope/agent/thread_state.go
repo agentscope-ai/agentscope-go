@@ -643,7 +643,7 @@ func (a *UnifiedAgent) boundOwnSummaryLocked() {
 	if share <= 0 {
 		return
 	}
-	if text, did := TruncateToolResult(a.state.Summary, share); did {
+	if text, did := truncateSummary(a.state.Summary, share); did {
 		a.state.Summary = text
 		logrus.WithFields(logrus.Fields{"agent": a.name, "budget": share}).
 			Warn("own summary exceeded its share next to the peer summary; middle-elided")
