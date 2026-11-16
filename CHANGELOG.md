@@ -145,6 +145,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   offer, the one new field that does not raise the version (the trigger then
   compresses synchronously).
 
+### Fixed — knowledge base query limits
+
+- `SimpleKnowledgeBase.Query` rejects non-positive `topK` before calling
+  the underlying index, regardless of the backend.
+
 ### Fixed — in-memory message bus replay
 
 - Replay reads return independent payload bytes, so changing a returned entry

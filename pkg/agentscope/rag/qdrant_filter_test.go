@@ -106,6 +106,26 @@ func TestQdrantFilterWireAndHostConstraint(t *testing.T) {
 		t.Fatalf("legacy query lost host constraint: %v", req)
 	}
 }
+func TestSimpleKnowledgeBaseRejectsInvalidTopKBeforeQdrantEmbedding(t *testing.T) {
+	client, _ := newFilterClient(t)
+	embedder := &filterEmbedder{}
+	idx, err := NewQdrantTextIndex(QdrantTextConfig{Client: client, Collection: "test", Embedder: embedder})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kb := NewSimpleKnowledgeBase("kb", idx)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	for _, topK := range []int{0, -1} {
+		if docs, err := kb.Query(ctx, "query", topK); err == nil || docs != nil {
+			t.Errorf("topK=%d: docs=%v err=%v; want an error and no documents", topK, docs, err)
+		}
+	}
+	if embedder.calls != 0 {
+		t.Fatalf("invalid topK caused %d embedding calls", embedder.calls)
+	}
+}
+
 func TestQdrantRejectsInvalidFiltersBeforeEmbedding(t *testing.T) {
 	client, _ := newFilterClient(t)
 	embed := &filterEmbedder{}

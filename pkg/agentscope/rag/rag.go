@@ -1,6 +1,9 @@
 package rag
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 // Document represents a retrievable document.
 type Document struct {
@@ -76,6 +79,10 @@ func NewSimpleKnowledgeBase(name string, idx Index) *SimpleKnowledgeBase {
 
 func (k *SimpleKnowledgeBase) Name() string { return k.name }
 
+// Query delegates to the underlying index. topK must be positive.
 func (k *SimpleKnowledgeBase) Query(ctx context.Context, query string, topK int) ([]Document, error) {
+	if topK <= 0 {
+		return nil, fmt.Errorf("rag: topK must be positive, got %d", topK)
+	}
 	return k.idx.Query(ctx, query, topK)
 }
