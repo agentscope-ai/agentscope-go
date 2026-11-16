@@ -220,6 +220,33 @@ func (m *openaiResponseModel) formatInputItems(msg *message.Msg) []map[string]an
 				"type": "input_text",
 				"text": blk.Text,
 			})
+		case message.DataBlock:
+			if part := responsesInputImage(blk); part != nil {
+				content = append(content, part)
+			}
+		case message.HintBlock:
+			// Hints are user input, including when attached to an assistant
+			// turn. Keep their position between the surrounding segments.
+			flushContent()
+			switch hint := blk.Hint.(type) {
+			case string:
+				items = append(items, map[string]any{"role": "user", "content": hint})
+			case []message.ContentBlock:
+				var parts []map[string]any
+				for _, sub := range hint {
+					switch h := sub.(type) {
+					case message.TextBlock:
+						parts = append(parts, map[string]any{"type": "input_text", "text": h.Text})
+					case message.DataBlock:
+						if part := responsesInputImage(h); part != nil {
+							parts = append(parts, part)
+						}
+					}
+				}
+				if len(parts) > 0 {
+					items = append(items, map[string]any{"role": "user", "content": parts})
+				}
+			}
 		case message.ToolCallBlock:
 			flushContent()
 			items = append(items, map[string]any{
@@ -241,7 +268,7 @@ func (m *openaiResponseModel) formatInputItems(msg *message.Msg) []map[string]an
 	flushContent()
 	if len(items) == 0 {
 		// Every block was of a type the Responses API cannot carry here
-		// (audio, a bare image on a role that has no content parts, ...).
+		// (audio, unsupported sources, ...).
 		// Emitting nothing would silently drop the turn from the
 		// conversation; the old one-item-per-message mapping produced
 		// {"role":...,"content":null} and the API rejected it loudly. Keep
@@ -252,6 +279,24 @@ func (m *openaiResponseModel) formatInputItems(msg *message.Msg) []map[string]an
 		}}
 	}
 	return items
+}
+
+// responsesInputImage preserves image sources without fetching or decoding them.
+// Other media keep the adapter's existing omission policy.
+func responsesInputImage(block message.DataBlock) map[string]any {
+	if !strings.HasPrefix(block.GetMediaType(), "image/") {
+		return nil
+	}
+	var url string
+	switch src := block.Source.(type) {
+	case message.URLSource:
+		url = src.URL
+	case message.Base64Source:
+		url = "data:" + src.MediaType + ";base64," + src.Data
+	default:
+		return nil
+	}
+	return map[string]any{"type": "input_image", "image_url": url}
 }
 
 // reasoningItemSummaryText extracts the concatenated summary_text of a raw
