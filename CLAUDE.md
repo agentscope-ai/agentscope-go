@@ -259,6 +259,10 @@ adapter support. Both paths filter empty text before joining or emitting it;
 nonempty whitespace remains content. Multi-agent formatting must associate each
 output with its original sender before filtering messages.
 
+Both Gemini tool-result conversion paths map `ToolResultError` to
+`functionResponse.response.error`; other states keep the existing `result` key.
+Output conversion and stored history remain unchanged.
+
 For provider work:
 
 - Reproduce protocol bugs at the outbound HTTP boundary with the real adapter.

@@ -206,6 +206,15 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   messages per input. Local fixtures cover both call paths; no live API result
   is claimed. Part of #125.
 
+### Fixed — Gemini tool error results
+
+- The Gemini formatter and model request converter send `ToolResultError`
+  details under `functionResponse.response.error`. Other states retain the
+  existing `result` key for compatibility. Tool names, output conversion and
+  stored history are unchanged. This follows the error mapping in
+  [Python #3947](https://github.com/agentscope-ai/agentscope/pull/3947), while
+  deliberately retaining Go's existing success key instead of Python's `output`.
+
 ### Fixed — Anthropic thinking history
 
 - Preserve redacted thinking data in buffered and streamed responses and retain

@@ -169,11 +169,15 @@ func (m *GeminiChatModel) buildRequest(msgs []*message.Msg, callOpts *CallOption
 		if len(toolResults) > 0 {
 			for _, tr := range toolResults {
 				trb := tr.(message.ToolResultBlock)
+				responseKey := "result"
+				if trb.State == message.ToolResultError {
+					responseKey = "error"
+				}
 				parts = append(parts, geminiPart{
 					FunctionResponse: &geminiFunctionResponse{
 						Name: trb.Name,
 						Response: map[string]any{
-							"result": formatter.ConvertToolResultToString(trb.Output),
+							responseKey: formatter.ConvertToolResultToString(trb.Output),
 						},
 					},
 				})
