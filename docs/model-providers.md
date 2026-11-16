@@ -83,6 +83,16 @@ content-omitted placeholder. Tool-result image conversion is unchanged.
 These request shapes are tested with local HTTP fixtures, not live vision
 calls.
 
+To select a specific function from the supplied tools, use
+`model.WithToolChoice(&model.ToolChoice{Mode: "get_weather"})`. Both `Chat`
+and `ChatStream` encode this as
+`{"type":"function","name":"get_weather"}` in `tool_choice`, keeping
+all supplied tool definitions. The `auto`, `none` and `required` modes stay
+strings; an unset tool choice stays omitted. This fix does not add tool-name
+validation or support for `ToolChoice.Tools` filtering to the Responses
+adapter. Request serialization is covered by local HTTP fixtures; live
+provider behavior has not been tested.
+
 A response whose `status` is not `completed` (for example `incomplete` at
 `max_output_tokens`, or `failed`) keeps its content, ID and usage and reports
 the status on `ChatResponse.Error`, from `Chat` and on the final `ChatStream`

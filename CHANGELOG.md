@@ -185,6 +185,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   keep the plain `tool_result` shape. Local fixtures cover the formatter and
   both call paths; no live API result is claimed. Part of #138.
 
+### Fixed — Responses named tool choice
+
+- Encode a named tool choice as a function object in buffered and streamed
+  Responses requests instead of sending the tool name as an invalid string.
+  Part of #125 (O5).
+
 ### Fixed — Anthropic tool-result history
 
 - Split merged assistant/tool-result history into Anthropic assistant/user
