@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -131,7 +132,11 @@ func (c *OpenAITextClient) Prepare(ctx context.Context, text string, outputToken
 		return nil, ErrTextInvalidRequest
 	}
 	msgs := []*message.Msg{message.UserMsg("user", text)}
-	body, err := json.Marshal(openAIChatRequest{Model: c.model.model, Messages: convertMessagesToOpenAI(msgs), MaxCompletionTokens: &outputTokens, ToolChoice: "none"})
+	messages, err := convertMessagesToOpenAI(msgs)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrTextInvalidRequest, err)
+	}
+	body, err := json.Marshal(openAIChatRequest{Model: c.model.model, Messages: messages, MaxCompletionTokens: &outputTokens, ToolChoice: "none"})
 	if err != nil || len(body) > maxRequestBytes {
 		return nil, ErrTextInvalidRequest
 	}

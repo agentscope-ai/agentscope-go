@@ -73,8 +73,13 @@ func (m *VolcengineChatModel) request(msgs []*message.Msg, stream bool, opts []C
 	if o.ThinkingBudget != nil && *o.ThinkingBudget > 0 {
 		return nil, fmt.Errorf("volcengine: thinking token budgets are unsupported; use WithThinking(enable, 0)")
 	}
+	messages, err := convertMessagesToOpenAI(msgs)
+	if err != nil {
+		return nil, fmt.Errorf("volcengine: %w", err)
+	}
+
 	r := &openAIChatRequest{
-		Model: m.model, Messages: convertMessagesToOpenAI(msgs), Stream: stream,
+		Model: m.model, Messages: messages, Stream: stream,
 		MaxTokens: o.MaxTokens, Tools: o.Tools, ReasoningEffort: o.ReasoningEffort,
 	}
 	if o.Temperature != nil {
@@ -122,7 +127,6 @@ func (m *VolcengineChatModel) Chat(ctx context.Context, msgs []*message.Msg, opt
 	if err != nil {
 		return nil, fmt.Errorf("volcengine: %w", err)
 	}
-	response.StopReason = normalizeStopReason(parsed.Choices[0].FinishReason)
 	return response, nil
 }
 

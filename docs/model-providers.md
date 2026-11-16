@@ -33,6 +33,15 @@ cm, _ := model.NewOpenAIChatModel(model.OpenAIConfig{
 
 Models: `gpt-4o`, `gpt-4o-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`, `gpt-5.4`, `gpt-5.5`, `gpt-audio-mini`, `o3`, `o4-mini`
 
+Both `Chat` and `ChatStream` return message-formatting errors before sending
+an HTTP request. Unsupported input such as base64 `audio/ogg`, or an error
+from `OpenAIConfig.Formatter`, no longer silently converts the entire history
+to plain text. Wrapped errors preserve the original cause for `errors.Is`.
+The same policy applies to DashScope, DeepSeek, Moonshot, OpenAI-compatible
+Ollama, xAI and Volcengine, which share the conversion helper. Correct or
+remove the unsupported input before retrying; the adapters do not rewrite
+stored history on a formatting failure.
+
 Buffered Chat Completions responses now retain the normalized `StopReason`
 (unreleased O1 fix), matching the existing streaming path. For example,
 `finish_reason: "length"` becomes `model.StopReasonLength`; stop, tool calls,
@@ -45,11 +54,10 @@ fork-summary and usage-aware structured-response truncation guards; tracing
 also receives the actual reason. Other consumers may still accept partial
 output unless they explicitly check for it.
 
-
 The shared parser serves OpenAI, DashScope, DeepSeek, Moonshot, the
-OpenAI-compatible Ollama adapter, xAI, and Volcengine. Volcengine already sets
-the field in its wrapper. Tests cover buffered/streamed agreement and retain
-provider-specific usage accounting. Responses API and native Ollama use
+OpenAI-compatible Ollama adapter, xAI, and Volcengine. Tests cover
+buffered/streamed agreement and retain provider-specific usage accounting.
+Responses API and native Ollama use
 separate implementations. These checks use local HTTP fixtures, not live
 provider calls. See the [OpenAI finish-reason reference](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create).
 
@@ -64,6 +72,16 @@ cm, _ := model.NewOpenAIResponseModel(&model.OpenAIResponseConfig{
 ```
 
 Uses the Responses API (`/v1/responses`) instead of Chat Completions. Default timeout is 5 minutes for long reasoning tasks.
+
+Both `Chat` and `ChatStream` preserve direct `DataBlock` images as
+`input_image` parts, using the original URL or a base64 data URL. A
+`HintBlock` becomes user input at its position in the history, including
+when attached to an assistant message; string hints and ordered text/image
+block lists are supported. Other media and unsupported hint block types
+are skipped. A turn with no replayable content keeps the existing
+content-omitted placeholder. Tool-result image conversion is unchanged.
+These request shapes are tested with local HTTP fixtures, not live vision
+calls.
 
 A response whose `status` is not `completed` (for example `incomplete` at
 `max_output_tokens`, or `failed`) keeps its content, ID and usage and reports

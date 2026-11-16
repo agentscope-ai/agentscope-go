@@ -21,7 +21,10 @@ func TestConvertMessagesToOpenAI_MultimodalNotStringified(t *testing.T) {
 		},
 	})
 
-	out := convertMessagesToOpenAI([]*message.Msg{msg})
+	out, err := convertMessagesToOpenAI([]*message.Msg{msg})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(out) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(out))
 	}
