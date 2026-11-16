@@ -27,6 +27,25 @@ func TestInMemoryIndexAddAndQuery(t *testing.T) {
 	}
 }
 
+func TestInMemoryIndexQueryRequiresPositiveTopK(t *testing.T) {
+	ctx := context.Background()
+	idx := NewInMemoryIndex()
+	if docs, err := idx.Query(ctx, "", 1); err != nil || len(docs) != 0 {
+		t.Fatalf("empty index: docs=%v err=%v", docs, err)
+	}
+	if err := idx.AddDocuments(ctx, []Document{{ID: "one"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, topK := range []int{0, -1} {
+		if docs, err := idx.Query(ctx, "", topK); err == nil || docs != nil {
+			t.Errorf("topK=%d: docs=%v err=%v, want error and no documents", topK, docs, err)
+		}
+	}
+	if docs, err := idx.Query(ctx, "", 2); err != nil || len(docs) != 1 || docs[0].ID != "one" {
+		t.Fatalf("oversized positive topK: docs=%v err=%v", docs, err)
+	}
+}
+
 func TestSimpleKnowledgeBase(t *testing.T) {
 	idx := NewInMemoryIndex()
 	_ = idx.AddDocuments(context.Background(), []Document{

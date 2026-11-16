@@ -255,6 +255,14 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   falling back to the provider default. Unset choice and no-tools behavior are
   unchanged. Part of #125 (A3).
 
+### Fixed — RAG retrieval and parsing
+
+- In-memory retrieval rejects non-positive `topK`. The text parser drops a
+  leading UTF-8 BOM, and the Word parser extracts WordprocessingML run text
+  with its tabs and breaks.
+- Qdrant queries use the collection's vector metric so larger document
+  scores consistently represent greater relevance.
+
 ### Fixed — summary over an empty fork snapshot
 
 - `UnifiedAgent.ApplySummary` (experimental) now refuses a fork snapshot
