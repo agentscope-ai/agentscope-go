@@ -250,8 +250,10 @@ func mergeConsecutiveRoles(msgs []map[string]any) []map[string]any {
 	return result
 }
 
-// API-rejected message-name characters; each run becomes one "_" (upstream #3548).
-var apiInvalidMessageNameChars = regexp.MustCompile(`[\s<|\\/>]+`)
+// API-rejected message-name characters; each run becomes one "_" (upstream
+// #3548). RE2's \s is ASCII-only, so the API's remaining ECMA-style
+// whitespace (vertical tab, Unicode spaces and line separators) is listed.
+var apiInvalidMessageNameChars = regexp.MustCompile(`[\s\x{0B}\p{Z}\x{FEFF}<|\\/>]+`)
 
 func sanitizeName(name string) string {
 	return apiInvalidMessageNameChars.ReplaceAllString(name, "_")
