@@ -222,6 +222,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   1024 tokens; explicit per-call output ceilings remain hard limits. Other
   thinking modes and MiniMax policy are unchanged. Part of #125 (A4).
 
+### Fixed — JSON session write failures
+
+- A failed JSON session `Set` or `Delete` preserves the previous entries in
+  the open session, so later writes can continue from the saved state.
+
 ### Fixed — explicit Messages tool-choice none
 
 - Anthropic and MiniMax Messages requests now retain an explicit

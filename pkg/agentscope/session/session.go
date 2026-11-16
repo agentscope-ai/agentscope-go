@@ -98,15 +98,31 @@ func (s *JSONSession) Get(_ context.Context, key string) (any, error) {
 func (s *JSONSession) Set(_ context.Context, key string, value any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	previous, existed := s.data[key]
 	s.data[key] = value
-	return s.persist()
+	if err := s.persist(); err != nil {
+		if existed {
+			s.data[key] = previous
+		} else {
+			delete(s.data, key)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *JSONSession) Delete(_ context.Context, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	previous, existed := s.data[key]
 	delete(s.data, key)
-	return s.persist()
+	if err := s.persist(); err != nil {
+		if existed {
+			s.data[key] = previous
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *JSONSession) List(_ context.Context, prefix string) ([]string, error) {
