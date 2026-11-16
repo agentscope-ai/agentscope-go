@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 
@@ -406,8 +407,11 @@ func TestSystemPromptSection(t *testing.T) {
 }
 
 func TestArgumentHelpers(t *testing.T) {
-	in := map[string]any{"f": 7.0, "neg": -2.0, "big": 1e12, "i": 5, "ni": -5, "n": json.Number("9"), "nbad": json.Number("x"), "s": "str"}
-	for key, want := range map[string]int{"f": 7, "neg": 0, "big": 0, "i": 5, "ni": 0, "n": 9, "nbad": 0, "s": 0, "missing": 0} {
+	in := map[string]any{"f": 7.0, "neg": -2.0, "big": 1e12, "huge": 1e300, "nan": math.NaN(), "max": float64(math.MaxInt32),
+		"over": float64(math.MaxInt32) + 1, "i": 5, "ni": -5, "n": json.Number("9"), "nmax": json.Number("2147483647"),
+		"nover": json.Number("2147483648"), "nbad": json.Number("x"), "s": "str"}
+	for key, want := range map[string]int{"f": 7, "neg": 0, "big": 0, "huge": 0, "nan": 0, "max": math.MaxInt32, "over": 0,
+		"i": 5, "ni": 0, "n": 9, "nmax": math.MaxInt32, "nover": 0, "nbad": 0, "s": 0, "missing": 0} {
 		if got := intArg(in, key); got != want {
 			t.Fatalf("intArg(%s) = %d, want %d", key, got, want)
 		}

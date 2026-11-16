@@ -182,8 +182,14 @@ func boolArg(in map[string]any, key string) bool {
 func intArg(in map[string]any, key string) int {
 	switch n := in[key].(type) {
 	case float64:
+		// Bound the value in the float domain first, so a huge value never
+		// reaches a conversion, then narrow through int64 behind an integer
+		// comparison: CodeQL's go/incorrect-integer-conversion counts only an
+		// integer-typed bounds check as guarding the int conversion.
 		if n >= 0 && n <= math.MaxInt32 {
-			return int(n)
+			if i := int64(n); i <= math.MaxInt32 {
+				return int(i)
+			}
 		}
 	case int:
 		return max(n, 0)
