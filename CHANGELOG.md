@@ -11,6 +11,13 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — Gemini thinking options
+
+- Gemini `Chat` and `ChatStream` now serialize tri-state thinking options instead
+  of silently dropping them. Argon/Carbon use the new `WithThinkingLevel` option
+  (`LOW`, `MEDIUM`, `HIGH`); incompatible budgets/levels fail before dispatch.
+  Unset options retain provider defaults. See [Gemini thinking](docs/model-providers.md#gemini-thinking-unreleased).
+
 ### Added — Main Thread router (experimental)
 
 - New experimental package `thread/route`: a `thread.Router` for the Main
