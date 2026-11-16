@@ -121,9 +121,13 @@ func (m *OpenAICompatEmbeddingModel) Embed(ctx context.Context, texts []string) 
 		return &EmbeddingResponse{Source: "api"}, nil
 	}
 
-	if m.cache != nil {
-		key := CacheKey(m.model, m.dimensions, texts)
-		if embeddings, ok := m.cache.Retrieve(key); ok {
+	cache := m.cache
+	var key string
+	if cache != nil {
+		key = endpointCacheKey("openai-compatible", m.baseURL, m.model, m.requestDimensions(), texts)
+	}
+	if key != "" {
+		if embeddings, ok := cache.Retrieve(key); ok {
 			return &EmbeddingResponse{
 				Embeddings: embeddings,
 				ID:         timestamp(),
@@ -139,12 +143,18 @@ func (m *OpenAICompatEmbeddingModel) Embed(ctx context.Context, texts []string) 
 		return nil, err
 	}
 
-	if m.cache != nil {
-		key := CacheKey(m.model, m.dimensions, texts)
-		_ = m.cache.Store(key, resp.Embeddings)
+	if key != "" {
+		_ = cache.Store(key, resp.Embeddings)
 	}
 
 	return resp, nil
+}
+
+func (m *OpenAICompatEmbeddingModel) requestDimensions() int {
+	if m.dimensions > 0 && m.passDimensions {
+		return m.dimensions
+	}
+	return 0
 }
 
 func (m *OpenAICompatEmbeddingModel) callAPI(ctx context.Context, texts []string) (*EmbeddingResponse, error) {
@@ -155,9 +165,7 @@ func (m *OpenAICompatEmbeddingModel) callAPI(ctx context.Context, texts []string
 		Input:          texts,
 		EncodingFormat: "float",
 	}
-	if m.dimensions > 0 && m.passDimensions {
-		req.Dimensions = m.dimensions
-	}
+	req.Dimensions = m.requestDimensions()
 
 	headers := map[string]string{
 		"Content-Type": "application/json",

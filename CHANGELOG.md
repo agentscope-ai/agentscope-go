@@ -161,6 +161,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   offer, the one new field that does not raise the version (the trigger then
   compresses synchronously).
 
+### Fixed — embedding cache endpoint isolation
+
+- Scope OpenAI-compatible and Gemini cache keys to their endpoint and adapter
+  family so a shared cache cannot return a different endpoint's vectors. Entries
+  written with old keys are repopulated on demand.
+
 ### Fixed — Chat Completions formatter errors
 
 - Return formatter errors before HTTP dispatch in buffered and streamed

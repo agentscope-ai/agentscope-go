@@ -66,6 +66,15 @@ nonfinite vectors and unsupported payload types return errors before any batch
 upsert. Arbitrary metadata retains Qdrant client conversion semantics; this is
 not a general metadata schema validator.
 
+## Embedding cache
+
+The OpenAI-compatible and Gemini embedding adapters scope their cache entries to
+the adapter family, configured endpoint, model, request dimensions and input.
+Entries written by older versions of these adapters miss and are populated again
+on demand. An endpoint with URL userinfo, a query or a fragment bypasses the cache.
+Use separate caches if credentials on the same endpoint can select different
+embeddings.
+
 ## Cache write semantics
 
 `embedding.FileEmbeddingCache.Store` marshals vectors before deciding whether
