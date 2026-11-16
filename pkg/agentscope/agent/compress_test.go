@@ -349,7 +349,7 @@ func TestTruncateToolResultKeepsHeadAndTail(t *testing.T) {
 	if !strings.HasPrefix(result, strings.Repeat("h", 100)) {
 		t.Error("truncated result should keep the head")
 	}
-	if !strings.HasSuffix(result, tail) {
+	if !strings.HasSuffix(result, strings.Repeat("t", 100)) {
 		t.Error("truncated result should keep the tail")
 	}
 	if !strings.Contains(result, "<<<TRUNCATED:") {
@@ -363,8 +363,8 @@ func TestTruncateToolResultKeepsHeadAndTail(t *testing.T) {
 func TestTruncateToolResultRuneSafe(t *testing.T) {
 	// Multi-byte content must not be cut mid-rune: providers reject invalid
 	// UTF-8 with a 400, which would turn a truncation into a dead reply.
-	text := strings.Repeat("中", 300)                   // 900 bytes, 300 runes
-	result, truncated := TruncateToolResult(text, 100) // 400-byte budget
+	text := strings.Repeat("中", 300) // 900 bytes, 300 runes
+	result, truncated := TruncateToolResult(text, 100)
 	if !truncated {
 		t.Fatal("expected truncation")
 	}

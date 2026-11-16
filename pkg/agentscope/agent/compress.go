@@ -108,7 +108,7 @@ type ContextConfig struct {
 	CompressionPrompt string          // Prompt guiding the model to generate a summary.
 	SummaryTemplate   string          // Template with {field} placeholders for the structured summary.
 	SummarySchema     json.RawMessage // JSON Schema for structured output (matches SummarySchema fields).
-	ToolResultLimit   int             // Max token estimate for individual tool results (default 50000).
+	ToolResultLimit   int             // Estimated budget for tool result text, including truncation and offload notices (default 50000).
 	MaxImageNum       int             // Max images kept in context; oldest are replaced by text reminders (0 = unlimited, upstream #2362).
 
 	// AgentDrivenTriggerRatio is the token ratio at which the model-invoked
@@ -496,7 +496,7 @@ func (a *UnifiedAgent) compressContextImpl(ctx context.Context, cfg *ContextConf
 	// window it just freed. Middle-elision keeps the overview head and the
 	// next-steps tail, the two ends the resumed context needs most.
 	if budget := a.ownSummaryBudget(cfg, ctxSize); budget > 0 {
-		if truncated, did := TruncateToolResult(newSummary, budget); did {
+		if truncated, did := truncateSummary(newSummary, budget); did {
 			logrus.WithFields(logrus.Fields{
 				"agent":  a.name,
 				"budget": budget,
@@ -893,15 +893,8 @@ func pullSplitBackForToolPairs(msgs []*message.Msg, splitIdx int) int {
 	}
 }
 
-// TruncateToolResult truncates a tool result string if it exceeds the token limit.
-// Returns the (possibly truncated) text and whether truncation occurred.
-//
-// Truncation keeps the head and tail of the output and elides the middle:
-// shell logs carry their errors at the end while file reads carry their
-// structure at the start, so a pure prefix cut drops exactly the content the
-// model needs. Both cuts land on rune boundaries so the result stays valid
-// UTF-8 (providers reject invalid UTF-8 with a 400).
-func TruncateToolResult(text string, tokenLimit int) (string, bool) {
+// truncateSummary keeps the existing byte estimate and middle elision for summaries.
+func truncateSummary(text string, tokenLimit int) (string, bool) {
 	estimatedTokens := len(text) / 4
 	if estimatedTokens <= tokenLimit {
 		return text, false

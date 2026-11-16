@@ -221,6 +221,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   empty thinking blocks carrying signatures when formatting follow-up history.
   Existing message types and serialization are unchanged. Part of #125 (A2).
 
+### Fixed — tool text truncation
+
+- Tool text uses a more conservative estimate for non-ASCII content. The
+  retained head and tail, truncation marker, and any offload reference share
+  the same estimated budget.
+
 ### Fixed — buffered Chat Completions stop reasons
 
 - Preserve normalized `finish_reason` on buffered OpenAI-compatible responses,
