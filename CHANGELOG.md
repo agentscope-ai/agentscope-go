@@ -161,6 +161,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   offer, the one new field that does not raise the version (the trigger then
   compresses synchronously).
 
+### Fixed — Chat Completions formatter errors
+
+- Return formatter errors before HTTP dispatch in buffered and streamed
+  OpenAI-compatible calls, preserving the cause instead of flattening the
+  entire history to plain text. Part of #125 (O4).
+
 ### Fixed — Responses image and hint input
 
 - Preserve direct URL/base64 images and hints in buffered and streamed
@@ -178,6 +184,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   `is_error: true`; only `ToolResultError` gains the flag and other states
   keep the plain `tool_result` shape. Local fixtures cover the formatter and
   both call paths; no live API result is claimed. Part of #138.
+
+### Fixed — Responses named tool choice
+
+- Encode a named tool choice as a function object in buffered and streamed
+  Responses requests instead of sending the tool name as an invalid string.
+  Part of #125 (O5).
 
 ### Fixed — Anthropic tool-result history
 
