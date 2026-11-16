@@ -201,8 +201,9 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 - Thinking models require a function-call part's `thought_signature` echoed
   back with the same history part; the adapter now stashes it in
   `ToolCallBlock.Extra` and restores it on the wire, for both buffered and
-  streamed responses. Local fixtures cover both call paths; no live API
-  result is claimed. Part of #138.
+  streamed responses. The public Gemini formatter also echoes signatures
+  through `Format` and `FormatMultiAgent`. Local fixtures cover both call
+  paths; no live API result is claimed. Part of #138.
 
 
 ### Fixed — Anthropic tool-result history
