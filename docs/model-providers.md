@@ -126,7 +126,7 @@ cm, _ := model.NewAnthropicChatModel(&model.AnthropicConfig{
 })
 ```
 
-Models: `claude-opus-4-5`, `claude-opus-4-6`, `claude-opus-4-7`, `claude-opus-4-8`, `claude-sonnet-4-5`, `claude-sonnet-4-6`, `claude-haiku-4-5`
+Models: `claude-opus-4-5`, `claude-opus-4-6`, `claude-opus-4-7`, `claude-opus-4-8`, `claude-sonnet-4-5` (deprecated), `claude-sonnet-4-6`, `claude-haiku-4-5`
 
 Extended thinking: `model.WithThinking(true, 10000)` enables thinking with a 10K token budget.
 
