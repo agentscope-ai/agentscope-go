@@ -161,6 +161,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   offer, the one new field that does not raise the version (the trigger then
   compresses synchronously).
 
+### Fixed — Chat Completions formatter errors
+
+- Return formatter errors before HTTP dispatch in buffered and streamed
+  OpenAI-compatible calls, preserving the cause instead of flattening the
+  entire history to plain text. Part of #125 (O4).
+
 ### Fixed — Responses image and hint input
 
 - Preserve direct URL/base64 images and hints in buffered and streamed

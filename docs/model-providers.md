@@ -33,6 +33,15 @@ cm, _ := model.NewOpenAIChatModel(model.OpenAIConfig{
 
 Models: `gpt-4o`, `gpt-4o-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`, `gpt-5.4`, `gpt-5.5`, `gpt-audio-mini`, `o3`, `o4-mini`
 
+Both `Chat` and `ChatStream` return message-formatting errors before sending
+an HTTP request. Unsupported input such as base64 `audio/ogg`, or an error
+from `OpenAIConfig.Formatter`, no longer silently converts the entire history
+to plain text. Wrapped errors preserve the original cause for `errors.Is`.
+The same policy applies to DashScope, DeepSeek, Moonshot, OpenAI-compatible
+Ollama, xAI and Volcengine, which share the conversion helper. Correct or
+remove the unsupported input before retrying; the adapters do not rewrite
+stored history on a formatting failure.
+
 Buffered Chat Completions responses now retain the normalized `StopReason`
 (unreleased O1 fix), matching the existing streaming path. For example,
 `finish_reason: "length"` becomes `model.StopReasonLength`; stop, tool calls,
