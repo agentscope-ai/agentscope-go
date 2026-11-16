@@ -277,6 +277,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   agent's summary and reported success although the snapshot covered no
   message to replace.
 
+### Fixed — knowledge base query limits
+
+- `SimpleKnowledgeBase.Query` rejects non-positive `topK` before calling
+  the underlying index, regardless of the backend.
+
 ### Fixed — background precompression
 
 - With `ContextConfig.PrecompressRatio` set, a context that is still at the

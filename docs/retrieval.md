@@ -75,6 +75,13 @@ nonfinite vectors and unsupported payload types return errors before any batch
 upsert. Arbitrary metadata retains Qdrant client conversion semantics; this is
 not a general metadata schema validator.
 
+## Knowledge base query limits
+
+`rag.SimpleKnowledgeBase.Query` requires a positive `topK`. It returns an
+error for zero or negative values before calling the underlying index.
+Positive values are passed through unchanged. Direct backend calls retain
+their existing limit handling.
+
 ## Embedding cache
 
 The OpenAI-compatible and Gemini embedding adapters scope their cache entries to
