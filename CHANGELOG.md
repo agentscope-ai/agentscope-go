@@ -234,6 +234,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   streaming path. Partial content and usage remain intact; unknown nonempty
   reasons pass through. Part of #125 (O1).
 
+### Fixed — Responses tool-call identifiers
+
+- Preserve original Responses `call_id` values through buffered/streamed
+  parsing and history replay, including tool results correlated by item ID.
+  Missing call IDs retain the existing fallback. Part of #125 (R1).
+
 ### Fixed — Anthropic manual-thinking budgets
 
 - Clamp automatic thinking budgets to the 1024-token minimum. The default
