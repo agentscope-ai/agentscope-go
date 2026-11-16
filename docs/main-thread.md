@@ -13,16 +13,21 @@ single writer of that log. The design was proposed in
 [`thread`](../pkg/agentscope/thread/) holds the log entries and stores, the
 projection of entries into a participant's context, the Coordinator, the
 usage ledger, the tool-output list, leases and the contracts a participant,
-a router and a forker implement (`runtime.go`). Two packages build on it and
-land separately: `thread/participant` adapts a `UnifiedAgent` (or a cloud
-master with sub-agents) and provides the tools an agent uses to transfer,
-assign, report and read; `thread/route` provides a router with rules and an
-optional classifier. This page describes the Coordinator's side.
+a router and a forker implement (`runtime.go`).
+[`thread/route`](../pkg/agentscope/thread/route/) provides a router with three
+modes, host rules and an optional classifier
+([Routing modes and the classifier layer](#routing-modes-and-the-classifier-layer)).
+`thread/participant`, which adapts a `UnifiedAgent` (or a cloud master with
+sub-agents) and provides the tools an agent uses to transfer, assign, report
+and read, lands separately. This page describes the Coordinator and the
+router.
 
-Every exported identifier in this package is EXPERIMENTAL and may change
+Every exported identifier in these packages is EXPERIMENTAL and may change
 without notice. The repository tests are offline, with scripted
 participants, so nothing here establishes task quality, cloud cost, latency
-or energy benefits.
+or energy benefits. These packages' only live runs were in a benchmark
+comparison that was withdrawn; only one routing observation from it is used
+(the `hybrid` default).
 
 ## Concepts
 
@@ -56,10 +61,12 @@ The invariants the Coordinator keeps are listed in
 2. If an activation is running, the input is steering for the current owner and
    arrives at its next safe boundary (after a tool step, before the next model
    call). Routing only happens at a query boundary.
-3. Otherwise `Config.Router` picks the owner. A change appends an owner change
-   based on the input. Without a router the query stays with the owner when
-   it may take it, else goes to the first available participant that may (a
-   participant the query names comes first).
+3. Otherwise `Config.Router` picks the owner (`thread/route` provides one; see
+   [Routing modes and the classifier layer](#routing-modes-and-the-classifier-layer)).
+   A change appends an owner change based on the input. Without a router the
+   query stays with the owner when it may take it, else goes to the first
+   available participant that may (a participant the query names comes
+   first).
 4. The Coordinator imports what the owner has not seen (see "Context and
    summaries"), then starts its activation. Its events stream to the user.
 5. When the activation ends, the visible text and the tool digest are sealed
@@ -93,6 +100,89 @@ instead of being told them at length. The new owner also takes the inputs
 that steered the failed run. Without a new owner the request ends with
 `no_owner`, and its steering with it. A failed wake does not fail over (its
 report was already answered); the inputs that steered it are queued again.
+
+## Routing modes and the classifier layer
+
+`route.New(route.Config{Mode: ...})` returns a `*route.Router`, which
+implements `thread.Router`:
+
+| Mode | Home | The classifier decides |
+|---|---|---|
+| `local_based` | edge | go to the cloud only for stronger reasoning or cloud-only tools |
+| `cloud_based` | cloud | go to the edge only for simple requests or device-only tools and data |
+| `hybrid` | none | the edge whenever it can answer correctly (cheaper, keeps data on the device), else the cloud; a query it leaves open goes to the cloud |
+
+The decision order is fixed: availability, a participant the user named, a
+tool group the query needs that only one side holds, host rules, the
+classifier, then the mode's default. A classifier problem does not stop
+routing: the query falls through to the default in these cases:
+
+- there is no classifier;
+- the state cannot be built;
+- `route.Config.Authorize` denies the dispatch;
+- the call, including its dispatch authorization, fails or runs out of
+  `route.Config.Timeout` (default 10 s; a negative value removes the bound,
+  and the bound holds for a classifier and an authorizer that honor their
+  context);
+- the answer is invalid;
+- its confidence is below the threshold;
+- it chose a participant more than `route.Config.MaxLag` entries behind.
+
+In `hybrid` the default is the cloud, whoever owns the session, and the edge
+only when the cloud is not a candidate. With the configured edge and cloud
+as the only participants, a query the earlier steps leave open goes to the
+edge only when the classifier picks the edge at or above the threshold and
+within `MaxLag`. `MaxLag` limits the classifier's choice only. The default
+participant gets the query even when it is behind, and imports what it
+lacks.
+
+The cloud counts as offline when `thread.Config.Available` reports it. With two
+participants, the edge is then the only candidate. If the cloud is unreachable
+but reported available, an open query still goes to it, and the edge gets
+the query only after that cloud run fails and failover moves it. A hosted
+classifier on the same failing network can add its timeout first.
+
+The classifier is any `classifier.DispatchClassifier`: Jev (hosted, or a
+local Piccolo server through the Jev adapter), Bailian, OpenAI Decisions or
+the offline fake. The router asks it one Choice question
+(`route.QuestionID`) over a state bounded by `route.Config.Budget`. The
+budget counts tokens with `route.Config.Count`, which by default estimates
+four characters per token. With English prose the default budget keeps the
+state within Piccolo's 8,192-token prompt, even with `IncludeHistory`; code
+comes close, and text that tokenizes more densely, such as Chinese, can
+exceed it. For such text, set `Count` to the classifier's tokenizer or lower
+the budget: a prompt the classifier rejects is a failed call, and the query
+falls through to the default. By default the state is what a classifier
+routing from the query alone sees:
+
+- the query, cut to 1,500 counted tokens;
+- the participants' names, zones, windows, availability and tool groups.
+
+`route.Config.IncludeHistory` adds the session's history:
+
+- the summary the cloud wrote for the edge window;
+- recent published entries as text, with the names of the tools each reply
+  used (arguments and outputs never appear);
+- each participant's lag and whether it owns the session.
+
+The local_based and cloud_based questions say what the state holds, so they
+name the summary and recent entries only with `IncludeHistory`. The hybrid
+question states what each side costs and holds, adds no rule of its own and
+does not describe the state. Each participant's choice says what its model
+holds in context (the cloud the whole session, with the full results of its
+own tool calls; the edge its window, the last published messages, any
+summary and its own notes), followed by the host's description.
+
+The question carries no warning about the state's content: a state that
+steers the classifier can cost quality or money. The state holds the query,
+and with `IncludeHistory` the summary and recent entries, whatever the
+classifier's endpoint, so a hosted classifier sees them. `route.BuildState`
+returns the exact state for logs. The Coordinator records each classifier
+call in the ledger under the participant name `router`, kind `classifier`.
+
+The three windows involved are therefore bounded separately: the cloud's own
+window (own notes from 10,000 tokens), the edge's 8K window (peer summary and
+budgeted imports) and the classifier's prompt (fixed state budget).
 
 ## Handing the foreground over
 
@@ -225,6 +315,11 @@ its own zone.
 ```go
 store := thread.NewMemoryStore() // or thread.OpenFileStore(path)
 
+// Classifier: any classifier.DispatchClassifier, or nil for rules and defaults only.
+router, err := route.New(route.Config{Mode: route.Hybrid, Edge: "edge", Cloud: "cloud",
+    Classifier: jevClassifier})
+// handle err
+
 coord, err := thread.NewCoordinator(ctx, thread.Config{
     Store: store, Participants: []thread.Participant{edge, cloud}, Router: router})
 // handle err
@@ -330,7 +425,9 @@ instead of leaving it for recovery.
 
 ## Limits
 
-* Repository tests are offline, with scripted participants.
+* Repository tests are offline, with scripted participants. These packages'
+  only live runs were in a withdrawn benchmark comparison; only its routing
+  observation behind the `hybrid` default is used.
 * One Coordinator process per log; `FileStore` takes no file lock and keeps the
   whole log in memory.
 * Some state grows with the session: settled tasks stay in the Coordinator's
@@ -348,6 +445,8 @@ instead of leaving it for recovery.
 * The loop bridge (`UnifiedAgentRunner.LoopOptions`) cannot hand the
   foreground over or ask the user; use the Coordinator.
 * No privacy boundary: the cloud reads the edge's entries, briefs, reports
-  and recorded tool outputs. Do not give the edge data that must stay on the
-  device. Untrusted tool output is not tracked either: nothing gates a write
-  after a web fetch beyond the host's permission rules.
+  and recorded tool outputs, and a hosted classifier reads the query, plus
+  the peer summary and recent entries with `route.Config.IncludeHistory`.
+  Do not give the edge data that must stay on the device. Untrusted tool
+  output is not tracked either: nothing gates a write after a web fetch
+  beyond the host's permission rules.

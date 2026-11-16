@@ -11,11 +11,23 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
-### Fixed — tool text truncation
+### Added — Main Thread router (experimental)
 
-- Tool text uses a more conservative estimate for non-ASCII content. The
-  retained head and tail, truncation marker, and any offload reference share
-  the same estimated budget.
+- New experimental package `thread/route`: a `thread.Router` for the Main
+  Thread `Coordinator`, with three modes (`local_based`, `cloud_based` and
+  `hybrid`), host rules and an optional classifier (any
+  `classifier.DispatchClassifier`). The decision order is fixed:
+  availability, a participant the user named, a tool group the query needs
+  that only one side holds, host rules, the classifier, then the mode's
+  default. The classifier answers one Choice question over a bounded state
+  that holds the query and the participants, and the session's history only
+  with `route.Config.IncludeHistory`. Its call is bounded by a timeout (10 s
+  by default), including the dispatch authorization. A failed or timed-out
+  call, a denied dispatch, an invalid answer, low confidence or a choice over
+  `MaxLag` falls through to the mode's default; in `hybrid` that is the
+  cloud, whoever owns the session. Tested offline with the fake classifier.
+  See
+  [Main Thread](docs/main-thread.md#routing-modes-and-the-classifier-layer).
 
 ### Added — Main Thread coordinator (experimental)
 
@@ -41,12 +53,10 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   machine; see the
   [note on `taskenvelope`](https://github.com/agentscope-ai/agentscope-go/issues/117#issuecomment-6769407061).
 - The log has no privacy classes: every participant reads every entry. The
-  adapters for `UnifiedAgent` (`thread/participant`) and the router
-  (`thread/route`) land separately. Tested offline with scripted
-  participants. See [Main Thread](docs/main-thread.md).
+  adapters for `UnifiedAgent` (`thread/participant`) land separately. Tested
+  offline with scripted participants. See [Main Thread](docs/main-thread.md).
 
 ### Added — agent seams for a session shared by several agents (experimental)
-
 
 - Opt-in `agent` seams for a host that runs several agents over one shared,
   append-only log, as proposed in
@@ -151,10 +161,23 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   offer, the one new field that does not raise the version (the trigger then
   compresses synchronously).
 
+### Fixed — Responses image and hint input
+
+- Preserve direct URL/base64 images and hints in buffered and streamed
+  Responses requests. Hints become user input at their original position,
+  retaining text and images in order. Part of #125 (O3).
+
 ### Fixed — in-memory message bus replay
 
 - Replay reads return independent payload bytes, so changing a returned entry
   cannot alter the log seen by later readers.
+
+### Fixed — Anthropic tool-result error flag
+
+- Failed tool results now reach the Anthropic Messages API with
+  `is_error: true`; only `ToolResultError` gains the flag and other states
+  keep the plain `tool_result` shape. Local fixtures cover the formatter and
+  both call paths; no live API result is claimed. Part of #138.
 
 ### Fixed — Anthropic tool-result history
 
@@ -171,12 +194,19 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   empty thinking blocks carrying signatures when formatting follow-up history.
   Existing message types and serialization are unchanged. Part of #125 (A2).
 
+### Fixed — tool text truncation
+
+- Tool text uses a more conservative estimate for non-ASCII content. The
+  retained head and tail, truncation marker, and any offload reference share
+  the same estimated budget.
+
 ### Fixed — buffered Chat Completions stop reasons
 
 - Preserve normalized `finish_reason` on buffered OpenAI-compatible responses,
   including length truncation, tool calls and content filtering, matching the
   streaming path. Partial content and usage remain intact; unknown nonempty
   reasons pass through. Part of #125 (O1).
+
 ### Fixed — Anthropic manual-thinking budgets
 
 - Clamp automatic thinking budgets to the 1024-token minimum. The default
