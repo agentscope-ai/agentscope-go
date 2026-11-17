@@ -1,0 +1,97 @@
+# Posts the golangci-lint report from lint-report.yml as inline PR review
+# comments via reviewdog. Runs on workflow_run so fork pull requests also
+# get comments: this workflow executes with a write token but NEVER checks
+# out or runs pull request code. The PR number and head SHA are taken from
+# GitHub-provided event data / the GitHub API, not from the artifact; the
+# artifact only supplies lint text, which reviewdog treats as data.
+name: Lint review
+
+on:
+  workflow_run:
+    workflows: ["Lint report"]
+    types: [completed]
+
+permissions:
+  actions: read # download the report artifact from the triggering run
+  contents: read # resolve the pull request associated with the head SHA
+  pull-requests: write # post review comments
+
+jobs:
+  review:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download lint report
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: golangci-lint-report
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Resolve pull request
+        id: pr
+        if: steps.download.outcome == 'success'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            let pr = (run.pull_requests || []).find((p) => p.state === 'open');
+            if (!pr) {
+              // Fork pull requests have an empty pull_requests array; the
+              // head SHA is GitHub-provided, so the lookup is trustworthy.
+              const { data: prs } =
+                await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  commit_sha: run.head_sha,
+                });
+              pr = prs.find((p) => p.state === 'open');
+            }
+            if (!pr) {
+              core.info('No open pull request found for this run; skipping.');
+              return;
+            }
+            core.setOutput('number', String(pr.number));
+            core.setOutput('sha', pr.head.sha);
+            core.setOutput('found', 'true');
+
+      - name: Setup reviewdog
+        if: steps.pr.outputs.found == 'true'
+        uses: reviewdog/action-setup@d8a7baabd7f3e8544ee4dbde3ee41d0011c3a93f # v1.5.0
+
+      - name: Post lint review comments
+        if: steps.pr.outputs.found == 'true'
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PR_HEAD_SHA: ${{ steps.pr.outputs.sha }}
+        run: |
+          # reviewdog's github-pr-review reporter requires a git working
+          # tree to resolve relative paths. Initialize an empty repository:
+          # nothing is checked out and no pull request code is executed.
+          git init -q .
+          # reviewdog reads PR context from GITHUB_EVENT_PATH, but a
+          # workflow_run payload has no pull_request object. Synthesize one
+          # from the GitHub-resolved values above; head/base owner IDs are
+          # left equal so reviewdog does not treat this as a read-only fork
+          # run (this workflow legitimately holds a write token).
+          jq -n \
+            --argjson pr "$PR_NUMBER" \
+            --arg sha "$PR_HEAD_SHA" \
+            --arg owner "$GITHUB_REPOSITORY_OWNER" \
+            --arg repo "${GITHUB_REPOSITORY#*/}" \
+            '{pull_request: {number: $pr, head: {sha: $sha}},
+              repository: {owner: {login: $owner}, name: $repo}}' \
+            > "$RUNNER_TEMP/review-event.json"
+          GITHUB_EVENT_PATH="$RUNNER_TEMP/review-event.json" \
+            reviewdog \
+              -f=golangci-lint \
+              -name=golangci-lint \
+              -reporter=github-pr-review \
+              -filter-mode=added \
+              -fail-level=none \
+              < golangci-lint-report.txt

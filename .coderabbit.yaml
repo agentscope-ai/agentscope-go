@@ -1,0 +1,68 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# Configuration for the CodeRabbit review bot (https://coderabbit.ai).
+# This file only takes effect once the CodeRabbit GitHub App is installed on
+# the repository: https://github.com/apps/coderabbitai
+# Reviews are advisory; the blocking quality gates remain the CI workflows.
+
+language: en-US
+
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+  path_filters:
+    - "!vendor/**"
+  path_instructions:
+    - path: "**/*.go"
+      instructions: |
+        This is the Go implementation of AgentScope (module
+        github.com/agentscope-ai/agentscope-go/v2). Check:
+        - Repository imports must keep the /v2 module suffix.
+        - Code must stay compatible with Go 1.25 (go.mod declares 1.25.0);
+          building on a newer toolchain is not proof of minimum-version
+          support.
+        - Source files must not carry SPDX or license headers.
+        - Exported API, configuration default, serialized format or
+          observable behavior changes must respect STABILITY.md; flag
+          breaking changes that lack a migration path.
+        - Scrutinize nil and error handling, context cancellation,
+          concurrency and resource ownership (goroutine leaks, unclosed
+          bodies, lock handling).
+        - Prefer the standard library; new dependencies need a compatible
+          license (Apache-2.0, MIT, BSD) and a stated purpose.
+    - path: "**/*_test.go"
+      instructions: |
+        Tests must provide a real regression signal: exercise boundaries and
+        error paths, not assertions that repeat the implementation. Exported
+        APIs need tests. The library coverage floor for ./pkg/... is 68.6%
+        (a ratchet: never lower COVERAGE_MIN in ci.yml or make cover-check).
+        Changes to shell safety checks or content-block parsing also require
+        the FuzzBashSafety / FuzzUnmarshalContentBlocks fuzz smoke.
+    - path: ".github/workflows/**"
+      instructions: |
+        Workflow changes must keep least-privilege permissions, pin
+        third-party actions to full commit SHAs, and never execute pull
+        request code with write tokens or secrets (no pull_request_target
+        combined with checking out and running the PR head). Keep
+        COVERAGE_MIN synchronized between ci.yml, the Makefile and AGENTS.md.
+    - path: "{README.md,README.es-ES.md,docs/**,CHANGELOG.md}"
+      instructions: |
+        Factual corrections must land in README.md and README.es-ES.md
+        together. API names and signatures must match the source; examples
+        must compile; links must work; do not describe intended design as
+        shipped behavior or hard-code "latest" version claims.
+  tools:
+    golangci-lint:
+      # The lint-review workflow already posts golangci-lint findings as
+      # inline PR comments; keep CodeRabbit's copy off to avoid duplicates.
+      enabled: false
+
+chat:
+  auto_reply: true
