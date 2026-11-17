@@ -1,6 +1,9 @@
 package rag
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 // Document represents a retrievable document.
 type Document struct {
@@ -44,8 +47,12 @@ func (i *InMemoryIndex) AddDocuments(_ context.Context, docs []Document) error {
 // Query currently just returns the first topK documents and does not compute
 // similarity; Document.Score stays 0 (no embeddings are stored here). Use a
 // text index (e.g. QdrantTextIndex) or a Reranker when scores matter.
+// topK must be positive.
 func (i *InMemoryIndex) Query(_ context.Context, _ string, topK int) ([]Document, error) {
-	if topK <= 0 || topK > len(i.docs) {
+	if topK <= 0 {
+		return nil, fmt.Errorf("rag: topK must be positive, got %d", topK)
+	}
+	if topK > len(i.docs) {
 		topK = len(i.docs)
 	}
 	out := make([]Document, topK)
@@ -76,6 +83,10 @@ func NewSimpleKnowledgeBase(name string, idx Index) *SimpleKnowledgeBase {
 
 func (k *SimpleKnowledgeBase) Name() string { return k.name }
 
+// Query delegates to the underlying index. topK must be positive.
 func (k *SimpleKnowledgeBase) Query(ctx context.Context, query string, topK int) ([]Document, error) {
+	if topK <= 0 {
+		return nil, fmt.Errorf("rag: topK must be positive, got %d", topK)
+	}
 	return k.idx.Query(ctx, query, topK)
 }

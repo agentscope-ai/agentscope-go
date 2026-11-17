@@ -308,11 +308,11 @@ The `rag/parser` package converts common file formats into `rag.Document` slices
 
 | Parser | Extensions | Description |
 |--------|-----------|-------------|
-| `TextParser` | `.txt`, `.md`, `.csv`, `.log` | Plain text with configurable chunking |
+| `TextParser` | `.txt`, `.md`, `.csv`, `.log` | Plain text with configurable chunking; removes a leading UTF-8 BOM |
 | `PDFParser` | `.pdf` | Stream-based text extraction (FlateDecode + plain text) |
-| `WordParser` | `.docx` | XML-based text extraction from Word documents |
+| `WordParser` | `.docx` | Extracts Word run text, preserving tabs and line breaks |
 | `ExcelParser` | `.xlsx` | Row-based text extraction from spreadsheets |
-| `PPTParser` | `.pptx` | Slide text extraction from PowerPoint |
+| `PPTParser` | `.pptx` | Slide text extraction from Strict and Transitional PowerPoint files |
 
 ### Usage
 
@@ -384,6 +384,9 @@ The `rag` package supports multiple vector store backends for document retrieval
 
 ### InMemoryIndex
 
+`InMemoryIndex.Query` requires a positive `topK`. A positive value larger
+than the index size returns all available documents.
+
 ```go
 index := rag.NewInMemoryIndex()
 index.AddDocuments(ctx, docs)
@@ -423,10 +426,12 @@ index.AddDocuments(ctx, docs)
 ### Result scores
 
 `Document.Score` is normalized so that higher means more relevant across every
-backend (Elasticsearch, Qdrant, MongoDB, Milvus). Milvus L2 distance is negated,
-so callers that negated it themselves must stop or they will double-negate.
-Comparing scores across backends does not require knowing which metric each one
-used.
+backend (Elasticsearch, Qdrant, MongoDB, Milvus). Milvus L2 and Qdrant Euclid
+and Manhattan distances are negated; callers should use the returned score
+directly. Scores have no common numeric scale across backends.
+
+See [Qdrant query requirements](retrieval.md#qdrant-query-requirements) for
+collection configuration and permissions.
 
 ### Reranked Retrieval
 

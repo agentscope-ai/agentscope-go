@@ -241,6 +241,7 @@ type CallOptions struct {
 	ToolChoice      *ToolChoice
 	ThinkingEnable  *bool
 	ThinkingBudget  *int
+	ThinkingLevel   *string // Gemini 4: LOW, MEDIUM or HIGH
 	ReasoningEffort *string // "low", "medium", "high"
 	Voice           *string // audio output voice (e.g. "alloy"); enables audio modality
 	ResponseFormat  *ResponseFormat
@@ -311,6 +312,15 @@ func WithThinking(enable bool, budget int) CallOption {
 			o.ThinkingBudget = &budget
 		}
 	}
+}
+
+// WithThinkingLevel sets the Gemini 4 thinking level, normalized to upper case.
+// Gemini accepts LOW, MEDIUM and HIGH for Argon and Carbon; invalid levels or
+// other Gemini models return an error from Chat/ChatStream before dispatch.
+// This option does not enable or disable thinking. Other providers ignore it.
+func WithThinkingLevel(level string) CallOption {
+	level = strings.ToUpper(level)
+	return func(o *CallOptions) { o.ThinkingLevel = &level }
 }
 
 // WithReasoningEffort sets the reasoning effort level (e.g. "low", "medium", "high").

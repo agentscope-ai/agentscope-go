@@ -11,6 +11,52 @@ import (
 
 const defaultMoonshotBaseURL = "https://api.moonshot.cn"
 
+// moonshotK3Models always think: their token budget rides
+// max_completion_tokens, fixed sampling parameters and the thinking switch
+// stay off the wire, and thinking cannot be disabled (upstream #3578).
+var moonshotK3Models = map[string]bool{
+	"kimi-k3":                 true,
+	"kimi-k3.1-pro":           true,
+	"kimi-k3.1-pro-highspeed": true,
+}
+
+// applyMoonshotCallOptions fills the request with call options. The K3 series
+// gets the wire shape above; other models keep the OpenAI-compatible fields.
+func applyMoonshotCallOptions(reqBody *openAIChatRequest, callOpts *CallOptions, isK3 bool) {
+	if callOpts.MaxTokens != nil {
+		if isK3 {
+			reqBody.MaxCompletionTokens = callOpts.MaxTokens
+		} else {
+			reqBody.MaxTokens = callOpts.MaxTokens
+		}
+	}
+	if !isK3 {
+		if callOpts.Temperature != nil {
+			t := float32(*callOpts.Temperature)
+			reqBody.Temperature = &t
+		}
+		if callOpts.TopP != nil {
+			p := float32(*callOpts.TopP)
+			reqBody.TopP = &p
+		}
+	}
+	if callOpts.Seed != nil {
+		reqBody.Seed = callOpts.Seed
+	}
+	if len(callOpts.Tools) > 0 {
+		reqBody.Tools = callOpts.Tools
+	}
+	if callOpts.ToolChoice != nil {
+		reqBody.ToolChoice = formatToolChoice(callOpts.ToolChoice)
+	}
+	// Upstream #2140: DeepSeek/Moonshot disable thinking via
+	// {"thinking":{"type":"disabled"}}, not enable_thinking. The K3 series
+	// always thinks and rejects the switch (upstream #3578).
+	if callOpts.ThinkingEnable != nil && !*callOpts.ThinkingEnable && !isK3 {
+		reqBody.Thinking = &openAIThinking{Type: "disabled"}
+	}
+}
+
 // MoonshotChatModel wraps the Moonshot/Kimi API (OpenAI-compatible).
 type MoonshotChatModel struct {
 	apiKey         string
@@ -67,35 +113,16 @@ func (m *MoonshotChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts 
 		opt(callOpts)
 	}
 
+	messages, err := convertMessagesToOpenAI(msgs)
+	if err != nil {
+		return nil, fmt.Errorf("moonshot: %w", err)
+	}
+
 	reqBody := openAIChatRequest{
 		Model:    m.model,
-		Messages: convertMessagesToOpenAI(msgs),
+		Messages: messages,
 	}
-	if callOpts.Temperature != nil {
-		t := float32(*callOpts.Temperature)
-		reqBody.Temperature = &t
-	}
-	if callOpts.MaxTokens != nil {
-		reqBody.MaxTokens = callOpts.MaxTokens
-	}
-	if callOpts.TopP != nil {
-		p := float32(*callOpts.TopP)
-		reqBody.TopP = &p
-	}
-	if callOpts.Seed != nil {
-		reqBody.Seed = callOpts.Seed
-	}
-	if len(callOpts.Tools) > 0 {
-		reqBody.Tools = callOpts.Tools
-	}
-	if callOpts.ToolChoice != nil {
-		reqBody.ToolChoice = formatToolChoice(callOpts.ToolChoice)
-	}
-	if callOpts.ThinkingEnable != nil && !*callOpts.ThinkingEnable {
-		// Upstream #2140: DeepSeek/Moonshot disable thinking via
-		// {"thinking":{"type":"disabled"}}, not enable_thinking.
-		reqBody.Thinking = &openAIThinking{Type: "disabled"}
-	}
+	applyMoonshotCallOptions(&reqBody, callOpts, moonshotK3Models[m.model])
 
 	var parsed openAIChatResponse
 	if err := httpx.DoJSONRequest(
@@ -127,37 +154,18 @@ func (m *MoonshotChatModel) ChatStream(ctx context.Context, msgs []*message.Msg,
 		opt(callOpts)
 	}
 
+	messages, err := convertMessagesToOpenAI(msgs)
+	if err != nil {
+		return nil, fmt.Errorf("moonshot: %w", err)
+	}
+
 	reqBody := openAIChatRequest{
 		Model:         m.model,
-		Messages:      convertMessagesToOpenAI(msgs),
+		Messages:      messages,
 		Stream:        true,
 		StreamOptions: &openAIStreamOpts{IncludeUsage: true},
 	}
-	if callOpts.Temperature != nil {
-		t := float32(*callOpts.Temperature)
-		reqBody.Temperature = &t
-	}
-	if callOpts.MaxTokens != nil {
-		reqBody.MaxTokens = callOpts.MaxTokens
-	}
-	if callOpts.TopP != nil {
-		p := float32(*callOpts.TopP)
-		reqBody.TopP = &p
-	}
-	if callOpts.Seed != nil {
-		reqBody.Seed = callOpts.Seed
-	}
-	if len(callOpts.Tools) > 0 {
-		reqBody.Tools = callOpts.Tools
-	}
-	if callOpts.ToolChoice != nil {
-		reqBody.ToolChoice = formatToolChoice(callOpts.ToolChoice)
-	}
-	if callOpts.ThinkingEnable != nil && !*callOpts.ThinkingEnable {
-		// Upstream #2140: DeepSeek/Moonshot disable thinking via
-		// {"thinking":{"type":"disabled"}}, not enable_thinking.
-		reqBody.Thinking = &openAIThinking{Type: "disabled"}
-	}
+	applyMoonshotCallOptions(&reqBody, callOpts, moonshotK3Models[m.model])
 
 	sseCh, err := httpx.DoSSERequest(
 		ctx,
@@ -180,7 +188,11 @@ func (m *MoonshotChatModel) ChatStream(ctx context.Context, msgs []*message.Msg,
 }
 
 // DisableThinkingOptions implements ThinkingDisabler (upstream #2140).
+// The K3 series always thinks, so it offers no disable option (upstream #3578).
 func (m *MoonshotChatModel) DisableThinkingOptions() []CallOption {
+	if moonshotK3Models[m.model] {
+		return nil
+	}
 	return []CallOption{WithThinkingDisabled()}
 }
 

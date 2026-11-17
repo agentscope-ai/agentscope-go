@@ -31,6 +31,18 @@ func TestTextParser_SimpleContent(t *testing.T) {
 	}
 }
 
+func TestTextParserLeadingBOM(t *testing.T) {
+	p := NewTextParser(ChunkConfig{MaxChunkSize: 3})
+	docs, err := p.Parse(context.Background(), strings.NewReader("\uFEFFA\uFEFFB"), "bom.txt")
+	if err != nil || len(docs) != 1 || docs[0].Content != "A\uFEFFB" {
+		t.Fatalf("docs=%v err=%v; want one chunk with its interior BOM intact", docs, err)
+	}
+	docs, err = p.Parse(context.Background(), strings.NewReader("\uFEFF"), "empty.txt")
+	if err != nil || docs != nil {
+		t.Fatalf("BOM-only file: docs=%v err=%v, want nil", docs, err)
+	}
+}
+
 func TestTextParser_EmptyContent(t *testing.T) {
 	p := NewTextParser(ChunkConfig{MaxChunkSize: 1000, Overlap: 100})
 	docs, err := p.Parse(context.Background(), strings.NewReader(""), "empty.txt")
