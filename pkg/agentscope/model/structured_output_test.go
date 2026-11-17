@@ -82,6 +82,37 @@ func TestStructuredOutput_FirstStrategySucceeds(t *testing.T) {
 	}
 }
 
+// soNoDisableModel implements ThinkingDisabler with no options, like the
+// Moonshot K3 series, whose thinking cannot be turned off.
+type soNoDisableModel struct {
+	soFakeModel
+}
+
+func (m *soNoDisableModel) DisableThinkingOptions() []CallOption { return nil }
+
+func TestStructuredOutput_SkipsEmptyThinkingDisabler(t *testing.T) {
+	// forced and auto fail; a disabler with no options must not add a
+	// duplicate no_think attempt, so the none strategy succeeds on call 3.
+	m := &soNoDisableModel{soFakeModel{script: []soScriptStep{
+		{err: fmt.Errorf("tool_choice rejected")},
+		{err: fmt.Errorf("tool_choice rejected")},
+		{resp: &ChatResponse{Content: []message.ContentBlock{message.TextBlock{Type: "text", Text: `{"answer":"text-json"}`}}, IsLast: true}},
+	}}}
+	out, err := GenerateStructuredOutput(context.Background(), m, nil, soSchema)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(out) != `{"answer":"text-json"}` {
+		t.Errorf("out = %s", out)
+	}
+	if len(m.calls) != 3 {
+		t.Fatalf("expected 3 ladder calls (no no_think), got %d: %+v", len(m.calls), m.calls)
+	}
+	if last := m.calls[len(m.calls)-1]; last.ToolChoice != nil {
+		t.Errorf("none strategy must not set tool_choice, got %+v", last.ToolChoice)
+	}
+}
+
 func TestStructuredOutput_LadderFallsThroughToNoThink(t *testing.T) {
 	// forced → provider rejects (tool_choice error); auto → model produces no
 	// tool call (StructuredOutputError class); no_think → succeeds with
