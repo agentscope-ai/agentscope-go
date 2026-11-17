@@ -28,6 +28,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   cloud, whoever owns the session. Tested offline with the fake classifier.
   See
   [Main Thread](docs/main-thread.md#routing-modes-and-the-classifier-layer).
+### Added — model card parameter overrides
+
+- `ModelCard.ParameterOverrides` parses and exposes each card's
+  `parameter_overrides` section (hidden, default, anyOf, …) instead of
+  dropping it, so model-list APIs can serve it to consumers. Part of #138.
+
 
 ### Added — Main Thread coordinator (experimental)
 
