@@ -11,6 +11,13 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — Gemini thinking options
+
+- Gemini `Chat` and `ChatStream` now serialize tri-state thinking options instead
+  of silently dropping them. Argon/Carbon use the new `WithThinkingLevel` option
+  (`LOW`, `MEDIUM`, `HIGH`); incompatible budgets/levels fail before dispatch.
+  Unset options retain provider defaults. See [Gemini thinking](docs/model-providers.md#gemini-thinking-unreleased).
+
 ### Added — Main Thread router (experimental)
 
 - New experimental package `thread/route`: a `thread.Router` for the Main
@@ -28,6 +35,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   cloud, whoever owns the session. Tested offline with the fake classifier.
   See
   [Main Thread](docs/main-thread.md#routing-modes-and-the-classifier-layer).
+### Added — model card parameter overrides
+
+- `ModelCard.ParameterOverrides` parses and exposes each card's
+  `parameter_overrides` section (hidden, default, anyOf, …) instead of
+  dropping it, so model-list APIs can serve it to consumers. Part of #138.
+
 
 ### Added — Main Thread coordinator (experimental)
 
@@ -205,6 +218,14 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   unchanged. Local fixtures cover both call paths; no live API result is
   claimed. Part of #138.
 
+### Added — model card parity refresh
+
+- Cards from Python AgentScope at 3fef100e: the claude 5-5 family and
+  fable-5-1, the gpt-6 family, gemini 3.7/3.8-flash and 4-argon/carbon,
+  kimi-k3.1-pro/-highspeed, dashscope, ollama, deepseek and xAI additions,
+  MiniMax cards, and a new `volcengine` set. `claude-sonnet-4-5` is now
+  deprecated per upstream. 112 cards total across 10 providers. Part of #138.
+
 
 ### Fixed — Anthropic tool-result history
 
@@ -277,6 +298,8 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   with its tabs and breaks.
 - Qdrant queries use the collection's vector metric so larger document
   scores consistently represent greater relevance.
+- The PowerPoint parser extracts slide text from ISO Strict `.pptx` files
+  as well as Transitional files.
 
 ### Fixed — summary over an empty fork snapshot
 
