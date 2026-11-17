@@ -3,6 +3,7 @@ package formatter
 import (
 	"fmt"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/message"
@@ -249,7 +250,11 @@ func mergeConsecutiveRoles(msgs []map[string]any) []map[string]any {
 	return result
 }
 
+// API-rejected message-name characters; each run becomes one "_" (upstream
+// #3548). RE2's \s is ASCII-only, so the API's remaining ECMA-style
+// whitespace (vertical tab, Unicode spaces and line separators) is listed.
+var apiInvalidMessageNameChars = regexp.MustCompile(`[\s\x{0B}\p{Z}\x{FEFF}<|\\/>]+`)
+
 func sanitizeName(name string) string {
-	r := strings.NewReplacer(" ", "_", "-", "_", ".", "_")
-	return r.Replace(name)
+	return apiInvalidMessageNameChars.ReplaceAllString(name, "_")
 }

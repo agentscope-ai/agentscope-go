@@ -50,7 +50,9 @@ jobs:
           # Two runs on purpose: coverage is attributed per tested package, so
           # the ./pkg/... gate needs its own run; reusing the ./... profile or
           # -coverpkg would measure a different (cross-package) metric.
-          go test -coverprofile=coverage.out ./... >/dev/null
+          # Keep the first pass's log and dump it on failure: a silent run hides
+          # which package or assertion failed (issue #157).
+          go test -coverprofile=coverage.out ./... > coverage-test.log 2>&1 || { cat coverage-test.log; exit 1; }
           printf "total ./...     : "; go tool cover -func=coverage.out | tail -1
           go test -coverprofile=coverage-pkg.out ./pkg/...
           total=$(go tool cover -func=coverage-pkg.out | tail -1 | awk '{print $NF}' | tr -d '%')

@@ -3,12 +3,15 @@ package hub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -328,5 +331,135 @@ func TestSanitizeClientNameCollapsesRuns(t *testing.T) {
 		if got := sanitizeClientName(in); got != want {
 			t.Errorf("sanitizeClientName(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// Live registries (GitHub api.mcp.github.com and the official
+// registry.modelcontextprotocol.io, probed 2026-11-13) have retired the
+// legacy detail endpoint: GET /v0/servers/{name} is 404 (literal slash) or
+// 400 (%2F-encoded) on GitHub and 404 on the official registry. The
+// replacement is GET /v0.1/servers/{name}/versions/latest, whose payload is
+// wrapped ({"server": {...}}) and carries a top-level server.version instead
+// of version_detail, and no x-github block.
+
+// newLiveShapeServer mimics the live registry: legacy detail endpoint is
+// dead, the v0.1 versions/latest endpoint serves the detail.
+func newLiveShapeServer(t *testing.T, detailStatus int) *httptest.Server {
+	t.Helper()
+	var legacyHits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/v0/servers/"):
+			atomic.AddInt32(&legacyHits, 1)
+			w.WriteHeader(http.StatusNotFound)
+		case strings.HasSuffix(r.URL.Path, "/versions/latest"):
+			if detailStatus != http.StatusOK {
+				w.WriteHeader(detailStatus)
+				return
+			}
+			_, _ = w.Write([]byte(`{"server": {"name": "io.github.upstash/context7", "description": "docs", "version": "0.3.0", "remotes": [{"type": "streamable-http", "url": "https://mcp.context7.com/mcp"}]}, "_meta": {"io.modelcontextprotocol.registry/official": {"status": "active", "isLatest": true}}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(func() {
+		srv.Close()
+		if got := atomic.LoadInt32(&legacyHits); got != 0 {
+			t.Errorf("legacy dead endpoint hit %d times, want 0", got)
+		}
+	})
+	return srv
+}
+
+func TestGitHubMCPRegistry_GetLiveRegistryShape(t *testing.T) {
+	srv := newLiveShapeServer(t, http.StatusOK)
+	h := NewGitHubMCPRegistry(GitHubRegistryConfig{BaseURL: srv.URL})
+	defer h.Close()
+
+	card, err := h.Get(context.Background(), "io.github.upstash/context7")
+	if err != nil {
+		t.Fatalf("Get against live registry shape: %v", err)
+	}
+	if card.Name != "context7" || card.Config["url"] != "https://mcp.context7.com/mcp" {
+		t.Errorf("card mapping wrong: %+v", card)
+	}
+	// The v0.1 detail carries a top-level version, not version_detail.
+	if card.Version != "0.3.0" {
+		t.Errorf("version not read from top-level server.version: %+v", card)
+	}
+
+	// Install must survive the same endpoint retirement.
+	dir := t.TempDir()
+	if err := h.Install(context.Background(), "io.github.upstash/context7", dir); err != nil {
+		t.Fatalf("Install against live registry shape: %v", err)
+	}
+	data, err := os.ReadFile(dir + "/context7.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "mcp.context7.com") {
+		t.Errorf("installed config wrong: %s", data)
+	}
+}
+
+func TestGitHubMCPRegistry_GetFallsBackToLegacyEndpoint(t *testing.T) {
+	// A third-party registry may still serve only the legacy detail endpoint.
+	srv := newGitHubTestServer(t)
+	defer srv.Close()
+	h := NewGitHubMCPRegistry(GitHubRegistryConfig{BaseURL: srv.URL})
+	defer h.Close()
+
+	card, err := h.Get(context.Background(), "io.github.upstash/context7")
+	if err != nil {
+		t.Fatalf("legacy fallback: %v", err)
+	}
+	if card.Name != "context7" {
+		t.Errorf("legacy fallback card wrong: %+v", card)
+	}
+}
+
+func TestGitHubMCPRegistry_GetNotFoundKeepsNotFoundSemantics(t *testing.T) {
+	// GitHub's real behavior: the legacy endpoint rejects the %2F escape
+	// with 400 while the v0.1 endpoint answers 404. The combined error must
+	// keep the primary not-found semantics.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v0/servers/") {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	h := NewGitHubMCPRegistry(GitHubRegistryConfig{BaseURL: srv.URL})
+	defer h.Close()
+
+	_, err := h.Get(context.Background(), "no.such/server")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var statusErr *httpStatusError
+	if !errors.As(err, &statusErr) || statusErr.status != http.StatusNotFound {
+		t.Errorf("primary not-found semantics lost: %v", err)
+	}
+	if !strings.Contains(err.Error(), "400") {
+		t.Errorf("legacy endpoint cause missing from the error chain: %v", err)
+	}
+}
+
+func TestGitHubMCPRegistry_GetNoFallbackOn429Or500(t *testing.T) {
+	// Rate limiting and server errors must not trigger the legacy fallback
+	// (it would double pressure on the failing registry).
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusInternalServerError} {
+		srv := newLiveShapeServer(t, status)
+		h := NewGitHubMCPRegistry(GitHubRegistryConfig{BaseURL: srv.URL})
+		_, err := h.Get(context.Background(), "io.github.upstash/context7")
+		h.Close()
+		if err == nil {
+			t.Fatalf("status %d: expected error", status)
+		}
+		if !strings.Contains(err.Error(), strconv.Itoa(status)) {
+			t.Errorf("status %d: error should report it directly, got: %v", status, err)
+		}
+		// newLiveShapeServer's cleanup asserts the legacy endpoint was not hit.
 	}
 }

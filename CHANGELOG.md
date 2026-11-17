@@ -11,6 +11,45 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Added — examples
+
+- **Gin and Echo integration example** (`examples/framework_service/`): serves
+  an agent's chat replies as SSE events and exposes its tools through the MCP
+  HTTP endpoints, mounted into Gin and Echo routers in one process.
+  Demonstrates the net/http interop pattern (native framework handlers for
+  streaming, `gin.WrapH`/`echo.WrapHandler` for the MCP handler) and includes
+  offline endpoint tests using a scripted model. Adds example-only
+  dependencies `github.com/gin-gonic/gin` and `github.com/labstack/echo/v4`
+  (both MIT).
+
+### Fixed — hub
+
+- **`GitHubMCPRegistry.Get`/`Install` against live registries:** both GitHub's
+  MCP registry (`api.mcp.github.com`) and the official registry
+  (`registry.modelcontextprotocol.io`) have retired the legacy detail endpoint
+  `GET /v0/servers/{name}` (404 on the literal slash, 400 on the `%2F`
+  escape), so `Get` — and with it `Install` — always failed against live
+  registries while the fixture-based tests kept passing. `Get` now requests
+  `GET /v0.1/servers/{name}/versions/latest` and falls back to the legacy
+  endpoint only on a 404 (third-party registries may still serve it); 429/5xx
+  and network errors surface directly. When both endpoints fail, the error
+  keeps the primary endpoint's not-found semantics with the legacy failure in
+  the cause chain. Registry HTTP errors now carry the status code in a typed
+  (unexported) error so fallback decisions do not rely on message text, and
+  `toCard` reads the top-level `server.version` when `version_detail` is
+  absent (the v0.1 detail shape). Known remaining gap, tracked separately:
+  entries published under the 2025-09-29+ server schema rename package fields
+  to camelCase (`identifier`/`runtimeHint`), which `fromPackage` does not map
+  yet, so package-only servers on the new schema are skipped by both `List`
+  and `Get`.
+
+### Fixed — Gemini thinking options
+
+- Gemini `Chat` and `ChatStream` now serialize tri-state thinking options instead
+  of silently dropping them. Argon/Carbon use the new `WithThinkingLevel` option
+  (`LOW`, `MEDIUM`, `HIGH`); incompatible budgets/levels fail before dispatch.
+  Unset options retain provider defaults. See [Gemini thinking](docs/model-providers.md#gemini-thinking-unreleased).
+
 ### Added — Main Thread participants (experimental)
 
 - New experimental package `thread/participant`: `AgentParticipant` runs one
@@ -52,6 +91,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   cloud, whoever owns the session. Tested offline with the fake classifier.
   See
   [Main Thread](docs/main-thread.md#routing-modes-and-the-classifier-layer).
+### Added — model card parameter overrides
+
+- `ModelCard.ParameterOverrides` parses and exposes each card's
+  `parameter_overrides` section (hidden, default, anyOf, …) instead of
+  dropping it, so model-list APIs can serve it to consumers. Part of #138.
+
 
 ### Added — Main Thread coordinator (experimental)
 
@@ -191,6 +236,13 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   family so a shared cache cannot return a different endpoint's vectors. Entries
   written with old keys are repopulated on demand.
 
+### Fixed — multi-agent message names for Chat Completions
+
+- Agent names now keep legal dashes and dots, and each run of the characters
+  the API rejects in `name` fields (whitespace — including Unicode whitespace
+  such as non-breaking and ideographic spaces — and `<|\/>`) collapses to one
+  underscore, so free-text names no longer cause 400s. Part of #138.
+
 ### Fixed — Chat Completions formatter errors
 
 - Return formatter errors before HTTP dispatch in buffered and streamed
@@ -220,6 +272,23 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 - Encode a named tool choice as a function object in buffered and streamed
   Responses requests instead of sending the tool name as an invalid string.
   Part of #125 (O5).
+### Fixed — Moonshot K3 wire shape
+
+- Kimi K3-series models now send their token budget as
+  `max_completion_tokens`, keep `temperature`/`top_p` and the `thinking`
+  switch off the wire, and offer no disable-thinking option to the
+  structured-output fallback (they always think). Older Moonshot models are
+  unchanged. Local fixtures cover both call paths; no live API result is
+  claimed. Part of #138.
+
+### Added — model card parity refresh
+
+- Cards from Python AgentScope at 3fef100e: the claude 5-5 family and
+  fable-5-1, the gpt-6 family, gemini 3.7/3.8-flash and 4-argon/carbon,
+  kimi-k3.1-pro/-highspeed, dashscope, ollama, deepseek and xAI additions,
+  MiniMax cards, and a new `volcengine` set. `claude-sonnet-4-5` is now
+  deprecated per upstream. 112 cards total across 10 providers. Part of #138.
+
 
 ### Fixed — Anthropic tool-result history
 
@@ -229,6 +298,15 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   continuation with UnifiedAgent; public formatter output can contain multiple
   messages per input. Local fixtures cover both call paths; no live API result
   is claimed. Part of #125.
+
+### Fixed — Gemini tool-call thought signatures
+
+- Thinking models require a function-call part's `thought_signature` echoed
+  back with the same history part; the adapter now stashes it in
+  `ToolCallBlock.Extra` and restores it on the wire, for both buffered and
+  streamed responses. The public Gemini formatter also echoes signatures
+  through `Format` and `FormatMultiAgent`. Local fixtures cover both call
+  paths; no live API result is claimed. Part of #138.
 
 ### Fixed — Gemini tool error results
 
@@ -292,6 +370,8 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   with its tabs and breaks.
 - Qdrant queries use the collection's vector metric so larger document
   scores consistently represent greater relevance.
+- The PowerPoint parser extracts slide text from ISO Strict `.pptx` files
+  as well as Transitional files.
 
 ### Fixed — summary over an empty fork snapshot
 

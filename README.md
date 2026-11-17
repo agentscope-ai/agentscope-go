@@ -214,6 +214,7 @@ its model choice, environment variables and required services or runtimes.
 | [guardrail](examples/guardrail/) | Block, redact and warn with mock model responses |
 | [spend_cap](examples/spend_cap/) | Observed-cost budgets with a mock model |
 | [agent_service](examples/agent_service/) | HTTP service and SSE events |
+| [framework_service](examples/framework_service/) | Agent SSE streaming and MCP tool endpoints mounted into Gin and Echo |
 | [scoped_service](examples/scoped_service/) | Offline shared service with owner-scoped sessions and file tools |
 | [webui](examples/webui/) | Embedded browser UI |
 | [dingtalk_channel](examples/dingtalk_channel/) | DingTalk messages and confirmations |
@@ -243,6 +244,7 @@ to the same catalog.
 | Middleware and memory | [Middleware](docs/middleware.md) |
 | Goal execution | [Experimental GoalPipeline and Agent adapters](docs/goal-pipeline.md) |
 | Named-member teams | [Experimental serial TeamPipeline and host interactions](docs/team-pipeline.md) |
+| Cloud-edge shared session | [Experimental Main Thread log, Coordinator and routing](docs/main-thread.md) |
 | Shared HTTP service | [Experimental owner-scoped sessions and request-aware construction](docs/scoped-service.md) |
 | Application deployment | [Deployment](docs/deployment.md) · [Execution and session limits](docs/adversarial-hardening.md) · [Reply recovery](docs/reply-recovery.md) |
 | OpenAI-compatible serving | [Experimental Chat Completions handler and client contract](docs/openai-serving.md) |

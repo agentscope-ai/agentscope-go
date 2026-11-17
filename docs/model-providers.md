@@ -126,7 +126,7 @@ cm, _ := model.NewAnthropicChatModel(&model.AnthropicConfig{
 })
 ```
 
-Models: `claude-opus-4-5`, `claude-opus-4-6`, `claude-opus-4-7`, `claude-opus-4-8`, `claude-sonnet-4-5`, `claude-sonnet-4-6`, `claude-haiku-4-5`
+Models: `claude-opus-4-5`, `claude-opus-4-6`, `claude-opus-4-7`, `claude-opus-4-8`, `claude-sonnet-4-5` (deprecated), `claude-sonnet-4-6`, `claude-haiku-4-5`
 
 Extended thinking: `model.WithThinking(true, 10000)` enables thinking with a 10K token budget.
 
@@ -220,6 +220,53 @@ cm, _ := model.NewGeminiChatModel(model.GeminiConfig{
 ```
 
 Models: `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-flash-preview`, `gemini-3.1-pro-preview`
+
+#### Gemini thinking (unreleased)
+
+Both `Chat` and `ChatStream` send explicit thinking options. Leaving thinking
+unset omits `thinkingConfig` and retains the provider default. For budget-era
+models, `model.WithThinking(true, 2048)` sends `includeThoughts: true` with a
+2048-token budget; a nonpositive option budget uses 1024. `WithThinkingDisabled()`
+or `WithThinking(false, 0)` sends `includeThoughts: false` and budget 0. Models
+that cannot disable thinking may reject this request; leaving the option unset
+is the default-compatible path.
+
+The adapter recognizes exactly `gemini-4-argon` and `gemini-4-carbon`, including
+the last segment of qualified model names, as level-based models:
+
+```go
+levelModel, err := model.NewGeminiChatModel(model.GeminiConfig{
+    APIKey: os.Getenv("GEMINI_API_KEY"),
+    Model:  "gemini-4-argon",
+})
+if err != nil {
+    return err
+}
+resp, err := levelModel.Chat(ctx, msgs,
+    model.WithThinking(true, 0),
+    model.WithThinkingLevel("medium"), // sent as MEDIUM
+)
+```
+
+`WithThinkingLevel` accepts `LOW`, `MEDIUM`, or `HIGH` case-insensitively. It does
+not set the enable flag and can be used alone to retain the model's thought-output
+default. Enabling without a level leaves the provider's level default. Disabling
+alone sends only `includeThoughts: false`; an explicitly supplied level is retained
+even alongside false, matching Python. This controls thought output and does not
+establish that the model stops internal reasoning.
+
+Invalid levels, any level on other Gemini models, and any nonnil budget on
+Argon/Carbon return an error before HTTP dispatch. `WithThinking(true, 0)` leaves
+the budget unset and is therefore valid for Argon/Carbon. Existing option
+composition retains a previously set positive budget, so use a fresh option set
+when switching to a level-based model. Other providers ignore `WithThinkingLevel`.
+
+This follows [Python AgentScope at `3fef100e`](https://github.com/agentscope-ai/agentscope/blob/3fef100e/src/agentscope/model/_gemini/_model.py)
+and the accepted [RFC #164](https://github.com/agentscope-ai/agentscope-go/issues/164#issuecomment-6906991883).
+The adapter-local gate does not use model cards. Python's Gemini 4 output-token
+cap and sampling filtering, Gemini structured-output thinking fallback, and thought
+signature round-trips are separate work. Validation uses local HTTP fixtures,
+not live Gemini calls.
 
 ### Ollama (Local)
 
@@ -555,26 +602,28 @@ Query bundled model metadata:
 card, _ := model.GetModelCard("claude-sonnet-4-6")
 // card.Name, card.Provider, card.ContextSize, card.OutputSize
 
-models := model.ListModels()          // all 78 model cards
+models := model.ListModels()          // all 112 model cards
 models = model.ListModels("openai")   // filter by provider
 ```
 
-78 model cards + 9 TTS model cards are bundled and accessible at runtime via `//go:embed`.
+112 model cards + 9 TTS model cards are bundled and accessible at runtime via `//go:embed`.
 
 ## Model Card Summary
 
 | Provider | Chat Models | Embedding Models | TTS Models |
 |----------|------------|------------------|------------|
-| OpenAI | 13 | 2 | 2 |
-| Anthropic | 10 | — | — |
-| DashScope | 15 (incl. GLM-5.2) | 2 | 6 |
-| DeepSeek | 4 | — | — |
-| Gemini | 9 | 2 | 1 |
-| Moonshot | 8 (incl. Kimi K3) | — | — |
-| Ollama | 4 | — | — |
-| xAI | 9 | — | — |
-| **Total** | **72** | **6** | **9** |
+| OpenAI | 17 | 2 | 2 |
+| Anthropic | 14 | — | — |
+| DashScope | 19 (incl. GLM-5.2) | 2 | 6 |
+| DeepSeek | 5 | — | — |
+| Gemini | 13 | 2 | 1 |
+| Moonshot | 10 (incl. Kimi K3) | — | — |
+| Ollama | 9 | — | — |
+| xAI | 11 | — | — |
+| Volcengine | 5 | — | — |
+| MiniMax | 3 | — | — |
+| **Total** | **106** | **6** | **9** |
 
-72 chat + 6 embedding = the 78 bundled cards under `pkg/agentscope/model/models/`.
+106 chat + 6 embedding = the 112 bundled cards under `pkg/agentscope/model/models/`.
 The 9 TTS cards are a separate embed under `pkg/agentscope/tts/models/`. Verify
 with `find pkg/agentscope/model/models -name '*.yaml' | wc -l`.

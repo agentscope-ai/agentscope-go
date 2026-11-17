@@ -90,9 +90,14 @@ func GenerateStructuredOutputWithUsage(ctx context.Context, model ChatModel, msg
 		{"forced", &ToolChoice{Mode: "required"}, false},
 		{"auto", &ToolChoice{Mode: "auto"}, false},
 	}
-	disabler, canDisable := model.(ThinkingDisabler)
-	if canDisable {
-		strategies = append(strategies, soStrategy{"no_think", &ToolChoice{Mode: "required"}, true})
+	var disableThinkingOpts []CallOption
+	if disabler, ok := model.(ThinkingDisabler); ok {
+		// A disabler that offers no options (e.g. Moonshot K3, which always
+		// thinks) gets no no_think attempt instead of a duplicate forced run.
+		disableThinkingOpts = disabler.DisableThinkingOptions()
+		if len(disableThinkingOpts) > 0 {
+			strategies = append(strategies, soStrategy{"no_think", &ToolChoice{Mode: "required"}, true})
+		}
 	}
 	strategies = append(strategies, soStrategy{"none", nil, false})
 
@@ -102,8 +107,8 @@ func GenerateStructuredOutputWithUsage(ctx context.Context, model ChatModel, msg
 		if st.choice != nil {
 			opts = append(opts, WithToolChoice(st.choice))
 		}
-		if st.noThink && canDisable {
-			opts = append(opts, disabler.DisableThinkingOptions()...)
+		if st.noThink {
+			opts = append(opts, disableThinkingOpts...)
 		}
 
 		resp, err := model.Chat(ctx, msgs, opts...)

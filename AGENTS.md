@@ -157,7 +157,14 @@ locally with the workflow's pinned apidiff and
 `bash .github/scripts/api-compat.sh origin/main`); `docs.yml` checks
 markdown links and runs the offline examples; `codeql.yml` and
 `scorecard.yml` provide pull-request static analysis and a scheduled hygiene
-scorecard.
+scorecard. `actionlint.yml` statically checks the workflow files themselves;
+`pr-title.yml` enforces Conventional Commit pull request titles;
+`lint-report.yml` and `lint-review.yml` post `golangci-lint` findings as
+inline PR review comments via reviewdog (the report job runs PR code with a
+read-only token, the posting job never executes PR code, and the blocking
+lint gate stays in `ci.yml`). `.coderabbit.yaml` configures the CodeRabbit
+review app for repositories where that GitHub App is installed; it is
+advisory and does not replace any CI gate.
 
 ### Coverage and regression policy
 
