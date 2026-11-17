@@ -268,6 +268,8 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   with its tabs and breaks.
 - Qdrant queries use the collection's vector metric so larger document
   scores consistently represent greater relevance.
+- The PowerPoint parser extracts slide text from ISO Strict `.pptx` files
+  as well as Transitional files.
 
 ### Fixed — summary over an empty fork snapshot
 
