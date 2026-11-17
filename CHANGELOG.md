@@ -73,6 +73,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   `parameter_overrides` section (hidden, default, anyOf, …) instead of
   dropping it, so model-list APIs can serve it to consumers. Part of #138.
 
+### Added — internal W4-A copy foundation
+
+- Add an internal allowlisted deep copier with explicit resource limits and
+  independent mutable storage for later retention-preview work. This does not
+  expose a snapshot API or alter agent/compression behavior.
 
 ### Added — Main Thread coordinator (experimental)
 
