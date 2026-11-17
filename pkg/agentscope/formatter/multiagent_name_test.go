@@ -8,9 +8,10 @@ import (
 )
 
 // The Chat Completions API only accepts message names matching
-// ^[^\s<|\/>]+$. Legal names must keep their dashes and dots, and each run
-// of illegal characters must collapse to one underscore (upstream #3548).
-var apiMessageNamePattern = regexp.MustCompile(`^[^\s<|\\/>]+$`)
+// ^[^\s<|\/>]+$ with ECMA-style whitespace. Legal names must keep their
+// dashes and dots, and each run of illegal characters must collapse to one
+// underscore (upstream #3548).
+var apiMessageNamePattern = regexp.MustCompile(`^[^\s\x{0B}\p{Z}\x{FEFF}<|\\/>]+$`)
 
 func TestMultiAgentNameSanitizer(t *testing.T) {
 	cases := []struct {
@@ -22,6 +23,10 @@ func TestMultiAgentNameSanitizer(t *testing.T) {
 		{"Team-1.v2", "Team-1.v2"}, // legal dash and dot are preserved
 		{"a  b", "a_b"},            // a run of illegal characters collapses
 		{"a\tb\nc", "a_b_c"},
+		{"a\vb", "a_b"}, // vertical tab (not RE2 \s)
+		{"a b", "a_b"},  // non-breaking space
+		{"a　b", "a_b"},  // ideographic space
+		{"a b", "a_b"},  // line separator
 		{"a<b", "a_b"},
 		{"a|b", "a_b"},
 		{`a\b`, "a_b"},
