@@ -40,7 +40,7 @@ jobs:
 
       - name: Install apidiff
         # Pinned to the last x/exp commit whose go.mod supports Go 1.25.
-        run: go install golang.org/x/exp/cmd/apidiff@c1d0aacb2297
+        run: go install golang.org/x/exp/cmd/apidiff@c1d0aacb22970709b06315c25ea93c5683101786
 
       - name: Check Stable-tier APIs
         env:
