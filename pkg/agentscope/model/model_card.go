@@ -43,6 +43,8 @@ type ModelCard struct {
 	OutputTypes  []string      `yaml:"output_types"  json:"output_types"`
 	ContextSize  int           `yaml:"context_size"  json:"context_size"`
 	OutputSize   int           `yaml:"output_size"   json:"output_size"`
+	// Card parameter hints (hidden, default, anyOf, …), exposed verbatim.
+	ParameterOverrides map[string]any `yaml:"parameter_overrides" json:"parameter_overrides,omitempty"`
 }
 
 // UnmarshalYAML makes deprecated_at parsing lenient. Upstream Python model
@@ -50,15 +52,16 @@ type ModelCard struct {
 // Go cards used RFC3339. Accept RFC3339, naive ISO seconds, and plain dates.
 func (c *ModelCard) UnmarshalYAML(value *yaml.Node) error {
 	var aux struct {
-		Type         string   `yaml:"type"`
-		Name         string   `yaml:"name"`
-		Label        string   `yaml:"label"`
-		Status       string   `yaml:"status"`
-		DeprecatedAt string   `yaml:"deprecated_at"`
-		InputTypes   []string `yaml:"input_types"`
-		OutputTypes  []string `yaml:"output_types"`
-		ContextSize  int      `yaml:"context_size"`
-		OutputSize   int      `yaml:"output_size"`
+		Type               string         `yaml:"type"`
+		Name               string         `yaml:"name"`
+		Label              string         `yaml:"label"`
+		Status             string         `yaml:"status"`
+		DeprecatedAt       string         `yaml:"deprecated_at"`
+		InputTypes         []string       `yaml:"input_types"`
+		OutputTypes        []string       `yaml:"output_types"`
+		ContextSize        int            `yaml:"context_size"`
+		OutputSize         int            `yaml:"output_size"`
+		ParameterOverrides map[string]any `yaml:"parameter_overrides"`
 	}
 	if err := value.Decode(&aux); err != nil {
 		return err
@@ -71,6 +74,7 @@ func (c *ModelCard) UnmarshalYAML(value *yaml.Node) error {
 	c.OutputTypes = aux.OutputTypes
 	c.ContextSize = aux.ContextSize
 	c.OutputSize = aux.OutputSize
+	c.ParameterOverrides = aux.ParameterOverrides
 	c.DeprecatedAt = nil
 	raw := strings.TrimSpace(aux.DeprecatedAt)
 	if raw == "" {
@@ -130,7 +134,7 @@ var modelsFS embed.FS
 
 // embeddedModelCards is the parsed, sorted set of all embedded model cards. The
 // embedded FS is immutable at runtime, so it is parsed exactly once (previously
-// every ListModels/GetModelCard call re-read and re-parsed 78 YAML files, and
+// every ListModels/GetModelCard call re-read and re-parsed the YAML files, and
 // GetModelCard sits on the reply hot path via context compression).
 var (
 	embeddedModelCardsOnce sync.Once

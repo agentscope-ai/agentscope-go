@@ -71,7 +71,10 @@ func (m *GeminiChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts ..
 		opt(callOpts)
 	}
 
-	reqBody := m.buildRequest(msgs, callOpts)
+	reqBody, err := m.buildRequest(msgs, callOpts)
+	if err != nil {
+		return nil, err
+	}
 
 	// Send the API key via the x-goog-api-key header rather than a ?key= query
 	// param so it never appears in URLs (which httpx logs and wraps into errors).
@@ -107,7 +110,10 @@ func (m *GeminiChatModel) ChatStream(ctx context.Context, msgs []*message.Msg, o
 		opt(callOpts)
 	}
 
-	reqBody := m.buildRequest(msgs, callOpts)
+	reqBody, err := m.buildRequest(msgs, callOpts)
+	if err != nil {
+		return nil, err
+	}
 
 	url := fmt.Sprintf("%s/models/%s:streamGenerateContent?alt=sse", m.baseURL, m.model)
 
@@ -136,7 +142,11 @@ func (m *GeminiChatModel) CountTokens(msgs []*message.Msg, tools []ToolSchema) i
 	return countTokensByBytes(msgs, tools)
 }
 
-func (m *GeminiChatModel) buildRequest(msgs []*message.Msg, callOpts *CallOptions) geminiRequest {
+func (m *GeminiChatModel) buildRequest(msgs []*message.Msg, callOpts *CallOptions) (geminiRequest, error) {
+	thinking, err := m.thinkingConfig(callOpts)
+	if err != nil {
+		return geminiRequest{}, err
+	}
 	var systemInstruction *geminiContent
 	var contents []geminiContent
 
@@ -225,8 +235,8 @@ func (m *GeminiChatModel) buildRequest(msgs []*message.Msg, callOpts *CallOption
 	}
 
 	// Generation config
-	genCfg := geminiGenerationConfig{}
-	hasGenCfg := false
+	genCfg := geminiGenerationConfig{ThinkingConfig: thinking}
+	hasGenCfg := thinking != nil
 	if callOpts.Temperature != nil {
 		t := float32(*callOpts.Temperature)
 		genCfg.Temperature = &t
@@ -258,7 +268,55 @@ func (m *GeminiChatModel) buildRequest(msgs []*message.Msg, callOpts *CallOption
 		req.Tools = []geminiTool{{FunctionDeclarations: funcs}}
 	}
 
-	return req
+	return req, nil
+}
+
+// isGeminiLevelModel mirrors Python AgentScope at 3fef100e. Keep the gate
+// exact: unknown model IDs retain the budget-era contract.
+func isGeminiLevelModel(name string) bool {
+	switch name[strings.LastIndex(name, "/")+1:] {
+	case "gemini-4-argon", "gemini-4-carbon":
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *GeminiChatModel) thinkingConfig(opts *CallOptions) (*geminiThinkingConfig, error) {
+	levelModel := isGeminiLevelModel(m.model)
+	if levelModel && opts.ThinkingBudget != nil {
+		return nil, fmt.Errorf("gemini: thinking budget is unsupported for Argon and Carbon; use thinking level")
+	}
+	var level *string
+	if opts.ThinkingLevel != nil {
+		if !levelModel {
+			return nil, fmt.Errorf("gemini: thinking level is supported only for Argon and Carbon")
+		}
+		normalized := strings.ToUpper(*opts.ThinkingLevel)
+		switch normalized {
+		case "LOW", "MEDIUM", "HIGH":
+			level = &normalized
+		default:
+			return nil, fmt.Errorf("gemini: thinking level must be LOW, MEDIUM or HIGH")
+		}
+	}
+	if levelModel {
+		if opts.ThinkingEnable == nil && level == nil {
+			return nil, nil
+		}
+		return &geminiThinkingConfig{IncludeThoughts: opts.ThinkingEnable, ThinkingLevel: level}, nil
+	}
+	if opts.ThinkingEnable == nil {
+		return nil, nil
+	}
+	budget := 0
+	if *opts.ThinkingEnable {
+		budget = 1024
+		if opts.ThinkingBudget != nil && *opts.ThinkingBudget > 0 {
+			budget = *opts.ThinkingBudget
+		}
+	}
+	return &geminiThinkingConfig{IncludeThoughts: opts.ThinkingEnable, ThinkingBudget: &budget}, nil
 }
 
 // --- Gemini API types ---
@@ -293,10 +351,17 @@ type geminiFunctionResponse struct {
 	Response map[string]any `json:"response"`
 }
 
+type geminiThinkingConfig struct {
+	IncludeThoughts *bool   `json:"includeThoughts,omitempty"`
+	ThinkingBudget  *int    `json:"thinkingBudget,omitempty"`
+	ThinkingLevel   *string `json:"thinkingLevel,omitempty"`
+}
+
 type geminiGenerationConfig struct {
-	Temperature     *float32 `json:"temperature,omitempty"`
-	MaxOutputTokens *int     `json:"maxOutputTokens,omitempty"`
-	TopP            *float32 `json:"topP,omitempty"`
+	ThinkingConfig  *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+	Temperature     *float32              `json:"temperature,omitempty"`
+	MaxOutputTokens *int                  `json:"maxOutputTokens,omitempty"`
+	TopP            *float32              `json:"topP,omitempty"`
 }
 
 type geminiTool struct {
