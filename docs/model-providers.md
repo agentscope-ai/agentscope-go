@@ -33,6 +33,15 @@ cm, _ := model.NewOpenAIChatModel(model.OpenAIConfig{
 
 Models: `gpt-4o`, `gpt-4o-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`, `gpt-5.4`, `gpt-5.5`, `gpt-audio-mini`, `o3`, `o4-mini`
 
+Both `Chat` and `ChatStream` return message-formatting errors before sending
+an HTTP request. Unsupported input such as base64 `audio/ogg`, or an error
+from `OpenAIConfig.Formatter`, no longer silently converts the entire history
+to plain text. Wrapped errors preserve the original cause for `errors.Is`.
+The same policy applies to DashScope, DeepSeek, Moonshot, OpenAI-compatible
+Ollama, xAI and Volcengine, which share the conversion helper. Correct or
+remove the unsupported input before retrying; the adapters do not rewrite
+stored history on a formatting failure.
+
 Buffered Chat Completions responses now retain the normalized `StopReason`
 (unreleased O1 fix), matching the existing streaming path. For example,
 `finish_reason: "length"` becomes `model.StopReasonLength`; stop, tool calls,
@@ -45,11 +54,10 @@ fork-summary and usage-aware structured-response truncation guards; tracing
 also receives the actual reason. Other consumers may still accept partial
 output unless they explicitly check for it.
 
-
 The shared parser serves OpenAI, DashScope, DeepSeek, Moonshot, the
-OpenAI-compatible Ollama adapter, xAI, and Volcengine. Volcengine already sets
-the field in its wrapper. Tests cover buffered/streamed agreement and retain
-provider-specific usage accounting. Responses API and native Ollama use
+OpenAI-compatible Ollama adapter, xAI, and Volcengine. Tests cover
+buffered/streamed agreement and retain provider-specific usage accounting.
+Responses API and native Ollama use
 separate implementations. These checks use local HTTP fixtures, not live
 provider calls. See the [OpenAI finish-reason reference](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create).
 
@@ -64,6 +72,43 @@ cm, _ := model.NewOpenAIResponseModel(&model.OpenAIResponseConfig{
 ```
 
 Uses the Responses API (`/v1/responses`) instead of Chat Completions. Default timeout is 5 minutes for long reasoning tasks.
+
+Both `Chat` and `ChatStream` preserve direct `DataBlock` images as
+`input_image` parts, using the original URL or a base64 data URL. A
+`HintBlock` becomes user input at its position in the history, including
+when attached to an assistant message; string hints and ordered text/image
+block lists are supported. Other media and unsupported hint block types
+are skipped. A turn with no replayable content keeps the existing
+content-omitted placeholder. Tool-result image conversion is unchanged.
+These request shapes are tested with local HTTP fixtures, not live vision
+calls.
+
+To select a specific function from the supplied tools, use
+`model.WithToolChoice(&model.ToolChoice{Mode: "get_weather"})`. Both `Chat`
+and `ChatStream` encode this as
+`{"type":"function","name":"get_weather"}` in `tool_choice`, keeping
+all supplied tool definitions. The `auto`, `none` and `required` modes stay
+strings; an unset tool choice stays omitted. This fix does not add tool-name
+validation or support for `ToolChoice.Tools` filtering to the Responses
+adapter. Request serialization is covered by local HTTP fixtures; live
+provider behavior has not been tested.
+
+Responses function calls carry an item `id` and a separate `call_id`.
+`ToolCallBlock.ID` remains the item ID used by agent execution, events and
+stored tool results. The adapter preserves a nonempty string `call_id` in
+`ToolCallBlock.Extra["call_id"]` in both call paths. Streaming argument
+fragments still correlate through `item_id`; a completed function-call
+item can supply the call ID if the initial item omitted it.
+
+When replaying history, the adapter uses that original call ID for the
+function call and its later results. A result's explicit nonempty string
+`Metadata["call_id"]` takes precedence over the preceding call's mapping;
+without either, the result's existing ID is used. Old histories and
+compatible responses without valid call-ID metadata retain the previous
+fallback. Existing metadata fields survive JSON message serialization;
+previously discarded IDs cannot be recovered from old checkpoints. This
+fix does not add server-side history continuation. Tests use local HTTP
+fixtures, not live-provider acceptance checks.
 
 A response whose `status` is not `completed` (for example `incomplete` at
 `max_output_tokens`, or `failed`) keeps its content, ID and usage and reports
@@ -175,6 +220,53 @@ cm, _ := model.NewGeminiChatModel(model.GeminiConfig{
 ```
 
 Models: `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-flash-preview`, `gemini-3.1-pro-preview`
+
+#### Gemini thinking (unreleased)
+
+Both `Chat` and `ChatStream` send explicit thinking options. Leaving thinking
+unset omits `thinkingConfig` and retains the provider default. For budget-era
+models, `model.WithThinking(true, 2048)` sends `includeThoughts: true` with a
+2048-token budget; a nonpositive option budget uses 1024. `WithThinkingDisabled()`
+or `WithThinking(false, 0)` sends `includeThoughts: false` and budget 0. Models
+that cannot disable thinking may reject this request; leaving the option unset
+is the default-compatible path.
+
+The adapter recognizes exactly `gemini-4-argon` and `gemini-4-carbon`, including
+the last segment of qualified model names, as level-based models:
+
+```go
+levelModel, err := model.NewGeminiChatModel(model.GeminiConfig{
+    APIKey: os.Getenv("GEMINI_API_KEY"),
+    Model:  "gemini-4-argon",
+})
+if err != nil {
+    return err
+}
+resp, err := levelModel.Chat(ctx, msgs,
+    model.WithThinking(true, 0),
+    model.WithThinkingLevel("medium"), // sent as MEDIUM
+)
+```
+
+`WithThinkingLevel` accepts `LOW`, `MEDIUM`, or `HIGH` case-insensitively. It does
+not set the enable flag and can be used alone to retain the model's thought-output
+default. Enabling without a level leaves the provider's level default. Disabling
+alone sends only `includeThoughts: false`; an explicitly supplied level is retained
+even alongside false, matching Python. This controls thought output and does not
+establish that the model stops internal reasoning.
+
+Invalid levels, any level on other Gemini models, and any nonnil budget on
+Argon/Carbon return an error before HTTP dispatch. `WithThinking(true, 0)` leaves
+the budget unset and is therefore valid for Argon/Carbon. Existing option
+composition retains a previously set positive budget, so use a fresh option set
+when switching to a level-based model. Other providers ignore `WithThinkingLevel`.
+
+This follows [Python AgentScope at `3fef100e`](https://github.com/agentscope-ai/agentscope/blob/3fef100e/src/agentscope/model/_gemini/_model.py)
+and the accepted [RFC #164](https://github.com/agentscope-ai/agentscope-go/issues/164#issuecomment-6906991883).
+The adapter-local gate does not use model cards. Python's Gemini 4 output-token
+cap and sampling filtering, Gemini structured-output thinking fallback, and thought
+signature round-trips are separate work. Validation uses local HTTP fixtures,
+not live Gemini calls.
 
 ### Ollama (Local)
 
@@ -510,26 +602,28 @@ Query bundled model metadata:
 card, _ := model.GetModelCard("claude-sonnet-4-6")
 // card.Name, card.Provider, card.ContextSize, card.OutputSize
 
-models := model.ListModels()          // all 78 model cards
+models := model.ListModels()          // all 112 model cards
 models = model.ListModels("openai")   // filter by provider
 ```
 
-78 model cards + 9 TTS model cards are bundled and accessible at runtime via `//go:embed`.
+112 model cards + 9 TTS model cards are bundled and accessible at runtime via `//go:embed`.
 
 ## Model Card Summary
 
 | Provider | Chat Models | Embedding Models | TTS Models |
 |----------|------------|------------------|------------|
-| OpenAI | 13 | 2 | 2 |
-| Anthropic | 10 | — | — |
-| DashScope | 15 (incl. GLM-5.2) | 2 | 6 |
-| DeepSeek | 4 | — | — |
-| Gemini | 9 | 2 | 1 |
-| Moonshot | 8 (incl. Kimi K3) | — | — |
-| Ollama | 4 | — | — |
-| xAI | 9 | — | — |
-| **Total** | **72** | **6** | **9** |
+| OpenAI | 17 | 2 | 2 |
+| Anthropic | 14 | — | — |
+| DashScope | 19 (incl. GLM-5.2) | 2 | 6 |
+| DeepSeek | 5 | — | — |
+| Gemini | 13 | 2 | 1 |
+| Moonshot | 10 (incl. Kimi K3) | — | — |
+| Ollama | 9 | — | — |
+| xAI | 11 | — | — |
+| Volcengine | 5 | — | — |
+| MiniMax | 3 | — | — |
+| **Total** | **106** | **6** | **9** |
 
-72 chat + 6 embedding = the 78 bundled cards under `pkg/agentscope/model/models/`.
+106 chat + 6 embedding = the 112 bundled cards under `pkg/agentscope/model/models/`.
 The 9 TTS cards are a separate embed under `pkg/agentscope/tts/models/`. Verify
 with `find pkg/agentscope/model/models -name '*.yaml' | wc -l`.

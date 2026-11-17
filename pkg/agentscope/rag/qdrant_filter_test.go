@@ -3,8 +3,6 @@ package rag
 import (
 	"context"
 	"errors"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"math"
 	"net"
 	"sync/atomic"
@@ -13,6 +11,8 @@ import (
 
 	"github.com/qdrant/go-client/qdrant"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type filterServer struct {
@@ -23,6 +23,21 @@ type filterServer struct {
 	empty    atomic.Bool
 }
 
+type collectionFixture struct {
+	qdrant.UnimplementedCollectionsServer
+	vectors map[string]*qdrant.VectorsConfig
+}
+
+func (s *collectionFixture) Get(_ context.Context, req *qdrant.GetCollectionInfoRequest) (*qdrant.GetCollectionInfoResponse, error) {
+	vectors, ok := s.vectors[req.GetCollectionName()]
+	if !ok {
+		return nil, status.Error(codes.NotFound, "fixture: collection missing")
+	}
+	return &qdrant.GetCollectionInfoResponse{Result: &qdrant.CollectionInfo{
+		Config: &qdrant.CollectionConfig{Params: &qdrant.CollectionParams{VectorsConfig: vectors}},
+	}}, nil
+}
+
 func (s *filterServer) Query(_ context.Context, r *qdrant.QueryPoints) (*qdrant.QueryResponse, error) {
 	s.requests <- r
 	if s.fail.Load() {
@@ -31,9 +46,27 @@ func (s *filterServer) Query(_ context.Context, r *qdrant.QueryPoints) (*qdrant.
 	if s.empty.Load() {
 		return &qdrant.QueryResponse{}, nil
 	}
+	if r.GetCollectionName() != "test" {
+		scores := []float32{0.75, 0.25}
+		switch r.GetCollectionName() {
+		case "euclid", "manhattan", "default-vector":
+			scores[0], scores[1] = scores[1], scores[0]
+		}
+		return &qdrant.QueryResponse{Result: []*qdrant.ScoredPoint{
+			{Id: qdrant.NewID("00000000-0000-0000-0000-000000000001"), Score: scores[0]},
+			{Id: qdrant.NewID("00000000-0000-0000-0000-000000000002"), Score: scores[1]},
+		}}, nil
+	}
 	return &qdrant.QueryResponse{Result: []*qdrant.ScoredPoint{{Id: qdrant.NewID("00000000-0000-0000-0000-000000000001"), Score: 0.75, Payload: qdrant.NewValueMap(map[string]any{"content": "result"})}}}, nil
 }
 func newFilterClient(t *testing.T) (*qdrant.Client, *filterServer) {
+	t.Helper()
+	return newFilterClientWithVectors(t, map[string]*qdrant.VectorsConfig{
+		"test": qdrant.NewVectorsConfig(&qdrant.VectorParams{Size: 2, Distance: qdrant.Distance_Cosine}),
+	})
+}
+
+func newFilterClientWithVectors(t *testing.T, vectors map[string]*qdrant.VectorsConfig) (*qdrant.Client, *filterServer) {
 	t.Helper()
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -42,6 +75,7 @@ func newFilterClient(t *testing.T) (*qdrant.Client, *filterServer) {
 	srv := grpc.NewServer()
 	fixture := &filterServer{requests: make(chan *qdrant.QueryPoints, 10), upserts: make(chan *qdrant.UpsertPoints, 10)}
 	qdrant.RegisterPointsServer(srv, fixture)
+	qdrant.RegisterCollectionsServer(srv, &collectionFixture{vectors: vectors})
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.Stop)
 	c, err := qdrant.NewClient(&qdrant.Config{Host: "127.0.0.1", Port: lis.Addr().(*net.TCPAddr).Port, SkipCompatibilityCheck: true})
@@ -50,6 +84,67 @@ func newFilterClient(t *testing.T) (*qdrant.Client, *filterServer) {
 	}
 	t.Cleanup(func() { _ = c.Close() })
 	return c, fixture
+}
+
+func TestQdrantScoresUseCollectionMetric(t *testing.T) {
+	cases := []struct {
+		name    string
+		vectors *qdrant.VectorsConfig
+		want    [2]float64
+	}{
+		{"euclid", qdrant.NewVectorsConfig(&qdrant.VectorParams{Size: 2, Distance: qdrant.Distance_Euclid}), [2]float64{-0.25, -0.75}},
+		{"manhattan", qdrant.NewVectorsConfig(&qdrant.VectorParams{Size: 2, Distance: qdrant.Distance_Manhattan}), [2]float64{-0.25, -0.75}},
+		{"cosine", qdrant.NewVectorsConfig(&qdrant.VectorParams{Size: 2, Distance: qdrant.Distance_Cosine}), [2]float64{0.75, 0.25}},
+		{"dot", qdrant.NewVectorsConfig(&qdrant.VectorParams{Size: 2, Distance: qdrant.Distance_Dot}), [2]float64{0.75, 0.25}},
+		{"default-vector", qdrant.NewVectorsConfigMap(map[string]*qdrant.VectorParams{
+			"":      {Size: 2, Distance: qdrant.Distance_Euclid},
+			"other": {Size: 2, Distance: qdrant.Distance_Dot},
+		}), [2]float64{-0.25, -0.75}},
+	}
+	vectors := make(map[string]*qdrant.VectorsConfig, len(cases)+2)
+	for _, tc := range cases {
+		vectors[tc.name] = tc.vectors
+	}
+	vectors["named-only"] = qdrant.NewVectorsConfigMap(map[string]*qdrant.VectorParams{"other": {Size: 2, Distance: qdrant.Distance_Dot}})
+	vectors["unknown"] = qdrant.NewVectorsConfig(&qdrant.VectorParams{Size: 2, Distance: qdrant.Distance(100)})
+	client, fixture := newFilterClientWithVectors(t, vectors)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			idx, err := NewQdrantIndex(QdrantConfig{Client: client, Collection: tc.name})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			docs, err := idx.QueryVector(ctx, []float32{1, 0}, 2, nil)
+			if err != nil || len(docs) != 2 {
+				t.Fatalf("documents=%v err=%v", docs, err)
+			}
+			<-fixture.requests
+			if docs[0].ID != "00000000-0000-0000-0000-000000000001" || docs[1].ID != "00000000-0000-0000-0000-000000000002" ||
+				docs[0].Score != tc.want[0] || docs[1].Score != tc.want[1] {
+				t.Fatalf("documents=%v, want original order and scores %v", docs, tc.want)
+			}
+		})
+	}
+	for _, collection := range []string{"missing", "named-only", "unknown"} {
+		t.Run(collection, func(t *testing.T) {
+			idx, err := NewQdrantIndex(QdrantConfig{Client: client, Collection: collection})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if docs, err := idx.QueryVector(ctx, []float32{1, 0}, 2, nil); err == nil || docs != nil {
+				t.Errorf("documents=%v err=%v, want metric discovery error", docs, err)
+			}
+			select {
+			case <-fixture.requests:
+				t.Error("sent a point query without a usable metric")
+			default:
+			}
+		})
+	}
 }
 
 type filterEmbedder struct{ calls int }
@@ -106,6 +201,26 @@ func TestQdrantFilterWireAndHostConstraint(t *testing.T) {
 		t.Fatalf("legacy query lost host constraint: %v", req)
 	}
 }
+func TestSimpleKnowledgeBaseRejectsInvalidTopKBeforeQdrantEmbedding(t *testing.T) {
+	client, _ := newFilterClient(t)
+	embedder := &filterEmbedder{}
+	idx, err := NewQdrantTextIndex(QdrantTextConfig{Client: client, Collection: "test", Embedder: embedder})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kb := NewSimpleKnowledgeBase("kb", idx)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	for _, topK := range []int{0, -1} {
+		if docs, err := kb.Query(ctx, "query", topK); err == nil || docs != nil {
+			t.Errorf("topK=%d: docs=%v err=%v; want an error and no documents", topK, docs, err)
+		}
+	}
+	if embedder.calls != 0 {
+		t.Fatalf("invalid topK caused %d embedding calls", embedder.calls)
+	}
+}
+
 func TestQdrantRejectsInvalidFiltersBeforeEmbedding(t *testing.T) {
 	client, _ := newFilterClient(t)
 	embed := &filterEmbedder{}

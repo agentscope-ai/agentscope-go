@@ -6,6 +6,15 @@ precomputed vector. Existing `QdrantTextIndex.Query` calls remain valid and use 
 caller filter. The low-level `QdrantIndex.Query` cannot embed text and returns an
 error directing the caller to `QueryVector`.
 
+## Qdrant query requirements
+
+Vector and text queries read collection metadata before searching to determine
+the metric of the unnamed dense vector. Each query makes one extra RPC, so the
+query credentials must also allow reading the collection configuration. A
+failed metadata request or a collection without an unnamed dense vector
+returns an error. Queries also return an error if the unnamed dense vector
+uses an unsupported distance metric.
+
 ## Typed metadata conditions
 
 A `MetadataFilter` is an AND list of conditions constructed with:
@@ -65,6 +74,22 @@ Qdrant's native vector field, omitting that internal key from payload. Empty or
 nonfinite vectors and unsupported payload types return errors before any batch
 upsert. Arbitrary metadata retains Qdrant client conversion semantics; this is
 not a general metadata schema validator.
+
+## Knowledge base query limits
+
+`rag.SimpleKnowledgeBase.Query` requires a positive `topK`. It returns an
+error for zero or negative values before calling the underlying index.
+Positive values are passed through unchanged. Direct backend calls retain
+their existing limit handling.
+
+## Embedding cache
+
+The OpenAI-compatible and Gemini embedding adapters scope their cache entries to
+the adapter family, configured endpoint, model, request dimensions and input.
+Entries written by older versions of these adapters miss and are populated again
+on demand. An endpoint with URL userinfo, a query or a fragment bypasses the cache.
+Use separate caches if credentials on the same endpoint can select different
+embeddings.
 
 ## Cache write semantics
 

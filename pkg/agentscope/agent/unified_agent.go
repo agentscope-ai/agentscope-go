@@ -1838,15 +1838,13 @@ func (a *UnifiedAgent) executeStreamingTool(
 
 func (a *UnifiedAgent) truncateToolResult(ctx context.Context, outputText, toolCallID string) string {
 	if a.contextCfg != nil && a.contextCfg.ToolResultLimit > 0 {
-		truncated, wasTruncated := TruncateToolResult(outputText, a.contextCfg.ToolResultLimit)
+		limit := a.contextCfg.ToolResultLimit
+		truncated, wasTruncated := TruncateToolResult(outputText, limit)
 		if wasTruncated && a.offloader != nil {
 			path, offErr := a.offloader.OffloadContent(ctx, outputText,
 				fmt.Sprintf("tool_result_%s.txt", toolCallID))
 			if offErr == nil {
-				truncated += fmt.Sprintf(
-					"\n<system-reminder>The remaining content has been offloaded to '%s'.</system-reminder>",
-					path,
-				)
+				truncated = fitToolText(outputText, uint64(limit)*4, path)
 			}
 		}
 		return truncated

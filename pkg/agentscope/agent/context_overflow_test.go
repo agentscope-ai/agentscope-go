@@ -176,6 +176,7 @@ func TestContextOverflowRecoveryTruncatesToolResults(t *testing.T) {
 	if !strings.Contains(resultText, "<<<TRUNCATED:") {
 		t.Fatal("truncated tool result should carry the elision marker")
 	}
+	checkToolTextBudget(t, resultText, 1000)
 	if a.state.Summary != "" {
 		t.Fatal("truncation should succeed before compaction; summary should stay empty")
 	}

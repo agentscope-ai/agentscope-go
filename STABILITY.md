@@ -25,7 +25,7 @@ import "github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope"
   `providercontract` (test-only), `console`, `channel`, `channel/dingtalk`,
   `hub` (built-in sources), `skill` (`Store` partitions), `middleware/memory`
   (`FileStore` + `AgenticMemoryMiddleware`), `taskenvelope`, `tierrouter`, `embodied`,
-  `thread`.
+  `thread`, `thread/route`.
   These are the newer v3 infrastructure layers, harness tooling, the
   console/channel frontends, and the Phase 3 hub/skill/memory additions.
 - **Internal** (`internal/...`): no compatibility guarantee; do not import.
@@ -183,7 +183,9 @@ ports and deferred work, including realtime/TUI, SOP and model-context wiring.
   guarded owner/epoch writes, transfer, background tasks and scheduled
   summaries; its log has no privacy classes. Tested offline with scripted
   participants. One Coordinator process per log; no live quality, cost or
-  latency claim. See [Main Thread](docs/main-thread.md).
+  latency claim. `thread/route` picks each query's owner: three modes, host
+  rules and an optional classifier whose failure or timeout falls back to
+  the mode's default. See [Main Thread](docs/main-thread.md).
 
 - The thread seams (`WithForkCapture`, `ForkSnapshot`, `ForkRequest`,
   `ForkResult`, `ForkSummary`, `ApplySummary`, `SummaryApplyOptions`,

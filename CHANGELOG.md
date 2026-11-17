@@ -32,6 +32,37 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   yet, so package-only servers on the new schema are skipped by both `List`
   and `Get`.
 
+### Fixed — Gemini thinking options
+
+- Gemini `Chat` and `ChatStream` now serialize tri-state thinking options instead
+  of silently dropping them. Argon/Carbon use the new `WithThinkingLevel` option
+  (`LOW`, `MEDIUM`, `HIGH`); incompatible budgets/levels fail before dispatch.
+  Unset options retain provider defaults. See [Gemini thinking](docs/model-providers.md#gemini-thinking-unreleased).
+
+### Added — Main Thread router (experimental)
+
+- New experimental package `thread/route`: a `thread.Router` for the Main
+  Thread `Coordinator`, with three modes (`local_based`, `cloud_based` and
+  `hybrid`), host rules and an optional classifier (any
+  `classifier.DispatchClassifier`). The decision order is fixed:
+  availability, a participant the user named, a tool group the query needs
+  that only one side holds, host rules, the classifier, then the mode's
+  default. The classifier answers one Choice question over a bounded state
+  that holds the query and the participants, and the session's history only
+  with `route.Config.IncludeHistory`. Its call is bounded by a timeout (10 s
+  by default), including the dispatch authorization. A failed or timed-out
+  call, a denied dispatch, an invalid answer, low confidence or a choice over
+  `MaxLag` falls through to the mode's default; in `hybrid` that is the
+  cloud, whoever owns the session. Tested offline with the fake classifier.
+  See
+  [Main Thread](docs/main-thread.md#routing-modes-and-the-classifier-layer).
+### Added — model card parameter overrides
+
+- `ModelCard.ParameterOverrides` parses and exposes each card's
+  `parameter_overrides` section (hidden, default, anyOf, …) instead of
+  dropping it, so model-list APIs can serve it to consumers. Part of #138.
+
+
 ### Added — Main Thread coordinator (experimental)
 
 - New experimental package `thread`, as proposed in
@@ -56,12 +87,10 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   machine; see the
   [note on `taskenvelope`](https://github.com/agentscope-ai/agentscope-go/issues/117#issuecomment-6769407061).
 - The log has no privacy classes: every participant reads every entry. The
-  adapters for `UnifiedAgent` (`thread/participant`) and the router
-  (`thread/route`) land separately. Tested offline with scripted
-  participants. See [Main Thread](docs/main-thread.md).
+  adapters for `UnifiedAgent` (`thread/participant`) land separately. Tested
+  offline with scripted participants. See [Main Thread](docs/main-thread.md).
 
 ### Added — agent seams for a session shared by several agents (experimental)
-
 
 - Opt-in `agent` seams for a host that runs several agents over one shared,
   append-only log, as proposed in
@@ -166,10 +195,64 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   offer, the one new field that does not raise the version (the trigger then
   compresses synchronously).
 
+### Fixed — embedding cache endpoint isolation
+
+- Scope OpenAI-compatible and Gemini cache keys to their endpoint and adapter
+  family so a shared cache cannot return a different endpoint's vectors. Entries
+  written with old keys are repopulated on demand.
+
+### Fixed — multi-agent message names for Chat Completions
+
+- Agent names now keep legal dashes and dots, and each run of the characters
+  the API rejects in `name` fields (whitespace and `<|\/>`) collapses to one
+  underscore, so free-text names no longer cause 400s. Part of #138.
+
+### Fixed — Chat Completions formatter errors
+
+- Return formatter errors before HTTP dispatch in buffered and streamed
+  OpenAI-compatible calls, preserving the cause instead of flattening the
+  entire history to plain text. Part of #125 (O4).
+
+### Fixed — Responses image and hint input
+
+- Preserve direct URL/base64 images and hints in buffered and streamed
+  Responses requests. Hints become user input at their original position,
+  retaining text and images in order. Part of #125 (O3).
+
 ### Fixed — in-memory message bus replay
 
 - Replay reads return independent payload bytes, so changing a returned entry
   cannot alter the log seen by later readers.
+
+### Fixed — Anthropic tool-result error flag
+
+- Failed tool results now reach the Anthropic Messages API with
+  `is_error: true`; only `ToolResultError` gains the flag and other states
+  keep the plain `tool_result` shape. Local fixtures cover the formatter and
+  both call paths; no live API result is claimed. Part of #138.
+
+### Fixed — Responses named tool choice
+
+- Encode a named tool choice as a function object in buffered and streamed
+  Responses requests instead of sending the tool name as an invalid string.
+  Part of #125 (O5).
+### Fixed — Moonshot K3 wire shape
+
+- Kimi K3-series models now send their token budget as
+  `max_completion_tokens`, keep `temperature`/`top_p` and the `thinking`
+  switch off the wire, and offer no disable-thinking option to the
+  structured-output fallback (they always think). Older Moonshot models are
+  unchanged. Local fixtures cover both call paths; no live API result is
+  claimed. Part of #138.
+
+### Added — model card parity refresh
+
+- Cards from Python AgentScope at 3fef100e: the claude 5-5 family and
+  fable-5-1, the gpt-6 family, gemini 3.7/3.8-flash and 4-argon/carbon,
+  kimi-k3.1-pro/-highspeed, dashscope, ollama, deepseek and xAI additions,
+  MiniMax cards, and a new `volcengine` set. `claude-sonnet-4-5` is now
+  deprecated per upstream. 112 cards total across 10 providers. Part of #138.
+
 
 ### Fixed — Anthropic tool-result history
 
@@ -180,11 +263,35 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   messages per input. Local fixtures cover both call paths; no live API result
   is claimed. Part of #125.
 
+### Fixed — Gemini tool-call thought signatures
+
+- Thinking models require a function-call part's `thought_signature` echoed
+  back with the same history part; the adapter now stashes it in
+  `ToolCallBlock.Extra` and restores it on the wire, for both buffered and
+  streamed responses. The public Gemini formatter also echoes signatures
+  through `Format` and `FormatMultiAgent`. Local fixtures cover both call
+  paths; no live API result is claimed. Part of #138.
+
+### Fixed — Gemini tool error results
+
+- The Gemini formatter and model request converter send `ToolResultError`
+  details under `functionResponse.response.error`. Other states retain the
+  existing `result` key for compatibility. Tool names, output conversion and
+  stored history are unchanged. This follows the error mapping in
+  [Python #3947](https://github.com/agentscope-ai/agentscope/pull/3947), while
+  deliberately retaining Go's existing success key instead of Python's `output`.
+
 ### Fixed — Anthropic thinking history
 
 - Preserve redacted thinking data in buffered and streamed responses and retain
   empty thinking blocks carrying signatures when formatting follow-up history.
   Existing message types and serialization are unchanged. Part of #125 (A2).
+
+### Fixed — tool text truncation
+
+- Tool text uses a more conservative estimate for non-ASCII content. The
+  retained head and tail, truncation marker, and any offload reference share
+  the same estimated budget.
 
 ### Fixed — buffered Chat Completions stop reasons
 
@@ -192,6 +299,13 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   including length truncation, tool calls and content filtering, matching the
   streaming path. Partial content and usage remain intact; unknown nonempty
   reasons pass through. Part of #125 (O1).
+
+### Fixed — Responses tool-call identifiers
+
+- Preserve original Responses `call_id` values through buffered/streamed
+  parsing and history replay, including tool results correlated by item ID.
+  Missing call IDs retain the existing fallback. Part of #125 (R1).
+
 ### Fixed — Anthropic manual-thinking budgets
 
 - Clamp automatic thinking budgets to the 1024-token minimum. The default
@@ -201,12 +315,27 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   1024 tokens; explicit per-call output ceilings remain hard limits. Other
   thinking modes and MiniMax policy are unchanged. Part of #125 (A4).
 
+### Fixed — JSON session write failures
+
+- A failed JSON session `Set` or `Delete` preserves the previous entries in
+  the open session, so later writes can continue from the saved state.
+
 ### Fixed — explicit Messages tool-choice none
 
 - Anthropic and MiniMax Messages requests now retain an explicit
   `tool_choice: {"type":"none"}` when tools are supplied, rather than silently
   falling back to the provider default. Unset choice and no-tools behavior are
   unchanged. Part of #125 (A3).
+
+### Fixed — RAG retrieval and parsing
+
+- In-memory retrieval rejects non-positive `topK`. The text parser drops a
+  leading UTF-8 BOM, and the Word parser extracts WordprocessingML run text
+  with its tabs and breaks.
+- Qdrant queries use the collection's vector metric so larger document
+  scores consistently represent greater relevance.
+- The PowerPoint parser extracts slide text from ISO Strict `.pptx` files
+  as well as Transitional files.
 
 ### Fixed — summary over an empty fork snapshot
 
@@ -215,6 +344,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   `OfferSummary` already did, and changes nothing. Before, it replaced the
   agent's summary and reported success although the snapshot covered no
   message to replace.
+
+### Fixed — knowledge base query limits
+
+- `SimpleKnowledgeBase.Query` rejects non-positive `topK` before calling
+  the underlying index, regardless of the backend.
 
 ### Fixed — background precompression
 
