@@ -102,6 +102,13 @@ func (p *PPTParser) Parse(_ context.Context, r io.Reader, filename string) ([]ra
 
 // extractSlideText reads a slide XML file and extracts all text from <a:t> elements.
 func extractSlideText(f *zip.File) (string, error) {
+	const (
+		transitionalNS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+		strictNS       = "http://purl.oclc.org/ooxml/drawingml/main"
+	)
+	isDrawingNamespace := func(space string) bool {
+		return space == transitionalNS || space == strictNS
+	}
 	rc, err := f.Open()
 	if err != nil {
 		return "", err
@@ -124,16 +131,16 @@ func extractSlideText(f *zip.File) (string, error) {
 		switch t := tok.(type) {
 		case xml.StartElement:
 			// <a:t> contains the actual text
-			if t.Name.Local == "t" && t.Name.Space == "http://schemas.openxmlformats.org/drawingml/2006/main" {
+			if t.Name.Local == "t" && isDrawingNamespace(t.Name.Space) {
 				inText = true
 			}
 		case xml.EndElement:
-			if t.Name.Local == "t" && t.Name.Space == "http://schemas.openxmlformats.org/drawingml/2006/main" {
+			if t.Name.Local == "t" && isDrawingNamespace(t.Name.Space) {
 				inText = false
 				sb.WriteString(" ")
 			}
 			// Add newline at paragraph end
-			if t.Name.Local == "p" && t.Name.Space == "http://schemas.openxmlformats.org/drawingml/2006/main" {
+			if t.Name.Local == "p" && isDrawingNamespace(t.Name.Space) {
 				sb.WriteString("\n")
 			}
 		case xml.CharData:
