@@ -21,14 +21,16 @@ import (
 // holder; resourceOf returning "" runs without a lease.
 //
 // The lease is renewed every ttl/2 while the call runs and released when it
-// returns (for a streaming tool, when its stream closes). A renewal that
-// finds the lease expired (for example because renewal stalled or the
-// device slept) takes it again when it is free, and the call's result ends
-// with a note that the resource was not exclusively held for the whole call.
-// When another holder has it, the failed renewal is logged, renewal stops and
-// the note names that holder. The note is best-effort: a lease that expires
-// in the instant between a renewal's check and the renewal itself, or that
-// another call of the same holder takes again first, is renewed without it.
+// returns (for a streaming tool, when its stream closes). Each renewal checks
+// the lease first, and so does the end of the call. When it is no longer
+// held (it expired, for example because renewal stalled or the device
+// slept, or it was released), the call's result ends with a note that the
+// resource was not exclusively held for the whole call, and a renewal takes
+// the lease again when it is free. When another holder has it, the note
+// names that holder; a renewal that fails for that reason is logged and
+// renewal stops. The note is best-effort: a lease that expires in the
+// instant between a renewal's check and the renewal itself, or that the same
+// holder takes again first (for example in another call), goes unnoticed.
 // Calls of the same holder on the same resource share the lease, which is
 // released by the last one. The wrapper keeps t's name, schema, permission and
 // read-only answers and every optional interface t implements:
@@ -109,7 +111,8 @@ func (l *leasedTool) GetMiddlewares() []tool.ToolMiddleware {
 // acquire takes the lease for the call's resource. It returns the release
 // function, or an error response when the resource is held by another holder.
 // Release may be called more than once; every call returns the note for the
-// call's result, empty unless another holder took the lease during the call.
+// call's result, empty unless the lease lapsed or another holder took it
+// during the call.
 func (l *leasedTool) acquire(input map[string]any) (func() string, *tool.ToolResponse) {
 	resource := ""
 	if l.resourceOf != nil {
@@ -142,6 +145,16 @@ func (l *leasedTool) acquire(input map[string]any) (func() string, *tool.ToolRes
 		once.Do(func() {
 			close(stop)
 			renew.Wait()
+			// Check the lease once more: it may have lapsed after the last
+			// renewal.
+			if lostTo == "" {
+				switch h, held := l.leases.Holder(resource); {
+				case !held:
+					lapsed = true
+				case h != l.holder:
+					lostTo = h
+				}
+			}
 			inflight.release(key)
 			switch {
 			case lostTo != "":
@@ -157,9 +170,9 @@ func (l *leasedTool) acquire(input map[string]any) (func() string, *tool.ToolRes
 }
 
 // renew extends the lease every ttl/2 until stop closes. Each renewal first
-// checks that the lease is still held: one that expired since the last
-// renewal is reported as lapsed, because another holder could have taken and
-// released it in between. The first renewal acquired the same resource for
+// checks that the lease is still held by this holder: one that is not is
+// reported as lapsed, because another holder could have used the resource
+// since the last renewal. The first renewal acquired the same resource for
 // the same holder and ttl, so a renewal can only fail because another holder
 // took the lease after it expired; the failure is logged, renewal stops and
 // renew returns that holder.
@@ -172,7 +185,7 @@ func (l *leasedTool) renew(resource string, stop <-chan struct{}) (lapsed bool, 
 			return lapsed, ""
 		case <-ticker.C:
 		}
-		if _, held := l.leases.Holder(resource); !held {
+		if h, held := l.leases.Holder(resource); !held || h != l.holder {
 			lapsed = true
 		}
 		_, err := l.leases.Acquire(resource, l.holder, l.ttl)
@@ -256,6 +269,9 @@ func (l *leasedStreaming) ExecuteStream(ctx context.Context, input map[string]an
 	in, err := l.st.ExecuteStream(ctx, input)
 	if err != nil {
 		return nil, err
+	}
+	if in == nil {
+		return nil, fmt.Errorf("%s returned no stream", l.Name())
 	}
 	out := make(chan tool.ToolChunk)
 	forwarding = true

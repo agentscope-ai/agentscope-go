@@ -614,10 +614,33 @@ func (p *panicStream) ExecuteStream(context.Context, map[string]any) (<-chan too
 	panic("stream setup failed")
 }
 
-// TestLeasedStreamReleasesWhenSetupPanics covers a wrapped ExecuteStream
-// that panics before it returns a stream: no forwarder owns the lease yet, so
-// the wrapper releases it, stopping renewal, as the panic passes through.
-func TestLeasedStreamReleasesWhenSetupPanics(t *testing.T) {
+// nilStream returns no stream and no error.
+type nilStream struct {
+	*probeTool
+}
+
+func (n *nilStream) ExecuteStream(context.Context, map[string]any) (<-chan tool.ToolChunk, error) {
+	return nil, nil
+}
+
+// TestLeasedStreamReleasesWhenSetupFails covers a wrapped ExecuteStream that
+// panics, or returns no stream, before any forwarder owns the lease: the
+// wrapper releases it, stopping renewal, as the panic passes through or
+// with the error it returns.
+func TestLeasedStreamReleasesWhenSetupFails(t *testing.T) {
+	released := func(t *testing.T, leases *thread.Leases) {
+		t.Helper()
+		if h, held := leases.Holder("a.go"); held {
+			t.Fatalf("the lease is still held by %s", h)
+		}
+		inflight.mu.Lock()
+		n := inflight.n[leaseKey{leases: leases, resource: "a.go", holder: "cloud"}]
+		inflight.mu.Unlock()
+		if n != 0 {
+			t.Fatalf("calls still counted: %d", n)
+		}
+	}
+
 	leases := thread.NewLeases(nil)
 	w := Leased(&panicStream{newProbe(leases)}, leases, "cloud", time.Minute, pathOf)
 	func() {
@@ -628,13 +651,64 @@ func TestLeasedStreamReleasesWhenSetupPanics(t *testing.T) {
 		}()
 		_, _ = w.(tool.StreamingTool).ExecuteStream(context.Background(), map[string]any{"path": "a.go"})
 	}()
-	if h, held := leases.Holder("a.go"); held {
-		t.Fatalf("the lease is still held by %s", h)
+	released(t, leases)
+
+	leases = thread.NewLeases(nil)
+	w = Leased(&nilStream{newProbe(leases)}, leases, "cloud", time.Minute, pathOf)
+	ch, err := w.(tool.StreamingTool).ExecuteStream(context.Background(), map[string]any{"path": "a.go"})
+	if ch != nil || err == nil || err.Error() != "write_file returned no stream" {
+		t.Fatalf("a missing stream: %v %v", ch, err)
 	}
-	inflight.mu.Lock()
-	n := inflight.n[leaseKey{leases: leases, resource: "a.go", holder: "cloud"}]
-	inflight.mu.Unlock()
-	if n != 0 {
-		t.Fatalf("calls still counted: %d", n)
+	released(t, leases)
+}
+
+// TestLeasedChecksTheLeaseWhenTheCallEnds covers a lease that lapsed after
+// the last renewal: the end of the call checks it once more. The ttl is long
+// enough that no renewal runs during the test.
+func TestLeasedChecksTheLeaseWhenTheCallEnds(t *testing.T) {
+	const (
+		lost   = "[The lease on a.go was lost during this call: edge took it, so the resource was not exclusively held for the whole call.]"
+		lapsed = "[The lease on a.go lapsed during this call, so the resource was not exclusively held for the whole call.]"
+	)
+	for _, tc := range []struct {
+		name         string
+		take, giveUp bool
+		note, holder string
+	}{
+		{"expired", false, false, lapsed, ""},
+		{"taken", true, false, lost, "edge"},
+		{"taken and released", true, true, lapsed, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clk := &testClock{now: time.Unix(1_000_000, 0)}
+			leases := thread.NewLeases(clk.Now)
+			p := newProbe(leases)
+			p.started, p.release = make(chan struct{}, 1), make(chan struct{})
+			w := Leased(p, leases, "cloud", time.Hour, pathOf)
+			out := make(chan string, 1)
+			go func() {
+				r, _ := w.Execute(context.Background(), map[string]any{"path": "a.go"})
+				out <- respText(r)
+			}()
+			<-p.started
+			clk.advance(2 * time.Hour)
+			if tc.take {
+				if _, err := leases.Acquire("a.go", "edge", time.Hour); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.giveUp {
+				if err := leases.Release("a.go", "edge"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			close(p.release)
+			if got := <-out; got != "ok\n"+tc.note {
+				t.Fatalf("result: %q", got)
+			}
+			if h, _ := leases.Holder("a.go"); h != tc.holder {
+				t.Fatalf("holder after the call: %q", h)
+			}
+		})
 	}
 }
