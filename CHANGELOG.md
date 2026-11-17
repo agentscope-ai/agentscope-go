@@ -11,6 +11,17 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — DashScope TTS stream failures
+
+- DashScope realtime `SynthesizeStream` now emits a terminal `Response.Err`
+  instead of only logging synthesis failures and closing an empty channel.
+  Consumers should check `Err` before consuming audio. TTS middleware skips
+  error responses while retaining its best-effort, no-retry behavior.
+  This addresses the error-transparency concern in Python
+  [#3621](https://github.com/agentscope-ai/agentscope/pull/3621), but uses Go's
+  response channel rather than Python's realtime `push` exception path.
+  Other providers' stream-error behavior is unchanged.
+
 ### Fixed — hub
 
 - **`GitHubMCPRegistry.Get`/`Install` against live registries:** both GitHub's

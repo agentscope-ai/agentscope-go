@@ -67,6 +67,11 @@ func (m *TTSMiddleware) synthesizeAndEmit(ctx context.Context, outCh chan<- even
 	if err == nil {
 		first := true
 		for resp := range streamCh {
+			if resp.Err != nil {
+				// Audio is best-effort: do not emit errors as audio or retry
+				// potentially partially synthesized speech. Drain the stream.
+				continue
+			}
 			if first {
 				outCh <- event.NewDataBlockStartEvent(replyID, blockID, resp.MediaType)
 				first = false

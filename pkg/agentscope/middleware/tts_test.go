@@ -2,11 +2,46 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/event"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/tts"
 )
+
+type errorStreamTTS struct {
+	tts.DummyModel
+	partial bool
+}
+
+func (m errorStreamTTS) SynthesizeStream(context.Context, string) (<-chan tts.Response, error) {
+	ch := make(chan tts.Response, 2)
+	if m.partial {
+		ch <- tts.Response{Content: []byte("audio"), MediaType: "audio/test"}
+	}
+	ch <- tts.Response{Err: errors.New("failed"), IsLast: true}
+	close(ch)
+	return ch, nil
+}
+func TestTTSMiddlewareStreamError(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		m := NewTTSMiddleware(errorStreamTTS{partial: partial})
+		ch := make(chan event.Event, 10)
+		m.synthesizeAndEmit(context.Background(), ch, "reply", "hello")
+		close(ch)
+		events := collectEvents(ch)
+		want := 0
+		if partial {
+			want = 3
+		}
+		if len(events) != want {
+			t.Fatalf("partial=%v: got %d events", partial, len(events))
+		}
+		if partial && (events[0].GetEventType() != event.EventDataBlockStart || events[1].GetEventType() != event.EventDataBlockDelta || events[2].GetEventType() != event.EventDataBlockEnd) {
+			t.Fatal("invalid audio event sequence")
+		}
+	}
+}
 
 // mockTTSModel returns fixed audio data for any text input.
 type mockTTSModel struct {

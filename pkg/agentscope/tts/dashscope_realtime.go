@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/model"
-	"github.com/sirupsen/logrus"
 )
 
 const dashScopeRealtimeTTSURL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2audio/generation"
@@ -61,12 +60,14 @@ func (t *DashScopeRealtimeTTS) Synthesize(ctx context.Context, text string) (*Re
 }
 
 func (t *DashScopeRealtimeTTS) SynthesizeStream(ctx context.Context, text string) (<-chan Response, error) {
-	ch := make(chan Response, 8)
+	// This adapter emits exactly one result; buffering it also allows a
+	// cancellation error to be delivered without waiting for a receiver.
+	ch := make(chan Response, 1)
 	go func() {
 		defer close(ch)
 		resp, err := t.synthesizeHTTP(ctx, text)
 		if err != nil {
-			logrus.WithError(err).Error("dashscope realtime tts: synthesize failed")
+			ch <- Response{Err: err, IsLast: true}
 			return
 		}
 		resp.IsLast = true
