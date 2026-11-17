@@ -18,7 +18,7 @@ jobs:
     permissions:
       issues: write
     steps:
-      - uses: actions/github-script@v9
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
             const title = (context.payload.issue.title || '').toLowerCase();
@@ -56,4 +56,4 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/labeler@v7
+      - uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7

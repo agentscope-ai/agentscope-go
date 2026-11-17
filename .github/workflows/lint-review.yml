@@ -26,7 +26,7 @@ jobs:
       - name: Download lint report
         id: download
         continue-on-error: true
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: golangci-lint-report
           run-id: ${{ github.event.workflow_run.id }}
@@ -35,7 +35,7 @@ jobs:
       - name: Resolve pull request
         id: pr
         if: steps.download.outcome == 'success'
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
             const run = context.payload.workflow_run;
