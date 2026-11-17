@@ -244,6 +244,7 @@ enlaces al mismo catálogo.
 | Configuración y primer agente | [Primeros pasos](docs/getting-started.md) |
 | Modelos y herramientas | [Proveedores](docs/model-providers.md) · [Herramientas](docs/tools.md) |
 | Middleware y memoria | [Middleware](docs/middleware.md) |
+| Sesión compartida nube-edge | [Registro, Coordinator y enrutamiento de Main Thread (experimental)](docs/main-thread.md) |
 | Despliegue de aplicaciones | [Despliegue](docs/deployment.md) · [Límites de ejecución y sesiones](docs/adversarial-hardening.md) |
 | Tareas de texto controladas | [Ejecución fija](docs/managed-task.md) · [Enrutamiento](docs/managed-routing.md) · [Evaluación](docs/managed-routing-evaluation.md) |
 | Clasificación probabilística | [Contratos y registro de intentos](docs/classifier.md) · [Adaptador Bailian](docs/bailian.md) |
