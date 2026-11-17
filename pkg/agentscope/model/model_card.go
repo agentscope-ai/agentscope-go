@@ -134,7 +134,7 @@ var modelsFS embed.FS
 
 // embeddedModelCards is the parsed, sorted set of all embedded model cards. The
 // embedded FS is immutable at runtime, so it is parsed exactly once (previously
-// every ListModels/GetModelCard call re-read and re-parsed 78 YAML files, and
+// every ListModels/GetModelCard call re-read and re-parsed the YAML files, and
 // GetModelCard sits on the reply hot path via context compression).
 var (
 	embeddedModelCardsOnce sync.Once

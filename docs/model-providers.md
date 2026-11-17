@@ -555,26 +555,28 @@ Query bundled model metadata:
 card, _ := model.GetModelCard("claude-sonnet-4-6")
 // card.Name, card.Provider, card.ContextSize, card.OutputSize
 
-models := model.ListModels()          // all 78 model cards
+models := model.ListModels()          // all 112 model cards
 models = model.ListModels("openai")   // filter by provider
 ```
 
-78 model cards + 9 TTS model cards are bundled and accessible at runtime via `//go:embed`.
+112 model cards + 9 TTS model cards are bundled and accessible at runtime via `//go:embed`.
 
 ## Model Card Summary
 
 | Provider | Chat Models | Embedding Models | TTS Models |
 |----------|------------|------------------|------------|
-| OpenAI | 13 | 2 | 2 |
-| Anthropic | 10 | — | — |
-| DashScope | 15 (incl. GLM-5.2) | 2 | 6 |
-| DeepSeek | 4 | — | — |
-| Gemini | 9 | 2 | 1 |
-| Moonshot | 8 (incl. Kimi K3) | — | — |
-| Ollama | 4 | — | — |
-| xAI | 9 | — | — |
-| **Total** | **72** | **6** | **9** |
+| OpenAI | 17 | 2 | 2 |
+| Anthropic | 14 | — | — |
+| DashScope | 19 (incl. GLM-5.2) | 2 | 6 |
+| DeepSeek | 5 | — | — |
+| Gemini | 13 | 2 | 1 |
+| Moonshot | 10 (incl. Kimi K3) | — | — |
+| Ollama | 9 | — | — |
+| xAI | 11 | — | — |
+| Volcengine | 5 | — | — |
+| MiniMax | 3 | — | — |
+| **Total** | **106** | **6** | **9** |
 
-72 chat + 6 embedding = the 78 bundled cards under `pkg/agentscope/model/models/`.
+106 chat + 6 embedding = the 112 bundled cards under `pkg/agentscope/model/models/`.
 The 9 TTS cards are a separate embed under `pkg/agentscope/tts/models/`. Verify
 with `find pkg/agentscope/model/models -name '*.yaml' | wc -l`.
