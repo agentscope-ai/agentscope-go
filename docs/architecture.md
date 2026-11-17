@@ -64,7 +64,7 @@ pkg/agentscope/
 │   ├── structured_output.go # GenerateStructuredOutput (JSON Schema via tool call)
 │   ├── wav.go             # PCM-to-WAV conversion for audio streaming
 │   ├── http.go            # ClientOptions, defaultHTTPClient, mergeHeaders
-│   ├── models/            # 78 YAML model cards (//go:embed)
+│   ├── models/            # 112 YAML model cards (//go:embed)
 │   └── pricing/           # Embedded default price card for cost governance
 │
 ├── tool/                  # Tool system, 24 registered tool names
@@ -227,7 +227,7 @@ The `Agent` interface defines five methods: `ID()`, `Reply()`, `Observe()`, `Int
 
 `ChatModel` provides `Chat()`, `ChatStream()`, `CountTokens()`. Nine provider adapters share common patterns: functional options via `CallOption`, retry logic, `ClientOptions` for HTTP customization. All nine adapters stream over SSE: eight go through `httpx.DoSSERequest`, and the OpenAI Responses adapter parses the `data:` frames itself. Ollama streams via its OpenAI-compatible `/v1/chat/completions` endpoint, not its native newline-delimited JSON API.
 
-78 model cards are bundled across 8 provider directories, plus 9 TTS model cards.
+112 model cards are bundled across 10 provider directories, plus 9 TTS model cards.
 
 ### Tool
 

@@ -312,7 +312,7 @@ The `rag/parser` package converts common file formats into `rag.Document` slices
 | `PDFParser` | `.pdf` | Stream-based text extraction (FlateDecode + plain text) |
 | `WordParser` | `.docx` | Extracts Word run text, preserving tabs and line breaks |
 | `ExcelParser` | `.xlsx` | Row-based text extraction from spreadsheets |
-| `PPTParser` | `.pptx` | Slide text extraction from PowerPoint |
+| `PPTParser` | `.pptx` | Slide text extraction from Strict and Transitional PowerPoint files |
 
 ### Usage
 
