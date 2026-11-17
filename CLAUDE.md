@@ -218,6 +218,11 @@ Shared types or options do not prove that every provider
 serializes a field or interprets it identically. Trace request construction and
 response parsing in both call paths.
 
+`model/gemini.go` validates thinking options in the shared request builder before
+buffered or streamed dispatch. Exact last-segment Argon/Carbon IDs use levels;
+other models use token budgets. Unset thinking retains provider defaults. See
+[Gemini thinking](docs/model-providers.md#gemini-thinking-unreleased).
+
 `model/volcengine.go` provides direct Ark Chat Completions construction with a
 complete versioned API prefix, tri-state thinking and reasoning effort. Its
 shared request builder serves both call paths; streaming owns a child context
