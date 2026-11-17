@@ -82,11 +82,10 @@ func (t *threadTool) Execute(ctx context.Context, input map[string]any) (*tool.T
 	if act == nil {
 		return failf("%s only works while this participant is running an activation", t.ToolName), nil
 	}
-	host := t.c.hostOf()
 	if t.ToolName == ToolThreadRead {
-		return t.c.threadRead(ctx, host, input), nil
+		return t.c.threadRead(ctx, act.host, input), nil
 	}
-	return t.c.eventRead(host, input), nil
+	return t.c.eventRead(act.host, input), nil
 }
 
 func failf(format string, args ...any) *tool.ToolResponse {

@@ -407,11 +407,13 @@ func TestSystemPromptSection(t *testing.T) {
 }
 
 func TestArgumentHelpers(t *testing.T) {
-	in := map[string]any{"f": 7.0, "neg": -2.0, "big": 1e12, "huge": 1e300, "nan": math.NaN(), "max": float64(math.MaxInt32),
-		"over": float64(math.MaxInt32) + 1, "i": 5, "ni": -5, "n": json.Number("9"), "nmax": json.Number("2147483647"),
-		"nover": json.Number("2147483648"), "nbad": json.Number("x"), "s": "str"}
-	for key, want := range map[string]int{"f": 7, "neg": 0, "big": 0, "huge": 0, "nan": 0, "max": math.MaxInt32, "over": 0,
-		"i": 5, "ni": 0, "n": 9, "nmax": math.MaxInt32, "nover": 0, "nbad": 0, "s": 0, "missing": 0} {
+	in := map[string]any{"f": 7.0, "frac": 2.5, "neg": -2.0, "big": 1e12, "huge": 1e300, "nan": math.NaN(),
+		"pinf": math.Inf(1), "ninf": math.Inf(-1), "max": float64(math.MaxInt32), "over": float64(math.MaxInt32) + 1,
+		"i": 5, "ni": -5, "n": json.Number("9"), "nmax": json.Number("2147483647"), "nover": json.Number("2147483648"),
+		"nbad": json.Number("x"), "s": "str"}
+	for key, want := range map[string]int{"f": 7, "frac": 2, "neg": 0, "big": 0, "huge": 0, "nan": 0, "pinf": 0, "ninf": 0,
+		"max": math.MaxInt32, "over": 0, "i": 5, "ni": 0, "n": 9, "nmax": math.MaxInt32, "nover": 0, "nbad": 0, "s": 0,
+		"missing": 0} {
 		if got := intArg(in, key); got != want {
 			t.Fatalf("intArg(%s) = %d, want %d", key, got, want)
 		}
@@ -423,6 +425,7 @@ func TestArgumentHelpers(t *testing.T) {
 	}{
 		{3.0, 3, true}, {3.5, 0, false}, {-1.0, 0, false}, {4, 4, true}, {-4, 0, false},
 		{json.Number("12"), 12, true}, {json.Number("-1"), 0, false}, {"7", 0, false},
+		{math.Inf(1), 0, false}, {math.NaN(), 0, false}, {math.Ldexp(1, 64), 0, false},
 	} {
 		if got, ok := seqArg(tc.v); got != tc.want || ok != tc.ok {
 			t.Fatalf("seqArg(%v) = %d %v", tc.v, got, ok)
@@ -537,5 +540,31 @@ func TestEmptyPeerSummaryFailsTheSync(t *testing.T) {
 	}
 	if tf.tp.State().Busy {
 		t.Fatal("a refused team activation must leave the participant idle")
+	}
+}
+
+// TestActivationKeepsItsHost covers a Release and a new Bind while an
+// activation runs, which the Coordinator never does (Close joins the
+// activations before it releases a participant): the activation's boundary
+// input and read tools keep using the host it started with.
+func TestActivationKeepsItsHost(t *testing.T) {
+	e := newToolEnv(t, cloudDesc)
+	e.host.entries = []thread.Entry{entryText(1, thread.KindUserInput, "from the first host")}
+	e.c.release(e.host)
+	other := newFakeHost(cloudDesc, edgeDesc)
+	if err := e.c.bind(other); err != nil {
+		t.Fatal(err)
+	}
+	if out, _ := e.run(t, ToolThreadRead, nil); !strings.Contains(out, "from the first host") {
+		t.Fatalf("thread_read read another host: %q", out)
+	}
+	e.act.mu.Lock()
+	e.act.hookStarted = true
+	e.act.mu.Unlock()
+	if _, err := e.c.boundary(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if first, second := e.host.snapshot(), other.snapshot(); first.pendCalls != 1 || second.pendCalls != 0 || len(second.reads) != 0 {
+		t.Fatalf("first host pending=%d; new host pending=%d reads=%d", first.pendCalls, second.pendCalls, len(second.reads))
 	}
 }

@@ -360,13 +360,16 @@ func snapshotOf(a *agent.UnifiedAgent) (thread.Snapshot, error) {
 	return &forkSnapshot{agent: a, snap: snap, cursor: cursor}, nil
 }
 
+// ownSnapshot returns snap as a snapshot this participant took of a. A
+// snapshot another agent instance took is returned together with an ErrStale
+// error, for the callers that accept it.
 func ownSnapshot(a *agent.UnifiedAgent, snap thread.Snapshot) (*forkSnapshot, error) {
 	s, ok := snap.(*forkSnapshot)
 	if !ok || s == nil || s.snap == nil {
 		return nil, fmt.Errorf("%w: the snapshot was not taken by this participant", thread.ErrNoSnapshot)
 	}
 	if s.agent != a {
-		return nil, fmt.Errorf("%w: the snapshot belongs to another agent instance", thread.ErrStale)
+		return s, fmt.Errorf("%w: the snapshot belongs to another agent instance", thread.ErrStale)
 	}
 	return s, nil
 }
@@ -402,7 +405,7 @@ func forkOn(ctx context.Context, a *agent.UnifiedAgent, snap thread.Snapshot, sp
 func offerOn(ctx context.Context, a *agent.UnifiedAgent, snap thread.Snapshot, text string, anyInstance bool) error {
 	s, err := ownSnapshot(a, snap)
 	if err != nil && anyInstance && errors.Is(err, thread.ErrStale) {
-		s, err = snap.(*forkSnapshot), nil
+		err = nil
 	}
 	if err != nil {
 		return err

@@ -564,3 +564,77 @@ func TestLeasedStreamKeepsTheFinalChunkAfterCancel(t *testing.T) {
 		}
 	}
 }
+
+// TestLeasedNotesALapsedLease covers a lease that expired between two
+// renewals and was free when the next renewal ran: another holder could have
+// taken and released it in between, so the call's result says the resource
+// was not exclusively held throughout.
+func TestLeasedNotesALapsedLease(t *testing.T) {
+	const note = "[The lease on a.go lapsed during this call, so the resource was not exclusively held for the whole call.]"
+	ttl := 20 * time.Millisecond
+	clk := &testClock{now: time.Unix(1_000_000, 0)}
+	leases := thread.NewLeases(clk.Now)
+	p := newProbe(leases)
+	p.started, p.release = make(chan struct{}, 1), make(chan struct{})
+	w := Leased(p, leases, "cloud", ttl, pathOf)
+	out := make(chan string, 1)
+	go func() {
+		r, _ := w.Execute(context.Background(), map[string]any{"path": "a.go"})
+		out <- respText(r)
+	}()
+	<-p.started
+	// The lease expires, then a renewal takes it again. Twice, because a
+	// renewal whose check ran just before the clock moved does not see the
+	// lapse (the note is best-effort); two such misses in a row are unlikely.
+	for range 2 {
+		clk.advance(time.Hour)
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			if h, _ := leases.Holder("a.go"); h == "cloud" {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("renewal never took the lease again")
+			}
+			time.Sleep(ttl / 4)
+		}
+	}
+	close(p.release)
+	if got := <-out; got != "ok\n"+note {
+		t.Fatalf("result: %q", got)
+	}
+}
+
+// panicStream panics in ExecuteStream before it returns a stream.
+type panicStream struct {
+	*probeTool
+}
+
+func (p *panicStream) ExecuteStream(context.Context, map[string]any) (<-chan tool.ToolChunk, error) {
+	panic("stream setup failed")
+}
+
+// TestLeasedStreamReleasesWhenSetupPanics covers a wrapped ExecuteStream
+// that panics before it returns a stream: no forwarder owns the lease yet, so
+// the wrapper releases it, stopping renewal, as the panic passes through.
+func TestLeasedStreamReleasesWhenSetupPanics(t *testing.T) {
+	leases := thread.NewLeases(nil)
+	w := Leased(&panicStream{newProbe(leases)}, leases, "cloud", time.Minute, pathOf)
+	func() {
+		defer func() {
+			if r := recover(); r != "stream setup failed" {
+				t.Fatalf("recovered %v", r)
+			}
+		}()
+		_, _ = w.(tool.StreamingTool).ExecuteStream(context.Background(), map[string]any{"path": "a.go"})
+	}()
+	if h, held := leases.Holder("a.go"); held {
+		t.Fatalf("the lease is still held by %s", h)
+	}
+	inflight.mu.Lock()
+	n := inflight.n[leaseKey{leases: leases, resource: "a.go", holder: "cloud"}]
+	inflight.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("calls still counted: %d", n)
+	}
+}

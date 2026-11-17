@@ -791,3 +791,53 @@ func TestRepeatedCallIDWithinReply(t *testing.T) {
 		t.Fatalf("recorded = %+v", h.recorded)
 	}
 }
+
+// TestAssignTaskFollowsPermissionRules pins admission through permission
+// rules: a deny rule on assign_task refuses the call before the host sees
+// it, and an ask rule holds it for a confirmation, so only a confirmed call
+// reaches Host.Assign.
+func TestAssignTaskFollowsPermissionRules(t *testing.T) {
+	assign := call("a1", ToolAssignTask, map[string]any{"to": "edge", "task": "read the sensor"})
+	run := func(t *testing.T, behavior permission.PermissionBehavior, confirm bool) (*fixture, int, *thread.ActivationEnd) {
+		t.Helper()
+		f := newFixture(t, fixtureOptions{respond: steps(resp("", assign), textResp("done"))})
+		f.a.PermissionEngine().AddRule(permission.Rule{ToolName: ToolAssignTask, Behavior: behavior, Source: "host policy"})
+		asks := 0
+		_, end := activate(t, f.p, foreground(5, "read the sensor"), func(it thread.ActivationEvent) {
+			req, ok := it.Event.(event.RequireUserConfirmEvent)
+			if !ok {
+				return
+			}
+			asks++
+			results := make([]event.ConfirmResult, len(req.ToolCalls))
+			for i, c := range req.ToolCalls {
+				results[i] = event.ConfirmResult{Confirmed: confirm, ToolCall: c}
+			}
+			if err := f.p.SubmitUserConfirm(it.Path, &event.UserConfirmResultEvent{ReplyID: req.ReplyID, ConfirmResults: results}); err != nil {
+				t.Errorf("submit confirmation: %v", err)
+			}
+		})
+		if end.Err != nil || end.Text != "done" || f.m.calls() != 2 {
+			t.Fatalf("end %+v after %d model calls", end, f.m.calls())
+		}
+		return f, asks, end
+	}
+	for _, tc := range []struct {
+		name     string
+		behavior permission.PermissionBehavior
+		confirm  bool
+		asks     int
+		assigned int
+	}{
+		{"deny", permission.BehaviorDeny, true, 0, 0},
+		{"ask and refuse", permission.BehaviorAsk, false, 1, 0},
+		{"ask and confirm", permission.BehaviorAsk, true, 1, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, asks, _ := run(t, tc.behavior, tc.confirm)
+			if got := len(f.host.snapshot().assigns); asks != tc.asks || got != tc.assigned {
+				t.Fatalf("asks = %d, Host.Assign calls = %d", asks, got)
+			}
+		})
+	}
+}

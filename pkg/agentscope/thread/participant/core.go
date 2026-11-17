@@ -144,7 +144,9 @@ func (c *core) bind(h thread.Host) error {
 }
 
 // release forgets h when it is the bound host, so the participant can be
-// bound again. Activations already running keep the host they started with.
+// bound again. Activations already running keep the host they started with:
+// their boundary input, thread tools and reports use the host captured when
+// they began.
 func (c *core) release(h thread.Host) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -176,7 +178,8 @@ func (c *core) endOp() {
 	c.mu.Unlock()
 }
 
-// beginActivation claims the participant for act and returns the host.
+// beginActivation claims the participant for act, records the bound host in
+// act and returns it.
 func (c *core) beginActivation(act *activation) (thread.Host, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -187,6 +190,7 @@ func (c *core) beginActivation(act *activation) (thread.Host, error) {
 		return nil, fmt.Errorf("%w: %s has an activation or operation in progress", ErrBusy, c.desc.Name)
 	}
 	c.state = stateActive
+	act.host = c.host
 	c.act = act
 	return c.host, nil
 }
@@ -219,6 +223,8 @@ type activation struct {
 	triggerSeq uint64
 	// ctx is the reply context; host calls made for the activation use it.
 	ctx context.Context
+	// host is the host bound when the activation began.
+	host thread.Host
 
 	mu            sync.Mutex
 	hookStarted   bool
@@ -277,8 +283,7 @@ func (c *core) boundary(ctx context.Context) (*agent.ThreadUpdate, error) {
 		return nil, fmt.Errorf("participant %s: the agent was built without the participant's loop hook; "+
 			"apply Prepared.Options() after any WithLoopHooks and pass other hooks through PrepareOptions.LoopHooks", c.desc.Name)
 	}
-	host := c.hostOf()
-	s, err := host.Pending(ctx, c.desc.Name, cursor)
+	s, err := act.host.Pending(ctx, c.desc.Name, cursor)
 	if err != nil {
 		return nil, fmt.Errorf("participant %s: pending thread input: %w", c.desc.Name, err)
 	}

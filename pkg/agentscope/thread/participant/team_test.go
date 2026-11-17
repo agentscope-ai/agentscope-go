@@ -533,3 +533,31 @@ func TestTeamOfferDuringFailedBuild(t *testing.T) {
 		t.Fatalf("the last master's checkpoint = %+v (%v)", st, err)
 	}
 }
+
+// TestTeamOfferDuringFailedFirstBuild covers an offer made while the first
+// master is built when that build fails: there is no earlier master to take
+// it, so the offer, which already returned nil, is dropped (and logged).
+func TestTeamOfferDuringFailedFirstBuild(t *testing.T) {
+	ctx := context.Background()
+	var offerErr error
+	f := newTeamFixture(t, teamOptions{master: queued(), member: queued(),
+		factory: func(f *teamFixture, ctx context.Context, _ tool.Tool, _ []tool.Tool, _ []agent.AgentOption) (*agent.UnifiedAgent, error) {
+			offerErr = f.tp.OfferOwnSummary(ctx, nil, "the notes")
+			return nil, errors.New("factory down")
+		}})
+	if _, err := f.tp.Activate(ctx, foreground(1, "hi")); err == nil {
+		t.Fatal("a failed build must fail the activation")
+	}
+	if offerErr != nil {
+		t.Fatalf("an offer during the build: %v", offerErr)
+	}
+	if st, err := agent.LoadCheckpoint(ctx, f.saver, "master-session"); err == nil && st != nil && st.SummaryOffer != nil {
+		t.Fatalf("a dropped offer was saved: %+v", st.SummaryOffer)
+	}
+	f.tp.mu.Lock()
+	pending := f.tp.pendingOffer
+	f.tp.mu.Unlock()
+	if pending != nil {
+		t.Fatalf("the offer is still waiting: %+v", pending)
+	}
+}

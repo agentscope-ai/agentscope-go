@@ -163,7 +163,12 @@ func (tp *TeamParticipant) leader(ctx context.Context, assign tool.Tool) (master
 		last, pending := tp.master, tp.pendingOffer
 		tp.pendingOffer = nil
 		tp.mu.Unlock()
-		if pending != nil && last != nil {
+		switch {
+		case pending == nil:
+		case last == nil:
+			agentscope.Log().WithField("participant", tp.c.desc.Name).
+				Info("participant: own notes offered while the first master build failed were dropped: no master has run yet")
+		default:
 			if oerr := offerOn(ctx, last, pending.snap, pending.text, true); oerr != nil {
 				agentscope.Log().WithError(oerr).WithField("participant", tp.c.desc.Name).
 					Info("participant: own notes offered while a master build failed were not installed")
@@ -560,9 +565,12 @@ func msgRunes(msgs []*message.Msg) int {
 // still holds it. A snapshot an earlier master instance took is offered to
 // the current one, which is built from the same checkpoint and matches it
 // by message ID, so notes forked while the next activation started are not
-// lost. An offer that arrives while the next master is built waits and is
-// made to that master once it is built (a newer waiting offer replaces an
-// older one); it then returns nil, and a failure is logged.
+// lost. An offer that arrives while the next master is built returns nil
+// without waiting for the build: it is made to that master once it is built
+// (a newer waiting offer replaces an older one, and one the first build's
+// failure leaves without a master is dropped), and a failure is logged.
+// Offers are made one at a time, so a call can still wait while another
+// offer is saved with the master's state.
 func (tp *TeamParticipant) OfferOwnSummary(ctx context.Context, snap thread.Snapshot, text string) error {
 	tp.offerMu.Lock()
 	defer tp.offerMu.Unlock()

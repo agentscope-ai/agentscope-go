@@ -21,10 +21,14 @@ import (
 // holder; resourceOf returning "" runs without a lease.
 //
 // The lease is renewed every ttl/2 while the call runs and released when it
-// returns (for a streaming tool, when its stream closes). A failed renewal is
-// logged. When another holder took the lease meanwhile (it expired, for
-// example because renewal stalled), renewal stops and the call's result ends
+// returns (for a streaming tool, when its stream closes). A renewal that
+// finds the lease expired (for example because renewal stalled or the
+// device slept) takes it again when it is free, and the call's result ends
 // with a note that the resource was not exclusively held for the whole call.
+// When another holder has it, the failed renewal is logged, renewal stops and
+// the note names that holder. The note is best-effort: a lease that expires
+// in the instant between a renewal's check and the renewal itself, or that
+// another call of the same holder takes again first, is renewed without it.
 // Calls of the same holder on the same resource share the lease, which is
 // released by the last one. The wrapper keeps t's name, schema, permission and
 // read-only answers and every optional interface t implements:
@@ -124,11 +128,13 @@ func (l *leasedTool) acquire(input map[string]any) (func() string, *tool.ToolRes
 	}
 	stop := make(chan struct{})
 	var renew sync.WaitGroup
-	var lostTo string // written by the renewal goroutine, read after renew.Wait
+	// Written by the renewal goroutine, read after renew.Wait.
+	var lapsed bool
+	var lostTo string
 	renew.Add(1)
 	go func() {
 		defer renew.Done()
-		lostTo = l.renew(resource, stop)
+		lapsed, lostTo = l.renew(resource, stop)
 	}()
 	var once sync.Once
 	var note string
@@ -137,27 +143,37 @@ func (l *leasedTool) acquire(input map[string]any) (func() string, *tool.ToolRes
 			close(stop)
 			renew.Wait()
 			inflight.release(key)
-			if lostTo != "" {
+			switch {
+			case lostTo != "":
 				note = fmt.Sprintf("[The lease on %s was lost during this call: %s took it, so the resource was not "+
 					"exclusively held for the whole call.]", resource, lostTo)
+			case lapsed:
+				note = fmt.Sprintf("[The lease on %s lapsed during this call, so the resource was not exclusively "+
+					"held for the whole call.]", resource)
 			}
 		})
 		return note
 	}, nil
 }
 
-// renew extends the lease every ttl/2 until stop closes. The first renewal
-// acquired the same resource for the same holder and ttl, so a renewal can
-// only fail because another holder took the lease after it expired; the
-// failure is logged, renewal stops and renew returns that holder.
-func (l *leasedTool) renew(resource string, stop <-chan struct{}) string {
+// renew extends the lease every ttl/2 until stop closes. Each renewal first
+// checks that the lease is still held: one that expired since the last
+// renewal is reported as lapsed, because another holder could have taken and
+// released it in between. The first renewal acquired the same resource for
+// the same holder and ttl, so a renewal can only fail because another holder
+// took the lease after it expired; the failure is logged, renewal stops and
+// renew returns that holder.
+func (l *leasedTool) renew(resource string, stop <-chan struct{}) (lapsed bool, takenBy string) {
 	ticker := time.NewTicker(max(l.ttl/2, time.Millisecond))
 	defer ticker.Stop()
 	for {
 		select {
 		case <-stop:
-			return ""
+			return lapsed, ""
 		case <-ticker.C:
+		}
+		if _, held := l.leases.Holder(resource); !held {
+			lapsed = true
 		}
 		_, err := l.leases.Acquire(resource, l.holder, l.ttl)
 		if err == nil {
@@ -168,7 +184,7 @@ func (l *leasedTool) renew(resource string, stop <-chan struct{}) string {
 		other = cmp.Or(other, "another holder")
 		agentscope.Log().WithError(err).WithField("resource", resource).WithField("holder", l.holder).WithField("taken_by", other).
 			Warn("participant: renewing the lease failed; another holder took it during a call")
-		return other
+		return lapsed, other
 	}
 }
 
@@ -229,12 +245,20 @@ func (l *leasedStreaming) ExecuteStream(ctx context.Context, input map[string]an
 		close(ch)
 		return ch, nil
 	}
+	// Until the forwarding goroutine owns the lease, an error or a panic in
+	// the wrapped ExecuteStream releases it here.
+	forwarding := false
+	defer func() {
+		if !forwarding {
+			release()
+		}
+	}()
 	in, err := l.st.ExecuteStream(ctx, input)
 	if err != nil {
-		release()
 		return nil, err
 	}
 	out := make(chan tool.ToolChunk)
+	forwarding = true
 	go func() {
 		defer close(out)
 		defer release()

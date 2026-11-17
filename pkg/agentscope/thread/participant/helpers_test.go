@@ -209,6 +209,7 @@ func (h *fakeHost) snapshot() fakeHost {
 		recorded:  append([]thread.EventRecord(nil), h.recorded...),
 		usage:     append([]thread.LedgerEntry(nil), h.usage...),
 		reads:     append([]thread.ReadQuery(nil), h.reads...),
+		pendCalls: h.pendCalls,
 	}
 }
 
