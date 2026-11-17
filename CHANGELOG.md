@@ -180,6 +180,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   family so a shared cache cannot return a different endpoint's vectors. Entries
   written with old keys are repopulated on demand.
 
+### Fixed — multi-agent message names for Chat Completions
+
+- Agent names now keep legal dashes and dots, and each run of the characters
+  the API rejects in `name` fields (whitespace and `<|\/>`) collapses to one
+  underscore, so free-text names no longer cause 400s. Part of #138.
+
 ### Fixed — Chat Completions formatter errors
 
 - Return formatter errors before HTTP dispatch in buffered and streamed
