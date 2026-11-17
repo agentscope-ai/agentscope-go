@@ -76,12 +76,16 @@ func (f *GeminiFormatter) formatMsg(msg *message.Msg) map[string]any {
 			}
 		case message.ToolCallBlock:
 			args := jsonLoadsWithRepair(blk.Input)
-			parts = append(parts, map[string]any{
+			part := map[string]any{
 				"functionCall": map[string]any{
 					"name": blk.Name,
 					"args": args,
 				},
-			})
+			}
+			if signature, ok := blk.Extra["thought_signature"].(string); ok && signature != "" {
+				part["thoughtSignature"] = signature
+			}
+			parts = append(parts, part)
 		case message.ToolResultBlock:
 			responseKey := "result"
 			if blk.State == message.ToolResultError {
