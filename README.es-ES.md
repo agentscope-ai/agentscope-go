@@ -219,6 +219,7 @@ necesarios.
 | [guardrail](examples/guardrail/) | Bloqueo, ocultación y avisos con respuestas simuladas |
 | [spend_cap](examples/spend_cap/) | Presupuestos basados en el coste observado con un modelo simulado |
 | [agent_service](examples/agent_service/) | Servicio HTTP y eventos SSE |
+| [framework_service](examples/framework_service/) | Streaming SSE del agente y endpoints de herramientas MCP montados en Gin y Echo |
 | [scoped_service](examples/scoped_service/) | Servicio compartido sin proveedor externo, sesiones por propietario y herramientas de archivos |
 | [webui](examples/webui/) | Interfaz web integrada |
 | [dingtalk_channel](examples/dingtalk_channel/) | Mensajes y confirmaciones en DingTalk |
@@ -243,6 +244,7 @@ enlaces al mismo catálogo.
 | Configuración y primer agente | [Primeros pasos](docs/getting-started.md) |
 | Modelos y herramientas | [Proveedores](docs/model-providers.md) · [Herramientas](docs/tools.md) |
 | Middleware y memoria | [Middleware](docs/middleware.md) |
+| Sesión compartida nube-edge | [Registro, Coordinator y enrutamiento de Main Thread (experimental)](docs/main-thread.md) |
 | Despliegue de aplicaciones | [Despliegue](docs/deployment.md) · [Límites de ejecución y sesiones](docs/adversarial-hardening.md) |
 | Tareas de texto controladas | [Ejecución fija](docs/managed-task.md) · [Enrutamiento](docs/managed-routing.md) · [Evaluación](docs/managed-routing-evaluation.md) |
 | Clasificación probabilística | [Contratos y registro de intentos](docs/classifier.md) · [Adaptador Bailian](docs/bailian.md) |
