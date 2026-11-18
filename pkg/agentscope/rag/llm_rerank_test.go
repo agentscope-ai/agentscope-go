@@ -79,6 +79,125 @@ func TestLLMRerankerCachesScores(t *testing.T) {
 	}
 }
 
+func TestLLMRerankerCacheMaxBoundsBatchWrites(t *testing.T) {
+	judge := &rerankJudgeModel{scores: `{"scores":[{"index":0,"score":0.1},{"index":1,"score":0.9},{"index":2,"score":0.3},{"index":3,"score":0.7}]}`}
+	r := NewLLMReranker(judge, WithLLMRerankerCacheMax(2))
+	docs := []Document{
+		{ID: "a", Content: "alpha"},
+		{ID: "b", Content: "beta"},
+		{ID: "c", Content: "gamma"},
+		{ID: "d", Content: "delta"},
+	}
+
+	out, err := r.Rerank(context.Background(), "q", docs, len(docs))
+	if err != nil {
+		t.Fatalf("rerank: %v", err)
+	}
+	if len(out) != len(docs) {
+		t.Fatalf("rerank returned %d documents, want %d", len(out), len(docs))
+	}
+	want := []struct {
+		id    string
+		score float64
+	}{
+		{id: "b", score: 0.9},
+		{id: "d", score: 0.7},
+		{id: "c", score: 0.3},
+		{id: "a", score: 0.1},
+	}
+	for i, want := range want {
+		if out[i].Document.ID != want.id || out[i].Score != want.score {
+			t.Fatalf("out[%d] = %s/%v, want %s/%v", i, out[i].Document.ID, out[i].Score, want.id, want.score)
+		}
+	}
+	if got := len(r.cache); got > 2 {
+		t.Fatalf("cache has %d entries; configured capacity is 2", got)
+	}
+}
+
+func TestLLMRerankerCacheMaxBoundsBatchAfterOverflow(t *testing.T) {
+	judge := &rerankJudgeModel{scores: `{"scores":[{"index":0,"score":0.1},{"index":1,"score":0.9},{"index":2,"score":0.3}]}`}
+	r := NewLLMReranker(judge, WithLLMRerankerCacheMax(2))
+	r.cache["old-a"] = 0.2
+	r.cache["old-b"] = 0.4
+	docs := []Document{
+		{ID: "a", Content: "alpha"},
+		{ID: "b", Content: "beta"},
+		{ID: "c", Content: "gamma"},
+	}
+
+	out, err := r.Rerank(context.Background(), "q", docs, len(docs))
+	if err != nil {
+		t.Fatalf("rerank: %v", err)
+	}
+	if len(out) != len(docs) {
+		t.Fatalf("rerank returned %d documents, want %d", len(out), len(docs))
+	}
+	want := []struct {
+		id    string
+		score float64
+	}{
+		{id: "b", score: 0.9},
+		{id: "c", score: 0.3},
+		{id: "a", score: 0.1},
+	}
+	for i, want := range want {
+		if out[i].Document.ID != want.id || out[i].Score != want.score {
+			t.Fatalf("out[%d] = %s/%v, want %s/%v", i, out[i].Document.ID, out[i].Score, want.id, want.score)
+		}
+	}
+	if got := len(r.cache); got > 2 {
+		t.Fatalf("cache has %d entries after overflow; configured capacity is 2", got)
+	}
+	if _, ok := r.cache["old-a"]; ok {
+		t.Fatal("overflow should clear the old cache entries")
+	}
+}
+
+func TestLLMRerankerCacheMaxUsesRemainingCapacity(t *testing.T) {
+	judge := &rerankJudgeModel{scores: `{"scores":[{"index":0,"score":0.9},{"index":1,"score":0.1}]}`}
+	r := NewLLMReranker(judge, WithLLMRerankerCacheMax(2))
+	docs := []Document{
+		{ID: "cached", Content: "already scored"},
+		{ID: "b", Content: "beta"},
+		{ID: "c", Content: "gamma"},
+	}
+	r.cache[llmRerankCacheKey("q", docs[0])] = 0.5
+
+	out, err := r.Rerank(context.Background(), "q", docs, len(docs))
+	if err != nil {
+		t.Fatalf("rerank: %v", err)
+	}
+	want := []struct {
+		id    string
+		score float64
+	}{
+		{id: "b", score: 0.9},
+		{id: "cached", score: 0.5},
+		{id: "c", score: 0.1},
+	}
+	if len(out) != len(want) {
+		t.Fatalf("rerank returned %d documents, want %d", len(out), len(want))
+	}
+	for i, want := range want {
+		if out[i].Document.ID != want.id || out[i].Score != want.score {
+			t.Fatalf("out[%d] = %s/%v, want %s/%v", i, out[i].Document.ID, out[i].Score, want.id, want.score)
+		}
+	}
+	if got := len(r.cache); got != 2 {
+		t.Fatalf("cache has %d entries, want capacity 2", got)
+	}
+	if _, ok := r.cache[llmRerankCacheKey("q", docs[1])]; !ok {
+		t.Fatal("first uncached document was not admitted into the remaining slot")
+	}
+	if _, ok := r.cache[llmRerankCacheKey("q", docs[2])]; ok {
+		t.Fatal("second uncached document should not exceed the remaining capacity")
+	}
+	if got := atomic.LoadInt64(&judge.calls); got != 1 {
+		t.Fatalf("judge calls = %d, want 1", got)
+	}
+}
+
 func TestLLMRerankerClampsAndDefaults(t *testing.T) {
 	judge := &rerankJudgeModel{scores: `{"scores":[{"index":0,"score":7},{"index":99,"score":0.5}]}`}
 	r := NewLLMReranker(judge)

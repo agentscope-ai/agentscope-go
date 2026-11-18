@@ -156,7 +156,9 @@ func (r *LLMReranker) Rerank(ctx context.Context, query string, docs []Document,
 		}
 		for pos, idx := range needJudge {
 			scores[idx] = judged[pos]
-			r.cache[llmRerankCacheKey(query, docs[idx])] = judged[pos]
+			if len(r.cache) < r.cacheMax {
+				r.cache[llmRerankCacheKey(query, docs[idx])] = judged[pos]
+			}
 		}
 		r.mu.Unlock()
 	}

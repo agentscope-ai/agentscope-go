@@ -22,6 +22,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   dependencies `github.com/gin-gonic/gin` and `github.com/labstack/echo/v4`
   (both MIT).
 
+### Fixed — RAG
+
+- `LLMReranker` now respects `WithLLMRerankerCacheMax` for oversized rerank
+  batches while still scoring every candidate.
+
 ### Fixed — hub
 
 - **`GitHubMCPRegistry.Get`/`Install` against live registries:** both GitHub's
