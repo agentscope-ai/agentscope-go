@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: ["*"]
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     strategy:
@@ -14,6 +17,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         go: ['1.25']
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
