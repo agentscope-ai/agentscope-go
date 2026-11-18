@@ -505,6 +505,15 @@ agentscope-go includes TTS models for audio synthesis, usable standalone or via 
 
 ### DashScope TTS
 
+`DashScopeRealtimeTTS.SynthesizeStream` delivers exactly one terminal response
+and closes its channel. Check `Response.Err` before consuming `Content`:
+HTTP, transport, body-read and cancellation failures arrive in that response
+with `IsLast: true`. The error preserves wrapped causes for `errors.Is`.
+This adapter buffers the HTTP response; it does not emit incremental audio.
+`TTSMiddleware` treats audio as best-effort: it skips error responses, closes
+any audio block already started, and does not retry a failed stream.
+This does not change other providers' streaming error behavior.
+
 Standard and realtime (CosyVoice) TTS:
 
 ```go

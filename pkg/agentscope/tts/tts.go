@@ -4,6 +4,9 @@ import "context"
 
 // Response holds the result of a TTS synthesis call.
 type Response struct {
+	// Err reports a stream failure. Check it before consuming Content.
+	// DashScopeRealtimeTTS emits one terminal response with Err on failure.
+	Err       error  `json:"-"`
 	Content   []byte // audio data (e.g. raw PCM or WAV)
 	MediaType string // e.g. "audio/wav", "audio/pcm"
 	IsLast    bool   // true for the final chunk in a stream
