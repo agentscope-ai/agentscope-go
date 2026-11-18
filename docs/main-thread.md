@@ -1,6 +1,6 @@
 # Main Thread: one session shared by a cloud and an edge agent
 
-The experimental `thread` package lets a cloud agent and an edge (on-device)
+The experimental `thread` packages let a cloud agent and an edge (on-device)
 agent serve one continuous user session. Each keeps its own context, model and
 tools. They share an append-only log, the Main Thread, that holds only what
 was published: the user's input, the text the user actually saw, which tools
@@ -14,18 +14,18 @@ single writer of that log. The design was proposed in
 projection of entries into a participant's context, the Coordinator, the
 usage ledger, the tool-output list, leases and the contracts a participant,
 a router and a forker implement (`runtime.go`).
+[`thread/participant`](../pkg/agentscope/thread/participant/) adapts one
+`UnifiedAgent` (`AgentParticipant`) or a cloud master with sub-agents
+(`TeamParticipant`) and provides the thread tools an agent uses to transfer,
+assign, report and read.
 [`thread/route`](../pkg/agentscope/thread/route/) provides a router with three
 modes, host rules and an optional classifier
 ([Routing modes and the classifier layer](#routing-modes-and-the-classifier-layer)).
-`thread/participant`, which adapts a `UnifiedAgent` (or a cloud master with
-sub-agents) and provides the tools an agent uses to transfer, assign, report
-and read, lands separately. This page describes the Coordinator and the
-router.
 
 Every exported identifier in these packages is EXPERIMENTAL and may change
 without notice. The repository tests are offline, with scripted
-participants, so nothing here establishes task quality, cloud cost, latency
-or energy benefits. These packages' only live runs were in a benchmark
+participants and scripted models, so nothing here establishes task quality,
+cloud cost, latency or energy benefits. These packages' only live runs were in a benchmark
 comparison that was withdrawn; only one routing observation from it is used
 (the `hybrid` default).
 
@@ -34,7 +34,8 @@ comparison that was withdrawn; only one routing observation from it is used
 **Participants.** A participant implements `thread.Participant`. Its
 `thread.Descriptor` gives its name, zone (`edge` or `cloud`), context window,
 the budget of a summary written for it, the longest brief it accepts, its
-tool groups and a description.
+tool groups and a description. `participant.SystemPromptSection` renders the
+peers' descriptors for an agent's system prompt.
 
 **One owner at a time.** Exactly one participant owns the foreground. Only the
 owner's foreground activation reaches the user. Every owner change increments
@@ -196,6 +197,11 @@ Coordinator never waits for a summary fork.
 Unlike a sub-agent call, nothing returns to the caller: the other side
 continues with the user.
 
+In `thread/participant` the `transfer` tool makes this call. The agent calls
+it alone (`agent.WithExclusiveTools`), and the reply ends with
+`types.ReplyHandedOff` without another model call; `OnReply` middleware
+cannot swallow that end.
+
 ## Background work
 
 `Host.Assign` starts a task on another participant in the background; its
@@ -209,6 +215,10 @@ participant's cursor. `thread.Leases` lets tools that touch shared resources
 (for example a file path) take a lease, so two participants cannot use one
 at the same time; with `Config.Leases` set, the Coordinator releases a
 participant's leases after each of its activations.
+
+In `thread/participant`, `assign_task` calls `Host.Assign`, `report` and
+`publish_artifact` publish results, and `participant.Leased` wraps a tool so
+each call takes the lease of the resource it names.
 
 **Following tasks from the host.** While the Coordinator runs, each `assign`
 and `report` entry reaches `Events()` (with `Foreground: false`). `Close`
@@ -247,24 +257,67 @@ accounting after the fact. See the
 
 **Known extension point: admission.** The Coordinator commits an `assign`
 entry before any host code sees it, so a ledger built from entries accounts
-after the fact and cannot refuse a task. Once `thread/participant` lands, a
-`deny` or `ask` permission rule on its assign tool gates each assignment
-before it is committed. A host that must check a budget before a task starts
+after the fact and cannot refuse a task. A `deny` or `ask` permission rule
+on `assign_task` gates each assignment before it is committed. A host that must check a budget before a task starts
 needs a hook on `Assign`, which does not exist yet; it will be added when a
 host needs it. There is also no per-task budget and no per-task cancel:
 interrupting the foreground or a transfer does not stop a task, and
 `Coordinator.Close` does.
 
+**Shared workspace.** When the participants' agents work on one workspace,
+give each its own `tool.ReadCache` with `SetRejectStaleWrites(true)` through
+`agent.WithReadCache`. A whole-file `Write` from a copy the agent read before
+the other side changed the file is then refused, and the agent reads it
+again; see [stale writes](tools.md#stale-writes-on-a-shared-workspace-experimental).
+This includes a team's master and members: a `TeamPipeline` member runs on
+the pipeline's context, not inside its master's tools, so a member without a
+cache of its own has neither the read-first guard nor this check.
+
 **Progress.** A participant reports its plan as `progress` entries of its
-run (an agent's `update_plan` calls, with `agent.WithPlanTool`). A projection
-shows only the newest progress of a run that is still going; once the run
-replied, transferred, reported, answered late or was interrupted, its
-progress drops out. A failed run keeps its last progress visible, which is
-what a failover or a recovery points at.
+run. An agent with `agent.WithPlanTool` reports it with `update_plan`; each
+update becomes a `progress` entry, and the call stays out of the reply's tool
+digest. The plan is injected ahead of the history on every call, so each
+update makes the history miss the prompt cache on the next one.
+`agent.WithPlanAfterLatestInput` puts it right after the newest user message
+instead, so a plan update re-sends only the current turn uncached. Imported
+entries, notes and boundary input are user messages too, and each one moves
+the plan, so the steps since the previous input miss the cache once; a
+participant that imports often and rarely updates its plan may cache better
+with the default. Its effect on answer quality has not been measured.
+A projection shows only the newest progress of a run that is still going;
+once the run replied, transferred, reported, answered late or was
+interrupted, its progress drops out. A failed run keeps its last progress
+visible, which is what a failover or a recovery points at.
+
+## A cloud master with sub-agents
+
+`participant.TeamParticipant` runs the cloud side as a master with members
+through `pipeline.TeamPipeline`. Each activation starts a team run whose
+leader factory rebuilds the master from its persisted state (the factory
+installs the TeamAssign tool, the thread tools and the participant's agent
+options). `TeamConfig.Load` reads the master's persisted state, so a
+participant rebuilt after a restart reports the right cursor before its
+first activation; without it the participant supports only a new session.
+Members never see the thread, and the member factories must not give them
+thread tools. Their text never becomes a reply entry, but their tool calls
+appear in the digest as `member/tool` and their usage is in the ledger.
 
 ## Context and summaries
 
 Before each activation the Coordinator decides what the participant imports.
+
+The cloud participants in `thread/participant` implement `thread.Forker`. A
+fork is the cloud's last request plus one appended instruction, with the
+same system prompt, tools and options and an output cap, so a provider with
+prefix caching can reuse the cached prefix. Whether it does, and what that
+saves, has not been measured for this runtime. The fork sends tool choice
+none by default; some providers (Anthropic) invalidate cached message blocks
+when the tool choice changes, so the `KeepForkToolChoice` option keeps the
+main request's tool choice and asks the model to rewrite if it calls a tool.
+A fork never touches the agent's main context (`agent.WithForkCapture`,
+`ForkSnapshot`, `ForkSummary`). A fork does not pass through the reply loop,
+so the `ForkGuard` option runs the host's guardrail rules on every summary
+it writes.
 
 * **Peer summary (for the edge).** Summaries are written by the cloud's
   `thread.Forker` from a fork of its last request, without touching its main
@@ -283,7 +336,11 @@ Before each activation the Coordinator decides what the participant imports.
   The Coordinator offers them to the cloud (`Forker.OfferOwnSummary`), which
   installs them at its own compaction line. Notes are offered only once a
   peer summary covers their snapshot: once they replace the history, its tool
-  work could no longer reach the edge.
+  work could no longer reach the edge. A `UnifiedAgent` saves the offer with
+  its state (`UnifiedAgent.OfferSummary`), so a team master rebuilt for the
+  next activation still holds it, and notes that finish after the next
+  activation built its master are offered to that master, which matches them
+  by message ID.
 * **Clear rule (edge handover).** When the edge is about to run after another
   participant held the foreground since the edge last acted, and the newest
   peer summary is newer than the edge's last activity, the edge's context is
@@ -301,19 +358,52 @@ Before each activation the Coordinator decides what the participant imports.
   the Coordinator imports in chunks and compacts between them with
   `Participant.Compact` (a `UnifiedAgent` uses `CompactStrict`, which leaves
   the state unchanged on any failure). After `ImportPolicy.MaxRounds` it moves
-  on and tells the participant which entries to read.
+  on and tells the participant which entries to read with `thread_read`.
+
+* **Local summary budget.** The edge's own summary comes from its agent's
+  synchronous compression in the reply loop; nothing forks on the edge.
+  `agent.ContextConfig.ThreadSummaryTokens` is the budget the edge's own
+  summary shares with the peer summary it holds. Zero (the default) sizes it
+  from the window, 3/8 of it (3,072 tokens of an 8,192-token window), applied
+  while a peer summary is held. A positive value fixes it, a negative one
+  turns it off, and `UnifiedAgent.SetThreadSummaryTokens` changes it at run
+  time. The own summary gets what the peer summary leaves, a newly arrived
+  peer summary elides an older own summary to that share at once, and the
+  peer summary no longer eats the recent tail's `ReserveRatio` share. The
+  peer summary's own budget, when the edge's descriptor leaves
+  `SummaryBudget` at zero, is 5/6 of that total.
 
 The tool-output list (`thread.EventList`) is opt-in: a participant that
 records its tool outputs through `Host.RecordEvent` keeps them outside the
 log and every context, and its peer in the other zone reads them on demand
 through the host (`EventOutline`, `EventSearch`, `EventPage`; every read is
 capped). Nothing is pushed, and a participant is never offered records from
-its own zone.
+its own zone. In `thread/participant`, `CaptureOutputs` on a participant
+records its outputs, and the `event_read` tool, installed on the peer, reads
+them.
 
 ## Wiring
 
 ```go
 store := thread.NewMemoryStore() // or thread.OpenFileStore(path)
+
+edgeDesc := thread.Descriptor{Name: "edge", Zone: thread.ZoneEdge, Window: 8192,
+    SummaryBudget: 1024, ToolGroups: []string{"device"},
+    Description: "Small on-device model with the device tools."}
+prep, err := participant.Prepare(edgeDesc, participant.PrepareOptions{})
+// handle err
+edgeAgent := agent.NewUnifiedAgent("edge", edgePrompt, edgeModel,
+    append(prep.Options(),
+        agent.WithToolkit(tool.NewToolkit(append(prep.Tools(), deviceTools...)...)),
+        agent.WithPermissionContext(permission.NewContext(permission.ModeDefault)),
+        agent.WithContextConfig(&agent.ContextConfig{ContextSize: 8192}))...)
+edge, err := prep.Participant(participant.AgentConfig{Descriptor: edgeDesc, Agent: edgeAgent})
+// handle err
+
+cloud, err := participant.NewTeamParticipant(participant.TeamConfig{
+    Descriptor: cloudDesc, Master: buildMaster, Members: members,
+    Load: loadMasterState}) // reads the checkpoint buildMaster restores from
+// handle err
 
 // Classifier: any classifier.DispatchClassifier, or nil for rules and defaults only.
 router, err := route.New(route.Config{Mode: route.Hybrid, Edge: "edge", Cloud: "cloud",
@@ -330,6 +420,13 @@ _, err = coord.Submit(ctx, thread.Query{Text: "…"})
 err = coord.WaitIdle(ctx)
 ```
 
+Agents need a permission context whenever the writing thread tools are
+installed. Pass host loop hooks through `PrepareOptions.LoopHooks`
+(`agent.WithLoopHooks` replaces earlier hooks). A participant calls its
+`Host` only after `NewCoordinator` returns: recovery changes the
+Coordinator's state before it starts serving calls, so a custom participant
+must not call the Host from `Bind`.
+
 Answer confirmation requests from `Events()` with
 `Coordinator.SubmitUserConfirm`. Show only events with `Foreground` set as
 the reply: background tasks and late output also appear in the stream,
@@ -339,9 +436,12 @@ cancels the foreground activation (one still queued behind a background task
 on its participant keeps the foreground until that task ends, and only then
 writes its interrupted marker); a transfer, task, report or artifact its
 tools had not committed yet is refused (`thread.ErrInterrupted`) and nothing
-is written. A write that committed just before the interrupt reaches the
-participant's context as a note before its next activation, so the agent and
-the log agree. If an interrupt reaches the new owner of a Transfer while the
+is written, and the model is told so. A write that committed just before
+the interrupt reaches the participant's context as a note before its next
+activation, so the agent and the log agree. Its late answer is never taken
+for a later call: the agent matches external results and confirmations by
+reply ID as well as tool-call ID, because some providers (Gemini) repeat
+tool-call IDs across replies. If an interrupt reaches the new owner of a Transfer while the
 old owner's pre-transfer events still wait to be shown, the rest of them are
 dropped from the event stream (the Transfer's reply entry still carries the
 whole text), so nothing of an old owner follows a later owner's events.
@@ -354,8 +454,7 @@ Sync (or does not know whether it did); returning a channel means the Sync
 was applied, and the Coordinator then records a clear's reset. The notes the
 Coordinator writes into a participant's context name a `thread_read` tool
 for entries an import cut or left out, so give the agent a tool by that name
-that reads through `Host.Read`. The `thread/participant` package, which
-a later change adds, will provide one.
+that reads through `Host.Read`; `thread/participant` installs one.
 
 ## Accounting
 
@@ -425,7 +524,8 @@ instead of leaving it for recovery.
 
 ## Limits
 
-* Repository tests are offline, with scripted participants. These packages'
+* Repository tests are offline, with scripted participants and scripted
+  models. These packages'
   only live runs were in a withdrawn benchmark comparison; only its routing
   observation behind the `hybrid` default is used.
 * One Coordinator process per log; `FileStore` takes no file lock and keeps the
@@ -442,6 +542,22 @@ instead of leaving it for recovery.
 * A settle failure after a normal end (a note or a checkpoint the participant
   could not save) is logged; the Coordinator reports end errors only for
   failed ends.
+* **Evaluation to do: local compression.** The edge compacts synchronously
+  in its reply loop. Whether an asynchronous, continuously updated summary
+  (the style the cloud's own notes follow) is stable enough on a weak local
+  model has not been evaluated; compare the two on task correctness and
+  cloud cost before changing the edge's default.
+* The cloud's own notes are scheduled at the end of each reply, so a long
+  tool-heavy reply can reach the compaction line before its notes are due,
+  and the agent then compresses synchronously.
+* A provider that reports no usage shows up as unknown usage for the model
+  calls of a reply: the agent's per-call event reports zeros then, and a
+  participant records all-zero counts as unknown. Compactions between
+  activations are counted less exactly. An `AgentParticipant` records the
+  usage of the compactions since its last reply as one `compaction` entry
+  at its next reply, and nothing for a compaction whose provider reported
+  no usage. A `TeamParticipant` records each compaction that changed the
+  context as one call of unknown usage.
 * The loop bridge (`UnifiedAgentRunner.LoopOptions`) cannot hand the
   foreground over or ask the user; use the Coordinator.
 * No privacy boundary: the cloud reads the edge's entries, briefs, reports

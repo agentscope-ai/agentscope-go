@@ -36,7 +36,7 @@ feature is wired into every execution path.
 | OpenAI-compatible serving | [openaiserver/](pkg/agentscope/openaiserver/) | Experimental stateless text Chat Completions, server-owned tools and request admission; [guide](docs/openai-serving.md) |
 | External integrations | [mcp/](pkg/agentscope/mcp/), [a2a/](pkg/agentscope/a2a/), [channel/](pkg/agentscope/channel/) | Tool servers, remote agents and messaging channels |
 | Retrieval and memory | [rag/](pkg/agentscope/rag/), [embedding/](pkg/agentscope/embedding/), [memory/](pkg/agentscope/memory/) | Retrieval, embeddings and memory stores |
-| Cloud-edge shared session | [thread/](pkg/agentscope/thread/), [route/](pkg/agentscope/thread/route/) | Experimental Main Thread log, Coordinator, transfer, background tasks, imports, summary scheduling and routing modes; [guide](docs/main-thread.md) |
+| Cloud-edge shared session | [thread/](pkg/agentscope/thread/), [participant/](pkg/agentscope/thread/participant/), [route/](pkg/agentscope/thread/route/) | Experimental Main Thread log, Coordinator, transfer, background tasks, imports, summary scheduling, agent participants and routing modes; [guide](docs/main-thread.md) |
 | Composition and scheduling | [pipeline/](pkg/agentscope/pipeline/), [team/](pkg/agentscope/team/), [schedule/](pkg/agentscope/schedule/) | Agent coordination and scheduled execution |
 | Discovery and skills | [credential/](pkg/agentscope/credential/), [hub/](pkg/agentscope/hub/), [skill/](pkg/agentscope/skill/) | Provider configuration, integration discovery and skill loading |
 | Edge and device support | [device/](pkg/agentscope/device/), [messagebus/](pkg/agentscope/messagebus/), [connectivity.go](pkg/agentscope/model/connectivity.go) | Device tools, pub/sub and cloud/local routing |
@@ -350,7 +350,13 @@ log. The `Coordinator` is the only writer: it routes at query boundaries, guards
 reply and owner-change writes with `{owner, epoch}` and shows the user the
 foreground owner's events (others' confirmation requests pass marked
 `Foreground: false`). The log has no privacy classes: every participant reads
-every entry. A participant fails `Activate` when its Sync was not applied; no
+every entry. `thread/participant` adapts `UnifiedAgent` (and a TeamPipeline
+master) through the opt-in agent seams in `agent/thread_state.go`, `fork.go`,
+`compact_strict.go` and `handoff.go`; its writing tools are external tools
+answered in event order, and agents match external results and
+confirmations by reply ID too, since tool-call IDs can repeat across
+replies. A participant calls its Host only after `NewCoordinator` returns.
+A participant fails `Activate` when its Sync was not applied; no
 Sync moves the cursor back (an edge clear is one Reset Sync with the
 activation). A failed owner's request fails over to the other side, queued
 behind any task running there (no takeover); a crash resumes the newest
