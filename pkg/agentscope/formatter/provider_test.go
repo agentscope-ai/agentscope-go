@@ -97,19 +97,8 @@ func TestAllFormatters_TextBlock(t *testing.T) {
 					t.Errorf("text = %v", parts[0]["text"])
 				}
 			case "OpenAIResponse":
-				role, _ := first["role"].(string)
-				if role != "user" {
-					t.Errorf("role = %v, want user", role)
-				}
-				content, ok := first["content"].([]map[string]any)
-				if !ok || len(content) == 0 {
-					t.Fatalf("content missing or empty: %v", first["content"])
-				}
-				if content[0]["type"] != "input_text" {
-					t.Errorf("type = %v, want input_text", content[0]["type"])
-				}
-				if content[0]["text"] != "Hello, world!" {
-					t.Errorf("text = %v", content[0]["text"])
+				if first["role"] != "user" || first["content"] != "Hello, world!" {
+					t.Errorf("message=%v", first)
 				}
 			case "Anthropic":
 				if first["role"] != "user" {
@@ -334,28 +323,9 @@ func TestAllFormatters_ToolCallWithTextBlock(t *testing.T) {
 				}
 
 			case "OpenAIResponse":
-				// Should have a content message with input_text AND a function_call item
-				foundText := false
-				foundFC := false
-				for _, item := range result {
-					if content, ok := item["content"].([]map[string]any); ok {
-						for _, c := range content {
-							if c["type"] == "input_text" && c["text"] == "Let me search for that." {
-								foundText = true
-							}
-						}
-					}
-					if item["type"] == "function_call" {
-						foundFC = true
-					}
+				if len(result) != 2 || result[0]["content"] != "Let me search for that." || result[1]["type"] != "function_call" {
+					t.Errorf("items=%v", result)
 				}
-				if !foundText {
-					t.Error("missing input_text content")
-				}
-				if !foundFC {
-					t.Error("missing function_call item")
-				}
-
 			default: // OpenAI family
 				if result[0]["content"] != "Let me search for that." {
 					t.Errorf("content = %v", result[0]["content"])
@@ -566,20 +536,8 @@ func TestAllFormatters_ThinkingBlock(t *testing.T) {
 				}
 
 			case "OpenAIResponse":
-				// ThinkingBlock with reasoning_item_id produces a reasoning item
-				// Without it, the thinking block is skipped and only the text content is emitted
-				if len(result) != 1 {
-					t.Fatalf("expected 1 item, got %d", len(result))
-				}
-				content, ok := result[0]["content"].([]map[string]any)
-				if !ok || len(content) == 0 {
-					t.Fatalf("content missing: %v", result[0])
-				}
-				if content[0]["type"] != "input_text" {
-					t.Errorf("type = %v, want input_text", content[0]["type"])
-				}
-				if content[0]["text"] != "The answer is 42." {
-					t.Errorf("text = %v", content[0]["text"])
+				if len(result) != 1 || result[0]["content"] != "The answer is 42." {
+					t.Errorf("items=%v", result)
 				}
 			}
 		})
@@ -638,12 +596,8 @@ func TestOpenAIResponse_ThinkingBlockWithReasoningItemID(t *testing.T) {
 		if item["type"] == "reasoning" && item["id"] == "ri_xyz" {
 			foundReasoning = true
 		}
-		if content, ok := item["content"].([]map[string]any); ok {
-			for _, c := range content {
-				if c["type"] == "input_text" && c["text"] == "Done." {
-					foundText = true
-				}
-			}
+		if item["content"] == "Done." {
+			foundText = true
 		}
 	}
 	if !foundReasoning {
@@ -1107,17 +1061,9 @@ func TestAllFormatters_HintBlock_StringHint(t *testing.T) {
 				}
 
 			case "OpenAIResponse":
-				content := result[0]["content"].([]map[string]any)
-				if len(content) < 2 {
-					t.Fatalf("expected at least 2 items, got %d", len(content))
+				if len(result) != 2 || result[0]["role"] != "user" || result[0]["content"] != "Remember to be concise." {
+					t.Fatalf("hint segments=%v", result)
 				}
-				if content[0]["type"] != "input_text" {
-					t.Errorf("type = %v, want input_text", content[0]["type"])
-				}
-				if content[0]["text"] != "Remember to be concise." {
-					t.Errorf("text = %v", content[0]["text"])
-				}
-
 			default: // OpenAI family
 				// HintBlock text is concatenated with TextBlock text
 				contentStr, ok := result[0]["content"].(string)
@@ -1175,9 +1121,12 @@ func TestAllFormatters_HintBlock_ContentBlockHint(t *testing.T) {
 					t.Errorf("hint text = %v, want %v", content[0]["text"], expectedHint)
 				}
 			case "OpenAIResponse":
+				if len(result) != 2 || result[0]["role"] != "user" || result[1]["content"] != "Understood." {
+					t.Fatalf("hint segments=%v", result)
+				}
 				content := result[0]["content"].([]map[string]any)
-				if content[0]["text"] != expectedHint {
-					t.Errorf("hint text = %v, want %v", content[0]["text"], expectedHint)
+				if len(content) != 2 || content[0]["text"] != "Skill instruction A." || content[1]["text"] != "Skill instruction B." {
+					t.Errorf("hint parts=%v", content)
 				}
 			default:
 				contentStr := result[0]["content"].(string)
