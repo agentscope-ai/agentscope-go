@@ -229,6 +229,15 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   when it loads a saved cache. See
   [stale writes](docs/tools.md#stale-writes-on-a-shared-workspace-experimental).
 
+### Changed — shared Responses message conversion
+
+- The Responses provider and public formatter now use the same ordered
+  conversion. Public formatter output retains full reasoning items, native
+  tool-result images and original call IDs; hints become user segments in
+  place. Single-text segments use string content, and empty/unsupported turns
+  follow the provider's existing fallback. Consumers inspecting formatter
+  maps must accept string or array content. Part of #125 (F1).
+
 ### Changed — checkpoint schema version 3
 
 - **BREAKING (constant value)** `agent.StateSchemaVersion` is now 3 (it was 2
