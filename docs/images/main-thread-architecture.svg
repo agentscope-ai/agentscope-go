@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="940" height="536" viewBox="0 0 940 536" role="img" aria-label="The user reaches the session through the Coordinator, which asks the router and classifier for an owner and appends every entry to the Main Thread. The edge and cloud participants import entries past their cursors and publish through the Coordinator. The cloud participant holds a master and two members; only the master touches the log.">
+<style>
+.bg{fill:#FFFFFF;stroke:#D3D9E1;stroke-width:1}
+.box{fill:#FFFFFF;stroke:#556273;stroke-width:1.2}
+.plain{fill:#E9EDF2;stroke:#C5CDD7;stroke-width:1}
+.cloud{fill:#E6ECFB;stroke:#2650BD;stroke-width:1.2}
+.edge{fill:#DDF2EE;stroke:#0A7566;stroke-width:1.2}
+.jev{fill:#F7ECD6;stroke:#935A04;stroke-width:1.2}
+.alert{fill:#FAE7E5;stroke:#AE261D;stroke-width:1.2}
+.l{stroke:#556273;stroke-width:1.3;fill:none}
+.lc{stroke:#2650BD;stroke-width:1.3;fill:none}
+.le{stroke:#0A7566;stroke-width:1.3;fill:none}
+.la{stroke:#AE261D;stroke-width:1.5;fill:none}
+.dash{stroke:#8A96A5;stroke-width:1;stroke-dasharray:4 4;fill:none}
+.t{fill:#17202B;font:400 12.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.tb{fill:#17202B;font:700 13px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.ts{fill:#556273;font:400 11.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.tm{fill:#17202B;font:400 11px 'SFMono-Regular', Consolas, Menlo, monospace}
+.tms{fill:#556273;font:400 10.5px 'SFMono-Regular', Consolas, Menlo, monospace}
+.ta{fill:#AE261D;font:500 11.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.tc{fill:#2650BD;font:700 13px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.te{fill:#0A7566;font:700 13px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#556273"/></marker></defs>
+<rect class="bg" x="0.5" y="0.5" width="939" height="535" rx="6"/>
+<rect class="box" x="200" y="14" width="200" height="36" rx="4"/>
+<text class="tb" x="300" y="37" text-anchor="middle">User</text>
+<line class="l" x1="265" y1="50" x2="265" y2="94" marker-end="url(#a)"/>
+<text class="ts" x="257" y="77" text-anchor="end">query, steering</text>
+<line class="l" x1="335" y1="94" x2="335" y2="50" marker-end="url(#a)"/>
+<text class="ts" x="343" y="77">events; the owner's marked foreground</text>
+<rect class="box" x="40" y="94" width="520" height="58" rx="4"/>
+<text class="tb" x="300" y="118" text-anchor="middle">Coordinator</text>
+<text class="ts" x="300" y="139" text-anchor="middle">routing · owner and epoch · wakes · summary forks · ledger</text>
+<rect class="jev" x="690" y="86" width="230" height="74" rx="4"/>
+<text class="tb" x="805" y="108" text-anchor="middle">Router → classifier</text>
+<text class="ts" x="805" y="128" text-anchor="middle">Jev · Bailian · OpenAI Decisions</text>
+<text class="ts" x="805" y="146" text-anchor="middle">fixed state ≤ 6K tokens</text>
+<line class="l" x1="560" y1="112" x2="690" y2="112" marker-end="url(#a)"/>
+<text class="ts" x="625" y="105" text-anchor="middle">route request</text>
+<line class="l" x1="690" y1="134" x2="560" y2="134" marker-end="url(#a)"/>
+<text class="ts" x="625" y="150" text-anchor="middle">choice + confidence</text>
+<line class="l" x1="300" y1="152" x2="300" y2="194" marker-end="url(#a)"/>
+<text class="ts" x="310" y="177">guarded append (owner, epoch)</text>
+<rect class="box" x="20" y="194" width="900" height="62" rx="4"/>
+<text class="tb" x="34" y="220">Main Thread</text>
+<text class="ts" x="34" y="240">append-only · total order</text>
+<rect class="plain" x="200" y="202" width="112" height="46" rx="2"/>
+<text class="tms" x="208" y="219">#41</text>
+<text class="tm" x="208" y="238">user_input</text>
+<rect class="edge" x="318" y="202" width="112" height="46" rx="2"/>
+<text class="tms" x="326" y="219">#42 edge</text>
+<text class="tm" x="326" y="238">reply</text>
+<rect class="jev" x="436" y="202" width="112" height="46" rx="2"/>
+<text class="tms" x="444" y="219">#43 epoch 8</text>
+<text class="tm" x="444" y="238">owner_change</text>
+<rect class="cloud" x="554" y="202" width="112" height="46" rx="2"/>
+<text class="tms" x="562" y="219">#44 cloud</text>
+<text class="tm" x="562" y="238">assign</text>
+<rect class="cloud" x="672" y="202" width="112" height="46" rx="2"/>
+<text class="tms" x="680" y="219">#45 cloud</text>
+<text class="tm" x="680" y="238">reply</text>
+<rect class="cloud" x="790" y="202" width="112" height="46" rx="2"/>
+<text class="tms" x="798" y="219">#46 cloud</text>
+<text class="tm" x="798" y="238">summary</text>
+<line class="le" x1="110" y1="256" x2="110" y2="318" marker-end="url(#a)"/>
+<text class="ts" x="118" y="291">entries past the cursor</text>
+<line class="le" x1="300" y1="318" x2="300" y2="256" marker-end="url(#a)"/>
+<text class="ts" x="308" y="291">publishes via the Coordinator</text>
+<line class="lc" x1="560" y1="256" x2="560" y2="318" marker-end="url(#a)"/>
+<text class="ts" x="568" y="281">entries past the cursor, in full</text>
+<line class="lc" x1="870" y1="318" x2="870" y2="256" marker-end="url(#a)"/>
+<text class="ts" x="862" y="305" text-anchor="end">master publishes via the Coordinator</text>
+<rect class="edge" x="20" y="318" width="380" height="202" rx="4"/>
+<text class="te" x="36" y="342">Edge participant</text>
+<rect class="box" x="36" y="354" width="348" height="152" rx="4"/>
+<text class="tb" x="52" y="378">Local agent</text>
+<text class="t" x="52" y="401">Cursor #44 · window 8K · running task #44</text>
+<text class="t" x="52" y="423">Peer summary + own summary + imports</text>
+<text class="t" x="52" y="445">Cleared at takeover by a covering peer summary</text>
+<text class="t" x="52" y="467">Tools: device, local files, thread tools</text>
+<text class="t" x="52" y="489">Takes over when the cloud is down</text>
+<rect class="cloud" x="450" y="318" width="470" height="202" rx="4"/>
+<text class="tc" x="466" y="342">Cloud participant</text>
+<rect class="box" x="466" y="352" width="438" height="74" rx="4"/>
+<text class="tb" x="482" y="374">master</text>
+<text class="t" x="482" y="395">Cursor #43 · catches up when routed to</text>
+<text class="t" x="482" y="415">Large window, own notes; the only team agent with thread tools</text>
+<line class="lc" x1="571" y1="426" x2="571" y2="456" marker-start="url(#a)" marker-end="url(#a)"/>
+<line class="lc" x1="799" y1="426" x2="799" y2="456" marker-start="url(#a)" marker-end="url(#a)"/>
+<text class="ts" x="685" y="445" text-anchor="middle">TeamAssign / result</text>
+<rect class="box" x="466" y="456" width="210" height="48" rx="4"/>
+<text class="t" x="571" y="485" text-anchor="middle">member A · task context only</text>
+<rect class="box" x="694" y="456" width="210" height="48" rx="4"/>
+<text class="t" x="799" y="485" text-anchor="middle">member B · task context only</text>
+</svg>

@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="940" height="282" viewBox="0 0 940 282" role="img" aria-label="Two ways to place a cloud team. Chosen: the log has two members, the edge agent and the master; members talk only to the master. Not chosen: every member reads and writes the log, so what the edge imports grows with the team, every member needs a cursor and epoch checks, and who may move the foreground becomes unclear.">
+<style>
+.bg{fill:#FFFFFF;stroke:#D3D9E1;stroke-width:1}
+.box{fill:#FFFFFF;stroke:#556273;stroke-width:1.2}
+.plain{fill:#E9EDF2;stroke:#C5CDD7;stroke-width:1}
+.cloud{fill:#E6ECFB;stroke:#2650BD;stroke-width:1.2}
+.edge{fill:#DDF2EE;stroke:#0A7566;stroke-width:1.2}
+.jev{fill:#F7ECD6;stroke:#935A04;stroke-width:1.2}
+.alert{fill:#FAE7E5;stroke:#AE261D;stroke-width:1.2}
+.l{stroke:#556273;stroke-width:1.3;fill:none}
+.lc{stroke:#2650BD;stroke-width:1.3;fill:none}
+.le{stroke:#0A7566;stroke-width:1.3;fill:none}
+.la{stroke:#AE261D;stroke-width:1.5;fill:none}
+.dash{stroke:#8A96A5;stroke-width:1;stroke-dasharray:4 4;fill:none}
+.t{fill:#17202B;font:400 12.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.tb{fill:#17202B;font:700 13px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.ts{fill:#556273;font:400 11.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.tm{fill:#17202B;font:400 11px 'SFMono-Regular', Consolas, Menlo, monospace}
+.tms{fill:#556273;font:400 10.5px 'SFMono-Regular', Consolas, Menlo, monospace}
+.ta{fill:#AE261D;font:500 11.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.tc{fill:#2650BD;font:700 13px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.te{fill:#0A7566;font:700 13px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#556273"/></marker></defs>
+<rect class="bg" x="0.5" y="0.5" width="939" height="281" rx="6"/>
+<text class="tb" x="20" y="22">Chosen: members inside the participant</text>
+<rect class="box" x="20" y="34" width="420" height="30" rx="4"/>
+<text class="tb" x="230" y="54" text-anchor="middle">Main Thread</text>
+<rect class="edge" x="30" y="112" width="120" height="42" rx="4"/>
+<text class="t" x="90" y="138" text-anchor="middle">Edge agent</text>
+<line class="le" x1="90" y1="64" x2="90" y2="112" marker-start="url(#a)" marker-end="url(#a)"/>
+<rect class="cloud" x="180" y="88" width="260" height="176" rx="4" stroke-dasharray="5 4"/>
+<text class="ts" x="192" y="106">Cloud participant</text>
+<rect class="box" x="250" y="112" width="120" height="42" rx="4"/>
+<text class="t" x="310" y="138" text-anchor="middle">master</text>
+<line class="lc" x1="310" y1="64" x2="310" y2="112" marker-start="url(#a)" marker-end="url(#a)"/>
+<rect class="box" x="192" y="210" width="110" height="40" rx="4"/>
+<text class="t" x="247" y="235" text-anchor="middle">member A</text>
+<rect class="box" x="318" y="210" width="110" height="40" rx="4"/>
+<text class="t" x="373" y="235" text-anchor="middle">member B</text>
+<line class="lc" x1="285" y1="154" x2="247" y2="210" marker-start="url(#a)" marker-end="url(#a)"/>
+<line class="lc" x1="335" y1="154" x2="373" y2="210" marker-start="url(#a)" marker-end="url(#a)"/>
+<text class="ts" x="310" y="186" text-anchor="middle">task / result</text>
+<line class="dash" x1="470" y1="10" x2="470" y2="270"/>
+<text class="tb" x="490" y="22">Not chosen: members on the log</text>
+<rect class="box" x="490" y="34" width="430" height="30" rx="4"/>
+<text class="tb" x="705" y="54" text-anchor="middle">Main Thread</text>
+<rect class="edge" x="490" y="112" width="96" height="42" rx="4"/>
+<text class="t" x="538" y="138" text-anchor="middle">Edge agent</text>
+<line class="la" x1="538" y1="64" x2="538" y2="112" marker-start="url(#a)" marker-end="url(#a)"/>
+<rect class="cloud" x="601" y="112" width="96" height="42" rx="4"/>
+<text class="t" x="649" y="138" text-anchor="middle">master</text>
+<line class="lc" x1="649" y1="64" x2="649" y2="112" marker-start="url(#a)" marker-end="url(#a)"/>
+<rect class="cloud" x="712" y="112" width="96" height="42" rx="4"/>
+<text class="t" x="760" y="138" text-anchor="middle">member A</text>
+<line class="lc" x1="760" y1="64" x2="760" y2="112" marker-start="url(#a)" marker-end="url(#a)"/>
+<rect class="cloud" x="823" y="112" width="96" height="42" rx="4"/>
+<text class="t" x="871" y="138" text-anchor="middle">member B</text>
+<line class="lc" x1="871" y1="64" x2="871" y2="112" marker-start="url(#a)" marker-end="url(#a)"/>
+<text class="ta" x="490" y="192">What the edge imports grows with the team</text>
+<text class="ta" x="490" y="216">Every member needs a cursor and epoch checks</text>
+<text class="ta" x="490" y="240">Who may move the foreground becomes unclear</text>
+</svg>

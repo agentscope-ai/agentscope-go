@@ -163,6 +163,7 @@ its model choice, environment variables and required services or runtimes.
 | [managed_routing_eval](examples/managed_routing_eval/) | Managed fixed/rules/classifier comparisons, offline fixtures and opt-in live pilot |
 | [managed_routing](examples/managed_routing/) | Managed pools, classification and fallback with offline fixtures |
 | [tier_routing](examples/tier_routing/) | UnifiedAgent with fixed and three-tier routed fake ChatModels |
+| [main_thread](examples/main_thread/) | A cloud master with a sub-agent and an edge agent sharing one session, with scripted models |
 | [embodied_demo](examples/embodied_demo/) | Single-device observation, edge/cloud planning and simulated action loop |
 | [managed_task](examples/managed_task/) | Fixed-model managed text execution with a local HTTP fixture |
 | [classifier](examples/classifier/) | Typed classification with offline fake results and attempt accounting |
@@ -244,7 +245,7 @@ to the same catalog.
 | Middleware and memory | [Middleware](docs/middleware.md) |
 | Goal execution | [Experimental GoalPipeline and Agent adapters](docs/goal-pipeline.md) |
 | Named-member teams | [Experimental serial TeamPipeline and host interactions](docs/team-pipeline.md) |
-| Cloud-edge shared session | [Experimental Main Thread log, Coordinator and routing](docs/main-thread.md) |
+| Cloud-edge shared session | [Experimental Main Thread log, Coordinator, participants and routing](docs/main-thread.md) · [Design](docs/design/main-thread.md) |
 | Shared HTTP service | [Experimental owner-scoped sessions and request-aware construction](docs/scoped-service.md) |
 | Application deployment | [Deployment](docs/deployment.md) · [Execution and session limits](docs/adversarial-hardening.md) · [Reply recovery](docs/reply-recovery.md) |
 | OpenAI-compatible serving | [Experimental Chat Completions handler and client contract](docs/openai-serving.md) |

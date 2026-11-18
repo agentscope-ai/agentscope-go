@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="940" height="520" viewBox="0 0 940 520" role="img" aria-label="Routing order. A query that arrives while an activation runs steers the running owner. Otherwise the candidates are the available participants; a single candidate owns the query, and otherwise the first step that decides picks the owner: a participant the user named, a needed tool group only one side holds, a host rule, the classifier, then the mode default. The router waits for the classifier at most Timeout; any classifier failure falls through to the default.">
+<style>
+.bg{fill:#FFFFFF;stroke:#D3D9E1;stroke-width:1}
+.box{fill:#FFFFFF;stroke:#556273;stroke-width:1.2}
+.plain{fill:#E9EDF2;stroke:#C5CDD7;stroke-width:1}
+.cloud{fill:#E6ECFB;stroke:#2650BD;stroke-width:1.2}
+.edge{fill:#DDF2EE;stroke:#0A7566;stroke-width:1.2}
+.jev{fill:#F7ECD6;stroke:#935A04;stroke-width:1.2}
+.alert{fill:#FAE7E5;stroke:#AE261D;stroke-width:1.2}
+.l{stroke:#556273;stroke-width:1.3;fill:none}
+.lc{stroke:#2650BD;stroke-width:1.3;fill:none}
+.le{stroke:#0A7566;stroke-width:1.3;fill:none}
+.la{stroke:#AE261D;stroke-width:1.5;fill:none}
+.dash{stroke:#8A96A5;stroke-width:1;stroke-dasharray:4 4;fill:none}
+.t{fill:#17202B;font:400 12.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.tb{fill:#17202B;font:700 13px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.ts{fill:#556273;font:400 11.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.tm{fill:#17202B;font:400 11px 'SFMono-Regular', Consolas, Menlo, monospace}
+.tms{fill:#556273;font:400 10.5px 'SFMono-Regular', Consolas, Menlo, monospace}
+.ta{fill:#AE261D;font:500 11.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.tc{fill:#2650BD;font:700 13px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.te{fill:#0A7566;font:700 13px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#556273"/></marker></defs>
+<rect class="bg" x="0.5" y="0.5" width="939" height="519" rx="6"/>
+<rect class="plain" x="20" y="16" width="470" height="40" rx="4"/>
+<text class="tb" x="255.0" y="41" text-anchor="middle">New query at a boundary</text>
+<line class="l" x1="255" y1="56" x2="255" y2="76" marker-end="url(#a)"/>
+<rect class="box" x="20" y="76" width="470" height="40" rx="4"/>
+<text class="tb" x="255.0" y="101" text-anchor="middle">An activation is running?</text>
+<line class="le" x1="490" y1="96" x2="560" y2="96" marker-end="url(#a)"/>
+<text class="ts" x="525" y="89" text-anchor="middle">yes</text>
+<rect class="edge" x="560" y="70" width="360" height="52" rx="4"/>
+<text class="tb" x="740" y="91" text-anchor="middle">Steer the running owner</text>
+<text class="ts" x="740" y="111" text-anchor="middle">at its next safe boundary; no re-routing</text>
+<line class="l" x1="255" y1="116" x2="255" y2="140" marker-end="url(#a)"/>
+<text class="ts" x="263" y="132">no</text>
+<rect class="plain" x="20" y="140" width="470" height="40" rx="4"/>
+<text class="t" x="255.0" y="165" text-anchor="middle">Candidates: available participants; a single one owns the query</text>
+<line class="l" x1="255" y1="180" x2="255" y2="200" marker-end="url(#a)"/>
+<rect class="box" x="20" y="200" width="470" height="40" rx="4"/>
+<text class="t" x="255.0" y="225" text-anchor="middle">The user named a participant (Query.Explicit)</text>
+<line class="l" x1="490" y1="220" x2="540" y2="220"/>
+<text class="ts" x="515" y="214" text-anchor="middle">yes</text>
+<line class="l" x1="255" y1="240" x2="255" y2="260" marker-end="url(#a)"/>
+<text class="ts" x="263" y="254">no</text>
+<rect class="box" x="20" y="260" width="470" height="40" rx="4"/>
+<text class="t" x="255.0" y="285" text-anchor="middle">A needed tool group only one side holds (Query.NeedsGroups)</text>
+<line class="l" x1="490" y1="280" x2="540" y2="280"/>
+<text class="ts" x="515" y="274" text-anchor="middle">yes</text>
+<line class="l" x1="255" y1="300" x2="255" y2="320" marker-end="url(#a)"/>
+<text class="ts" x="263" y="314">no</text>
+<rect class="box" x="20" y="320" width="470" height="40" rx="4"/>
+<text class="t" x="255.0" y="345" text-anchor="middle">A host rule matches (route.Config.Rules)</text>
+<line class="l" x1="490" y1="340" x2="540" y2="340"/>
+<text class="ts" x="515" y="334" text-anchor="middle">yes</text>
+<line class="l" x1="255" y1="360" x2="255" y2="384" marker-end="url(#a)"/>
+<text class="ts" x="263" y="374">no</text>
+<rect class="jev" x="20" y="384" width="470" height="56" rx="4"/>
+<text class="t" x="255.0" y="407" text-anchor="middle">Classifier answers within Timeout (10 s), authorized,</text>
+<text class="t" x="255.0" y="426" text-anchor="middle">valid, confidence ≥ Threshold (0.8), within MaxLag</text>
+<line class="l" x1="490" y1="412" x2="540" y2="412"/>
+<text class="ts" x="515" y="406" text-anchor="middle">yes</text>
+<line class="l" x1="255" y1="440" x2="255" y2="460" marker-end="url(#a)"/>
+<text class="ts" x="263" y="454">no</text>
+<rect class="plain" x="20" y="460" width="470" height="40" rx="4"/>
+<text class="t" x="255.0" y="485" text-anchor="middle">Mode default: edge (local_based) · cloud (cloud_based, hybrid)</text>
+<line class="l" x1="540" y1="220" x2="540" y2="480"/>
+<line class="l" x1="490" y1="480" x2="600" y2="480" marker-end="url(#a)"/>
+<rect class="box" x="600" y="454" width="320" height="52" rx="4"/>
+<text class="tb" x="760" y="475" text-anchor="middle">Owner of the query</text>
+<text class="ts" x="760" y="495" text-anchor="middle">an owner_change is written if it changes</text>
+<line class="l" x1="540" y1="480" x2="600" y2="480"/>
+<text class="ta" x="570" y="396">Any classifier failure falls through</text>
+<text class="ta" x="570" y="414">to the default, after at most Timeout</text>
+</svg>
