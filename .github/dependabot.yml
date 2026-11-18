@@ -6,3 +6,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # Keep the digest-pinned reference Dockerfile images current.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
