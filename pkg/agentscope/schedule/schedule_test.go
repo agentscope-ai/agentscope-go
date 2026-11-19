@@ -221,3 +221,105 @@ func TestRecurringLastRunAt(t *testing.T) {
 		t.Error("LastRunAt should be set after execution")
 	}
 }
+
+func TestInMemorySchedulerKeepsCanceledStateAfterCallback(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		closeScheduler bool
+		callbackErr    error
+	}{
+		{name: "cancel with nil result"},
+		{name: "cancel with error result", callbackErr: context.Canceled},
+		{name: "close with nil result", closeScheduler: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewInMemoryScheduler()
+			defer s.Close()
+			started := make(chan struct{})
+			notified := make(chan struct{})
+			release := make(chan struct{})
+			defer func() {
+				if release != nil {
+					close(release)
+				}
+			}()
+			finish := release
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			id, err := s.Schedule(ctx, &Task{Name: tc.name}, func(runCtx context.Context, _ *Task) error {
+				close(started)
+				<-runCtx.Done()
+				close(notified)
+				<-finish
+				return tc.callbackErr
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-started:
+			case <-ctx.Done():
+				t.Fatal("callback did not start")
+			}
+			if tc.closeScheduler {
+				err = s.Close()
+			} else {
+				err = s.Cancel(ctx, id)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-notified:
+			case <-ctx.Done():
+				t.Fatal("callback did not observe cancellation")
+			}
+			task, err := s.Get(ctx, id)
+			if err != nil || task.Status != StatusCanceled {
+				t.Fatalf("before callback exit: task=%+v err=%v, want canceled", task, err)
+			}
+			close(release)
+			release = nil
+			tick := time.NewTicker(time.Millisecond)
+			defer tick.Stop()
+			for {
+				task, err = s.Get(ctx, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !task.LastRunAt.IsZero() {
+					if task.Status != StatusCanceled || task.Error != "" {
+						t.Fatalf("after callback exit: status=%s, error=%q, want canceled without an error", task.Status, task.Error)
+					}
+					break
+				}
+				select {
+				case <-tick.C:
+				case <-ctx.Done():
+					t.Fatal("scheduler did not record callback exit")
+				}
+			}
+		})
+	}
+}
+
+func TestInMemorySchedulerDoesNotStartCanceledEntry(t *testing.T) {
+	s := NewInMemoryScheduler()
+	defer s.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	task := &Task{ID: "due", Status: StatusPending}
+	ran := false
+	entry := &scheduledEntry{task: task, cancel: cancel, fn: func(context.Context, *Task) error {
+		ran = true
+		return nil
+	}}
+	s.tasks[task.ID] = entry
+	if err := s.Cancel(ctx, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Models a timer or ticker selected just before cancellation.
+	s.executeOnce(ctx, entry)
+	if ran || task.Status != StatusCanceled || !task.LastRunAt.IsZero() {
+		t.Fatalf("after a canceled entry was selected: ran=%t, task=%+v", ran, task)
+	}
+}
