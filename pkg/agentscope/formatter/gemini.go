@@ -82,6 +82,9 @@ func (f *GeminiFormatter) formatMsg(msg *message.Msg) map[string]any {
 					"args": args,
 				},
 			}
+			if blk.ID != "" {
+				part["functionCall"].(map[string]any)["id"] = blk.ID
+			}
 			if signature, ok := blk.Extra["thought_signature"].(string); ok && signature != "" {
 				part["thoughtSignature"] = signature
 			}

@@ -206,6 +206,7 @@ func (m *GeminiChatModel) buildRequest(msgs []*message.Msg, callOpts *CallOption
 				_ = json.Unmarshal([]byte(tcb.Input), &args)
 				part := geminiPart{
 					FunctionCall: &geminiFunctionCall{
+						ID:   tcb.ID,
 						Name: tcb.Name,
 						Args: args,
 					},
@@ -343,6 +344,7 @@ type geminiPart struct {
 }
 
 type geminiFunctionCall struct {
+	ID   string         `json:"id,omitempty"`
 	Name string         `json:"name"`
 	Args map[string]any `json:"args,omitempty"`
 }
@@ -426,9 +428,13 @@ func parseGeminiResponse(parsed geminiResponse) (*ChatResponse, error) {
 			})
 		} else if part.FunctionCall != nil {
 			argsJSON, _ := json.Marshal(part.FunctionCall.Args)
+			id := part.FunctionCall.ID
+			if id == "" {
+				id = fmt.Sprintf("gemini-call-%s-%d", part.FunctionCall.Name, idx)
+			}
 			tc := message.ToolCallBlock{
 				Type:  "tool_call",
-				ID:    fmt.Sprintf("gemini-call-%s-%d", part.FunctionCall.Name, idx),
+				ID:    id,
 				Name:  part.FunctionCall.Name,
 				Input: string(argsJSON),
 				State: message.ToolCallPending,
@@ -523,9 +529,13 @@ func processGeminiStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh
 				})
 			} else if part.FunctionCall != nil {
 				argsJSON, _ := json.Marshal(part.FunctionCall.Args)
+				id := part.FunctionCall.ID
+				if id == "" {
+					id = fmt.Sprintf("gemini-call-%s-%d", part.FunctionCall.Name, toolCallIdx)
+				}
 				tc := message.ToolCallBlock{
 					Type:  "tool_call",
-					ID:    fmt.Sprintf("gemini-call-%s-%d", part.FunctionCall.Name, toolCallIdx),
+					ID:    id,
 					Name:  part.FunctionCall.Name,
 					Input: string(argsJSON),
 					State: message.ToolCallPending,

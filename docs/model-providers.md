@@ -221,6 +221,11 @@ cm, _ := model.NewGeminiChatModel(model.GeminiConfig{
 
 Models: `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-flash-preview`, `gemini-3.1-pro-preview`
 
+Gemini preserves provider-issued tool-call IDs and replays the same ID on
+`functionCall` and `functionResponse`; absent IDs use the existing generated ID.
+The adapter targets the Gemini Developer API. Custom `BaseURL` endpoints must
+accept these ID fields; Vertex-style endpoint compatibility is not guaranteed.
+
 #### Gemini thinking (unreleased)
 
 Both `Chat` and `ChatStream` send explicit thinking options. Leaving thinking
