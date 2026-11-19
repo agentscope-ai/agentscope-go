@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="940" height="462" viewBox="0 0 940 462" role="img" aria-label="Transfer sequence. The cloud master calls transfer; the Coordinator writes the text the user saw and the owner change in one guarded write, moving the epoch from 7 to 8, ends the master's reply and activates the edge with the brief. The edge replies to the user. Late output from the master fails the guard and is kept as a report.">
+<style>
+.bg{fill:#FFFFFF;stroke:#D3D9E1;stroke-width:1}
+.box{fill:#FFFFFF;stroke:#556273;stroke-width:1.2}
+.plain{fill:#E9EDF2;stroke:#C5CDD7;stroke-width:1}
+.cloud{fill:#E6ECFB;stroke:#2650BD;stroke-width:1.2}
+.edge{fill:#DDF2EE;stroke:#0A7566;stroke-width:1.2}
+.jev{fill:#F7ECD6;stroke:#935A04;stroke-width:1.2}
+.alert{fill:#FAE7E5;stroke:#AE261D;stroke-width:1.2}
+.l{stroke:#556273;stroke-width:1.3;fill:none}
+.lc{stroke:#2650BD;stroke-width:1.3;fill:none}
+.le{stroke:#0A7566;stroke-width:1.3;fill:none}
+.la{stroke:#AE261D;stroke-width:1.5;fill:none}
+.dash{stroke:#8A96A5;stroke-width:1;stroke-dasharray:4 4;fill:none}
+.t{fill:#17202B;font:400 12.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.tb{fill:#17202B;font:700 13px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.ts{fill:#556273;font:400 11.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.tm{fill:#17202B;font:400 11px 'SFMono-Regular', Consolas, Menlo, monospace}
+.tms{fill:#556273;font:400 10.5px 'SFMono-Regular', Consolas, Menlo, monospace}
+.ta{fill:#AE261D;font:500 11.5px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.tc{fill:#2650BD;font:700 13px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+.te{fill:#0A7566;font:700 13px 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#556273"/></marker></defs>
+<rect class="bg" x="0.5" y="0.5" width="939" height="461" rx="6"/>
+<rect class="cloud" x="50" y="10" width="140" height="32" rx="4"/>
+<text class="tb" x="120" y="31" text-anchor="middle">Cloud master</text>
+<rect class="box" x="300" y="10" width="140" height="32" rx="4"/>
+<text class="tb" x="370" y="31" text-anchor="middle">Coordinator</text>
+<rect class="edge" x="560" y="10" width="140" height="32" rx="4"/>
+<text class="tb" x="630" y="31" text-anchor="middle">Edge agent</text>
+<rect class="plain" x="790" y="10" width="120" height="32" rx="4"/>
+<text class="tb" x="850" y="31" text-anchor="middle">User</text>
+<line class="dash" x1="120" y1="42" x2="120" y2="452"/>
+<line class="dash" x1="370" y1="42" x2="370" y2="452"/>
+<line class="dash" x1="630" y1="42" x2="630" y2="452"/>
+<line class="dash" x1="850" y1="42" x2="850" y2="452"/>
+<text class="tm" x="245" y="66" text-anchor="middle">transfer(edge, brief)</text>
+<line class="lc" x1="120" y1="74" x2="368" y2="74" marker-end="url(#a)"/>
+<rect class="jev" x="190" y="88" width="360" height="30" rx="4"/>
+<text class="t" x="370" y="108" text-anchor="middle">one guarded write: reply + owner_change, epoch 7 → 8</text>
+<text class="t" x="245" y="140" text-anchor="middle">tool result; the reply ends (ReplyHandedOff)</text>
+<line class="lc" x1="370" y1="148" x2="122" y2="148" marker-end="url(#a)"/>
+<text class="t" x="500" y="174" text-anchor="middle">activate: brief + clear or import</text>
+<line class="le" x1="370" y1="182" x2="628" y2="182" marker-end="url(#a)"/>
+<text class="ts" x="640" y="209">imports the peer summary and the entries</text>
+<text class="t" x="740" y="238" text-anchor="middle">reply, via the Coordinator (epoch 8)</text>
+<line class="le" x1="630" y1="246" x2="848" y2="246" marker-end="url(#a)"/>
+<line class="dash" x1="20" y1="272" x2="920" y2="272"/>
+<text class="ts" x="24" y="290">Failures and late output</text>
+<text class="t" x="245" y="314" text-anchor="middle">late output</text>
+<line class="la" x1="120" y1="322" x2="368" y2="322" marker-end="url(#a)"/>
+<text class="ta" x="382" y="326">fails the guard: kept as a report with rejected_output, not shown</text>
+<text class="ta" x="382" y="360">target unavailable: refused, nothing written, epoch unchanged</text>
+<text class="t" x="245" y="368" text-anchor="middle">error result; the master stays owner</text>
+<line class="lc" x1="370" y1="376" x2="122" y2="376" marker-end="url(#a)"/>
+<text class="ta" x="382" y="404">interrupted before the commit: ErrInterrupted, nothing written</text>
+<text class="ta" x="382" y="432">activation fails after the write: one failover, else no_owner</text>
+</svg>

@@ -66,6 +66,23 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   (`LOW`, `MEDIUM`, `HIGH`); incompatible budgets/levels fail before dispatch.
   Unset options retain provider defaults. See [Gemini thinking](docs/model-providers.md#gemini-thinking-unreleased).
 
+### Added — Main Thread example and design notes (experimental)
+
+- **Offline example** (`examples/main_thread/`): an edge agent and a cloud
+  team (a master with one researcher) share one session through the
+  Coordinator, with scripted models and the offline fake classifier. The
+  session shows a query the cloud answers with its researcher, a transfer to
+  the edge, a query the user names for the edge, and a background task whose
+  report wakes the edge; it prints the log, the owner and the ledger, and its
+  test checks the session.
+- **Design notes**: [Main Thread design](docs/design/main-thread.md) explains
+  why the runtime is shaped this way, how it behaves across failures, what
+  the benchmark of a prototype measured, the changes outside the packages
+  and the open questions, with five figures.
+  [Main Thread privacy](docs/design/main-thread-privacy.md) records keeping
+  data on the device and untrusted content as future work. The
+  [guide](docs/main-thread.md) links both and shows how to run the example.
+
 ### Added — Main Thread participants (experimental)
 
 - New experimental package `thread/participant`: `AgentParticipant` runs one

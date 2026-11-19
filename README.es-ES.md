@@ -168,6 +168,7 @@ necesarios.
 | [managed_routing_eval](examples/managed_routing_eval/) | Comparación de modelo fijo, reglas y clasificación; pruebas locales y piloto real opcional |
 | [managed_routing](examples/managed_routing/) | Pools, clasificación y alternativas con datos de prueba sin servicios externos |
 | [tier_routing](examples/tier_routing/) | UnifiedAgent con ChatModels simulados, fijos y enrutados en tres niveles |
+| [main_thread](examples/main_thread/) | Un agente maestro en la nube con un subagente y un agente edge que comparten una sesión, con modelos simulados |
 | [embodied_demo](examples/embodied_demo/) | Observación, planificación local/nube y ciclo de acciones simuladas en un dispositivo |
 | [managed_task](examples/managed_task/) | Ejecución de texto con modelo fijo y servidor HTTP local de prueba |
 | [classifier](examples/classifier/) | Clasificación tipada con resultados simulados y registro de intentos |
@@ -244,7 +245,7 @@ enlaces al mismo catálogo.
 | Configuración y primer agente | [Primeros pasos](docs/getting-started.md) |
 | Modelos y herramientas | [Proveedores](docs/model-providers.md) · [Herramientas](docs/tools.md) |
 | Middleware y memoria | [Middleware](docs/middleware.md) |
-| Sesión compartida nube-edge | [Registro, Coordinator y enrutamiento de Main Thread (experimental)](docs/main-thread.md) |
+| Sesión compartida nube-edge | [Registro, Coordinator, participantes y enrutamiento de Main Thread (experimental)](docs/main-thread.md) · [Diseño](docs/design/main-thread.md) |
 | Despliegue de aplicaciones | [Despliegue](docs/deployment.md) · [Límites de ejecución y sesiones](docs/adversarial-hardening.md) |
 | Tareas de texto controladas | [Ejecución fija](docs/managed-task.md) · [Enrutamiento](docs/managed-routing.md) · [Evaluación](docs/managed-routing-evaluation.md) |
 | Clasificación probabilística | [Contratos y registro de intentos](docs/classifier.md) · [Adaptador Bailian](docs/bailian.md) |
