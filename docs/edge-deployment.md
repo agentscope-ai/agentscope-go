@@ -124,34 +124,49 @@ response of a stream. The mark is kept with the agent's messages and
 checkpoints; no formatter sends it. Only the copy of the history sent to the
 cloud is rewritten. The stored messages, the local model's own requests and
 the cloud's calls are unchanged, and the rewrite is deterministic, so cached
-prefixes stay stable. Calls written before the option was enabled, and
-arguments that are not exactly one valid JSON value, are sent as written.
+prefixes stay stable. Calls written before the option was enabled are sent
+as written, and so are arguments the rewrite could alter: anything that is
+not exactly one valid JSON value, invalid UTF-8, and any surrogate escape
+(`\uD800` to `\uDFFF`), paired or not.
 `FallbackChatModel.CanonicalReplay` does the same for the calls of models
 later in its chain. Do not turn the option on in two wrappers nested in each
 other: they share the one mark.
 
 The rewrite changes what is sent wherever the adapter keeps the model's key
-order: this package's OpenAI Chat Completions and Responses adapters send the
-arguments as the model wrote them, and Ollama's native adapter removes the
-spaces but keeps the order. The Anthropic and Gemini adapters already send
-the arguments as a parsed object, which Go encodes with sorted keys, so the
+order. The adapters built on the OpenAI-compatible formatter (OpenAI Chat
+Completions, DashScope, Volcengine, DeepSeek, Moonshot, xAI and the
+OpenAI-compatible Ollama adapter) and the Responses adapter send the
+arguments as the model wrote them; Ollama's native adapter removes the spaces
+but keeps the order. The Anthropic and Gemini adapters already send the
+arguments as a parsed object, which Go encodes with sorted keys, so the
 option changes nothing there.
 
-**The measurement.** It comes from the benchmark of a Main Thread prototype
-(see [its evidence](design/main-thread.md#17-evidence)), with `gpt-6-luna`
-on the OpenAI Responses API as the cloud and Qwen3.5-4B as the local model.
-Recorded requests holding the local model's calls were sent again directly,
-not through this package: 11 requests (one chosen because it had run away in
-a live run), 30 times each, with output capped at 8,000 tokens (the largest
-ordinary reply was 7,171). As recorded, 21 to 27 of 330 replies ran into the
-cap in each of three passes; with the keys sorted, 0 of 330 in each of two
-passes, once compact and once with the spaces kept. Removing only the spaces
-gave 23 of 329, so the key order is what matters. Every such reply was a
-`write_file`, and all came on the 8 requests where the local model wrote
-`path` first. In live runs, without a cap, such replies went on to the
-model's 128K output limit. This is one cloud model, one local model and one
-tool; the rewrite applies to every marked call, and its effect on other tools
-and other models is not established.
+With the Responses adapter as the cloud, one more part of a local call goes
+out as written: the adapter sends `ToolCallBlock.ID` as the `function_call`
+item's `id`, so a call from a vLLM server carries an id such as
+`chatcmpl-tool-…`. The benchmark's harness removed every item id that did
+not start with `fc` before sending, so the measurement below never sent these
+ids. Whether the Responses API accepts them is not established:
+{{RESPONSES_ID_STATUS}}. If it does not, the cloud request fails before the
+rewritten arguments matter, and the option has no effect on that setup.
+
+**The measurement.** It comes from the benchmark of a Main Thread prototype,
+recorded in the harness's
+[pre-registration, Amendment 8](https://github.com/thomeal/agentscope-go/blob/5c334a054e66147cd7f2f4edbf0cfa353b76ebcf/experiments/stage0/prereg.md#amendment-8),
+with `gpt-6-luna` on the OpenAI Responses API as the cloud and Qwen3.5-4B as
+the local model. Recorded requests holding the local model's calls were sent
+again directly, not through this package: 11 requests (one chosen because it
+had run away in a live run), 30 times each, with output capped at 8,000
+tokens (the largest ordinary reply was 7,171). As recorded, 21 to 27 of 330
+replies ran into the cap in each of three passes; with the keys sorted, 0 of
+330 in each of two passes, once compact and once with the spaces kept.
+Removing only the spaces gave 23 of 329. In this replay, sorting the keys
+removed the runaways; removing the spaces made no measurable difference.
+Every such reply was a `write_file`, and all came on the 8 requests where the
+local model wrote `path` first. In live runs, without a cap, such replies
+went on to the model's 128K output limit. This is one cloud model, one local
+model and one tool; the rewrite applies to every marked call, and its effect
+on other tools and other models is not established.
 
 ## Context Window and Timeouts for Local Models
 
