@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"maps"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -54,7 +55,8 @@ func markWriter(resp *ChatResponse, rank int) *ChatResponse {
 
 // markWriterStream forwards in and marks the tool calls of its final
 // response as written by the member of the given rank. It closes the
-// returned channel when in closes or ctx ends.
+// returned channel when in closes or ctx ends; after ctx ends it keeps
+// draining in, so a producer that does not watch ctx is not left blocked.
 func markWriterStream(ctx context.Context, in <-chan ChatResponse, rank int) <-chan ChatResponse {
 	if rank <= 0 {
 		return in
@@ -65,6 +67,7 @@ func markWriterStream(ctx context.Context, in <-chan ChatResponse, rank int) <-c
 		for {
 			select {
 			case <-ctx.Done():
+				go discard(in)
 				return
 			case r, ok := <-in:
 				if !ok {
@@ -76,12 +79,19 @@ func markWriterStream(ctx context.Context, in <-chan ChatResponse, rank int) <-c
 				select {
 				case out <- r:
 				case <-ctx.Done():
+					go discard(in)
 					return
 				}
 			}
 		}
 	}()
 	return out
+}
+
+// discard reads in until it closes.
+func discard(in <-chan ChatResponse) {
+	for range in {
+	}
 }
 
 // canonicalFor returns msgs as the member of the given rank should receive
@@ -145,14 +155,19 @@ func writerRank(extra map[string]any) (int, bool) {
 	return 0, false
 }
 
+// surrogateEscape matches a \u escape of a UTF-16 surrogate (U+D800 to
+// U+DFFF). Decoding an unpaired one yields U+FFFD.
+var surrogateEscape = regexp.MustCompile(`\\u[dD][89a-fA-F][0-9a-fA-F]{2}`)
+
 // canonicalJSON re-encodes one JSON value with sorted object keys and no
 // spaces (the measured cloud model wrote its own write_file calls this way).
 // Numbers stay as written and HTML is not escaped, so only the form changes;
 // a duplicated key keeps its last value, as encoding/json reads it. Input
-// that is not exactly one JSON value, or not valid UTF-8 (which decoding
-// would alter), has no canonical form.
+// that is not exactly one JSON value has no canonical form, nor has input
+// that decoding could alter: invalid UTF-8, or any surrogate escape, paired
+// or not.
 func canonicalJSON(s string) (string, bool) {
-	if !utf8.ValidString(s) {
+	if !utf8.ValidString(s) || surrogateEscape.MatchString(s) {
 		return "", false
 	}
 	dec := json.NewDecoder(strings.NewReader(s))

@@ -29,8 +29,15 @@ func TestCanonicalJSON(t *testing.T) {
 		{`{"a":`, "", false},
 		{``, "", false},
 		{"{\"s\": \"\xff\"}", "", false},
+		// Surrogate escapes, unpaired (decoding would give U+FFFD) or paired.
+		{`{"s": "\ud800"}`, "", false},
+		{`{"s": "x\uDFFF"}`, "", false},
+		{`{"s": "\ud83d\ude00"}`, "", false},
+		{`{"s": "\uDC00"}`, "", false},
+		{`{"s": "\ud7ff"}`, "{\"s\":\"\ud7ff\"}", true},
+		{`{"s": "\u00e9\ue000"}`, "{\"s\":\"é\ue000\"}", true},
 		{`{"a": 1, "a": 2}`, `{"a":2}`, true},
-		{`{"s": "é\/"}`, `{"s":"é/"}`, true},
+		{`{"s": "\u00e9\/"}`, `{"s":"é/"}`, true},
 	} {
 		got, ok := canonicalJSON(tc.in)
 		if ok != tc.ok || got != tc.want {
@@ -39,10 +46,20 @@ func TestCanonicalJSON(t *testing.T) {
 	}
 }
 
-// localCall is a call in the local model's own form: path first, spaced.
+// localCall is a call in the local model's own form: path first, spaced,
+// with provider metadata in Extra.
 func localCall(id string) message.ToolCallBlock {
 	return message.ToolCallBlock{Type: "tool_call", ID: id, Name: "write_file",
-		Input: `{"path": "a.go", "content": "package a\n"}`}
+		Input: `{"path": "a.go", "content": "package a\n"}`,
+		Extra: map[string]any{"call_id": id}}
+}
+
+// checkUnmarked fails if marking wrote into the provider's own Extra map.
+func checkUnmarked(t *testing.T, call *message.ToolCallBlock) {
+	t.Helper()
+	if len(call.Extra) != 1 || call.Extra["call_id"] != call.ID {
+		t.Fatalf("marking modified the model's own Extra: %v", call.Extra)
+	}
 }
 
 const canonicalLocalInput = `{"content":"package a\n","path":"a.go"}`
@@ -77,10 +94,13 @@ func (s *scriptedLocal) ChatStream(ctx context.Context, msgs []*message.Msg, _ .
 
 func (s *scriptedLocal) CountTokens([]*message.Msg, []ToolSchema) int { return 0 }
 
-// cloudCapture is a Responses API server: it refuses the first request so
-// the wrapper falls back to the local model, then records every request
-// body and answers with text, buffered or streamed as asked.
+// cloudCapture is a Responses API server: it refuses the requests numbered
+// in refuse (1-based) so the wrapper falls back to the local model, records
+// the body of every other request and answers it with text, buffered or
+// streamed as asked.
 type cloudCapture struct {
+	refuse map[int]bool
+
 	mu     sync.Mutex
 	n      int
 	bodies []map[string]any
@@ -91,16 +111,16 @@ func (c *cloudCapture) handler(t *testing.T) http.HandlerFunc {
 		raw, _ := io.ReadAll(r.Body)
 		c.mu.Lock()
 		c.n++
-		first := c.n == 1
+		refused := c.refuse[c.n]
 		var body map[string]any
 		if err := json.Unmarshal(raw, &body); err != nil {
 			t.Errorf("cloud request is not JSON: %v", err)
 		}
-		if !first {
+		if !refused {
 			c.bodies = append(c.bodies, body)
 		}
 		c.mu.Unlock()
-		if first {
+		if refused {
 			http.Error(w, `{"error":{"message":"unavailable"}}`, http.StatusBadRequest)
 			return
 		}
@@ -164,7 +184,8 @@ func inputsOf(msgs []*message.Msg) []string {
 // FallbackChatModel with a real Responses adapter as the cloud (the primary):
 // the local model's call reaches the cloud's wire with sorted keys, the
 // cloud's own call as written, and the caller's history is not modified.
-// Without the option the local model's form goes out unchanged.
+// When the cloud fails again, the local model receives both calls as
+// written. Without the option the local model's form goes out unchanged.
 func TestCanonicalReplayWire(t *testing.T) {
 	for _, wrapper := range []string{"connectivity", "fallback"} {
 		for _, tc := range []struct {
@@ -185,7 +206,9 @@ func TestCanonicalReplayWire(t *testing.T) {
 }
 
 func testCanonicalReplayWire(t *testing.T, wrapper string, canonical, stream bool) {
-	cc := &cloudCapture{}
+	// Requests 1 and 3 fail, so the first and the third call go to the
+	// local model and the second to the cloud.
+	cc := &cloudCapture{refuse: map[int]bool{1: true, 3: true}}
 	cloud := newResponsesStreamModel(t, cc.handler(t))
 	local := &scriptedLocal{call: localCall("call_local")}
 	var m ChatModel
@@ -248,9 +271,10 @@ func testCanonicalReplayWire(t *testing.T, wrapper string, canonical, stream boo
 	if got.Input != localCall("").Input {
 		t.Fatalf("the local call returned to the caller changed: %q", got.Input)
 	}
-	if _, leaked := local.call.Extra[writerRankKey]; leaked {
-		t.Fatal("marking modified the local model's own block")
+	if got.Extra["call_id"] != "call_local" {
+		t.Fatalf("marking dropped the provider's metadata: %v", got.Extra)
 	}
+	checkUnmarked(t, &local.call)
 
 	hist := historyAfter(resp.Content)
 	before := inputsOf(hist)
@@ -286,9 +310,25 @@ func testCanonicalReplayWire(t *testing.T, wrapper string, canonical, stream boo
 	if after := inputsOf(hist); fmt.Sprint(after) != fmt.Sprint(before) {
 		t.Errorf("the caller's history changed: %q -> %q", before, after)
 	}
-	if len(local.seen) != 1 || inputsOf(local.seen[0]) != nil {
-		t.Errorf("local model calls = %d", len(local.seen))
+
+	// The cloud fails again: the local model receives the history holding
+	// its own marked call, and the cloud's, as written.
+	call(append(append([]*message.Msg(nil), hist...), message.UserMsg("user", "and a third")))
+	cc.mu.Lock()
+	cloudCalls := len(cc.bodies)
+	cc.mu.Unlock()
+	if cloudCalls != 1 {
+		t.Fatalf("cloud answered %d requests, want 1", cloudCalls)
 	}
+	local.mu.Lock()
+	defer local.mu.Unlock()
+	if len(local.seen) != 2 || inputsOf(local.seen[0]) != nil {
+		t.Fatalf("local model calls = %d", len(local.seen))
+	}
+	if got := inputsOf(local.seen[1]); fmt.Sprint(got) != fmt.Sprint(before) {
+		t.Errorf("the local model received %q, want its history as written %q", got, before)
+	}
+	checkUnmarked(t, &local.call)
 }
 
 // TestCanonicalForSurvivesCheckpoint checks that the mark still works after
@@ -488,6 +528,7 @@ func TestFallbackCanonicalReplayStream(t *testing.T) {
 	if len(fallback.got) != 1 || fallback.got[0] != localCall("").Input {
 		t.Fatalf("the fallback's own call must reach it as written: %q", fallback.got)
 	}
+	checkUnmarked(t, &call)
 }
 
 func TestWriterRankForms(t *testing.T) {
@@ -536,5 +577,38 @@ func TestMarkWriterStreamStopsWhileSending(t *testing.T) {
 		case <-deadline:
 			t.Fatal("the forwarder did not close after cancellation")
 		}
+	}
+}
+
+// TestMarkWriterStreamDrainsAfterCancel covers a producer that ignores
+// cancellation: once the caller's context ends and nobody reads the
+// returned channel, the forwarder still drains the source so the producer
+// can finish.
+func TestMarkWriterStreamDrainsAfterCancel(t *testing.T) {
+	in := make(chan ChatResponse)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 3 {
+			in <- ChatResponse{}
+		}
+		in <- ChatResponse{IsLast: true}
+		close(in)
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	out := markWriterStream(ctx, in, 1)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the producer stayed blocked after cancellation")
+	}
+	select {
+	case _, ok := <-out:
+		if ok {
+			t.Fatal("a response arrived after cancellation, with nobody reading")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the forwarder did not close after cancellation")
 	}
 }

@@ -162,14 +162,11 @@ func WithRecoveryTimeout(d time.Duration) ConnectivityOption {
 // stored messages, the local model's requests and the cloud's own calls are
 // unchanged. The rewrite is deterministic, so cached prefixes stay stable.
 // Calls written before the option was enabled carry no mark, and arguments
-// that are not exactly one JSON value have no canonical form; both are sent
-// as written.
+// with no canonical form (not exactly one JSON value, invalid UTF-8 or a
+// surrogate escape) are left alone; both are sent as written.
 //
-// In one measurement, a cloud model sent a local model's write_file calls
-// with path before content ran into an 8,000-token output cap on 6 to 8% of
-// its replies, and on none with the keys sorted. See
-// docs/edge-deployment.md for that measurement and its limits: one cloud
-// model, one local model and one tool.
+// See docs/edge-deployment.md for the measurement behind the option and its
+// limits: one cloud model, one local model and one tool.
 func WithCanonicalReplay() ConnectivityOption {
 	return func(c *connectivityConfig) { c.canonicalReplay = true }
 }
