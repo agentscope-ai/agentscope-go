@@ -185,6 +185,7 @@ func (m *GeminiChatModel) buildRequest(msgs []*message.Msg, callOpts *CallOption
 				}
 				parts = append(parts, geminiPart{
 					FunctionResponse: &geminiFunctionResponse{
+						ID:   trb.ID,
 						Name: trb.Name,
 						Response: map[string]any{
 							responseKey: formatter.ConvertToolResultToString(trb.Output),
@@ -347,6 +348,7 @@ type geminiFunctionCall struct {
 }
 
 type geminiFunctionResponse struct {
+	ID       string         `json:"id,omitempty"`
 	Name     string         `json:"name"`
 	Response map[string]any `json:"response"`
 }

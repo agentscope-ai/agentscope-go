@@ -91,12 +91,14 @@ func (f *GeminiFormatter) formatMsg(msg *message.Msg) map[string]any {
 			if blk.State == message.ToolResultError {
 				responseKey = "error"
 			}
-			parts = append(parts, map[string]any{
-				"functionResponse": map[string]any{
-					"name":     blk.Name,
-					"response": map[string]any{responseKey: ConvertToolResultToString(blk.Output)},
-				},
-			})
+			response := map[string]any{
+				"name":     blk.Name,
+				"response": map[string]any{responseKey: ConvertToolResultToString(blk.Output)},
+			}
+			if blk.ID != "" {
+				response["id"] = blk.ID
+			}
+			parts = append(parts, map[string]any{"functionResponse": response})
 		case message.HintBlock:
 			for _, sub := range hintContent(blk) {
 				switch h := sub.(type) {
