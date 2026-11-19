@@ -11,6 +11,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — Ollama structured output
+
+- Native Ollama now includes the thinking-disabled attempt in the structured
+  output fallback sequence.
+
 ### Fixed — DashScope TTS stream failures
 
 - DashScope realtime `SynthesizeStream` now emits a terminal `Response.Err`
