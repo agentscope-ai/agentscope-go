@@ -120,9 +120,10 @@ func (cb *connectivityBreaker) afterCall(err error) {
 // localhost) is always available but a cloud model should be preferred when
 // connectivity permits.
 type ConnectivityAwareModel struct {
-	local ChatModel
-	cloud ChatModel
-	cb    *connectivityBreaker
+	local     ChatModel
+	cloud     ChatModel
+	cb        *connectivityBreaker
+	canonical bool
 }
 
 // ConnectivityOption configures a ConnectivityAwareModel.
@@ -131,6 +132,7 @@ type ConnectivityOption func(*connectivityConfig)
 type connectivityConfig struct {
 	failureThreshold int
 	recoveryTimeout  time.Duration
+	canonicalReplay  bool
 }
 
 // WithFailureThreshold sets the number of consecutive cloud failures before
@@ -153,6 +155,25 @@ func WithRecoveryTimeout(d time.Duration) ConnectivityOption {
 	}
 }
 
+// WithCanonicalReplay (EXPERIMENTAL) sends the cloud model the arguments of
+// the local model's tool calls as compact JSON with sorted keys. The local
+// model's calls are marked when they pass through (ToolCallBlock.Extra), and
+// the rewrite applies to the copy of the history sent to the cloud: the
+// stored messages, the local model's requests and the cloud's own calls are
+// unchanged. The rewrite is deterministic, so cached prefixes stay stable.
+// Calls written before the option was enabled carry no mark, and arguments
+// that are not exactly one JSON value have no canonical form; both are sent
+// as written.
+//
+// In one measurement, a cloud model sent a local model's write_file calls
+// with path before content ran into an 8,000-token output cap on 6 to 8% of
+// its replies, and on none with the keys sorted. See
+// docs/edge-deployment.md for that measurement and its limits: one cloud
+// model, one local model and one tool.
+func WithCanonicalReplay() ConnectivityOption {
+	return func(c *connectivityConfig) { c.canonicalReplay = true }
+}
+
 // NewConnectivityAwareModel creates a connectivity-aware model that routes
 // between a local fallback and a cloud model based on circuit breaker state.
 func NewConnectivityAwareModel(local, cloud ChatModel, opts ...ConnectivityOption) *ConnectivityAwareModel {
@@ -165,9 +186,10 @@ func NewConnectivityAwareModel(local, cloud ChatModel, opts ...ConnectivityOptio
 	}
 
 	return &ConnectivityAwareModel{
-		local: local,
-		cloud: cloud,
-		cb:    newConnectivityBreaker(cfg.failureThreshold, cfg.recoveryTimeout),
+		local:     local,
+		cloud:     cloud,
+		cb:        newConnectivityBreaker(cfg.failureThreshold, cfg.recoveryTimeout),
+		canonical: cfg.canonicalReplay,
 	}
 }
 
@@ -179,14 +201,14 @@ func (m *ConnectivityAwareModel) Chat(ctx context.Context, msgs []*message.Msg, 
 	case connOpen:
 		// Cloud is known-unavailable; use local directly.
 		logrus.Debug("connectivity: circuit open, routing to local model")
-		return m.local.Chat(ctx, msgs, opts...)
+		return m.chatLocal(ctx, msgs, opts)
 
 	case connClosed, connHalfOpen:
 		// Try cloud via circuit breaker.
 		var resp *ChatResponse
 		err := m.cb.execute(func() error {
 			var callErr error
-			resp, callErr = m.cloud.Chat(ctx, msgs, opts...)
+			resp, callErr = m.cloud.Chat(ctx, m.cloudMsgs(msgs), opts...)
 			return callErr
 		})
 
@@ -201,11 +223,11 @@ func (m *ConnectivityAwareModel) Chat(ctx context.Context, msgs []*message.Msg, 
 
 		// Circuit breaker rejected or cloud call failed.
 		logrus.WithError(err).Warn("connectivity: cloud model failed, falling back to local")
-		return m.local.Chat(ctx, msgs, opts...)
+		return m.chatLocal(ctx, msgs, opts)
 	}
 
 	// Unreachable, but satisfy the compiler.
-	return m.local.Chat(ctx, msgs, opts...)
+	return m.chatLocal(ctx, msgs, opts)
 }
 
 // ChatStream routes streaming calls based on circuit breaker state.
@@ -215,13 +237,13 @@ func (m *ConnectivityAwareModel) ChatStream(ctx context.Context, msgs []*message
 	switch state {
 	case connOpen:
 		logrus.Debug("connectivity: circuit open, streaming from local model")
-		return m.local.ChatStream(ctx, msgs, opts...)
+		return m.streamLocal(ctx, msgs, opts)
 
 	case connClosed, connHalfOpen:
 		var ch <-chan ChatResponse
 		err := m.cb.execute(func() error {
 			var callErr error
-			ch, callErr = m.cloud.ChatStream(ctx, msgs, opts...)
+			ch, callErr = m.cloud.ChatStream(ctx, m.cloudMsgs(msgs), opts...)
 			return callErr
 		})
 
@@ -234,10 +256,38 @@ func (m *ConnectivityAwareModel) ChatStream(ctx context.Context, msgs []*message
 		}
 
 		logrus.WithError(err).Warn("connectivity: cloud stream failed, falling back to local")
-		return m.local.ChatStream(ctx, msgs, opts...)
+		return m.streamLocal(ctx, msgs, opts)
 	}
 
-	return m.local.ChatStream(ctx, msgs, opts...)
+	return m.streamLocal(ctx, msgs, opts)
+}
+
+// cloudMsgs is the history the cloud model receives (WithCanonicalReplay).
+func (m *ConnectivityAwareModel) cloudMsgs(msgs []*message.Msg) []*message.Msg {
+	if m.canonical {
+		return canonicalFor(msgs, 0)
+	}
+	return msgs
+}
+
+// chatLocal calls the local model and, with canonical replay, marks its
+// tool calls.
+func (m *ConnectivityAwareModel) chatLocal(ctx context.Context, msgs []*message.Msg, opts []CallOption) (*ChatResponse, error) {
+	resp, err := m.local.Chat(ctx, msgs, opts...)
+	if m.canonical {
+		resp = markWriter(resp, 1)
+	}
+	return resp, err
+}
+
+// streamLocal streams from the local model and, with canonical replay,
+// marks the tool calls of its final response.
+func (m *ConnectivityAwareModel) streamLocal(ctx context.Context, msgs []*message.Msg, opts []CallOption) (<-chan ChatResponse, error) {
+	ch, err := m.local.ChatStream(ctx, msgs, opts...)
+	if m.canonical && err == nil && ch != nil {
+		ch = markWriterStream(ctx, ch, 1)
+	}
+	return ch, err
 }
 
 // CountTokens delegates to whichever model would currently be selected.

@@ -223,6 +223,17 @@ ports and deferred work, including realtime/TUI, SOP and model-context wiring.
   their content. See
   [stale writes](docs/tools.md#stale-writes-on-a-shared-workspace-experimental).
 
+- `model.WithCanonicalReplay` (for `ConnectivityAwareModel`) and
+  `FallbackChatModel.CanonicalReplay` are Experimental additions to the
+  Stable-tier `model` package and off by default; while they are off,
+  requests and stored messages are unchanged. They mark tool calls in
+  `ToolCallBlock.Extra` (`agentscope_writer_rank`), which is stored with
+  messages and checkpoints, and rewrite only the copy of the history sent to
+  a more preferred model. The motivating measurement covers one cloud model,
+  one local model and `write_file` only, and re-sent recorded requests rather
+  than running this code. See
+  [canonical replay](docs/edge-deployment.md#replaying-the-local-models-tool-calls-experimental).
+
 - Experimental `evalkit.Runner.RunManagedLoad` evaluates the managed entry point
   directly with independent scoring and all-arrival/cost reporting. It creates no
   qualification records; offline fixtures and opt-in live quality pilots are

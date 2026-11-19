@@ -104,6 +104,55 @@ fmt.Println(cam.ActiveModel()) // "cloud" or "local"
 | Open | All calls go to local (no cloud attempts) |
 | Half-Open | Single probe to cloud; if success, close circuit |
 
+### Replaying the local model's tool calls (experimental)
+
+The two models share one history, so the cloud receives the tool calls the
+local model wrote while the cloud was away. Their arguments are in the local
+model's own form, which can differ from the cloud's: a local model may write
+`{"path": …, "content": …}` where the cloud writes `content` first. In the
+measurement below, such calls sometimes made the cloud model run away on its
+next whole-file write. `WithCanonicalReplay` sends the cloud those arguments
+as compact JSON with sorted keys:
+
+```go
+cam := model.NewConnectivityAwareModel(local, cloud, model.WithCanonicalReplay())
+```
+
+The local model's calls are marked in `ToolCallBlock.Extra`
+(`agentscope_writer_rank`) as they pass through, including in the final
+response of a stream. The mark is kept with the agent's messages and
+checkpoints; no formatter sends it. Only the copy of the history sent to the
+cloud is rewritten. The stored messages, the local model's own requests and
+the cloud's calls are unchanged, and the rewrite is deterministic, so cached
+prefixes stay stable. Calls written before the option was enabled, and
+arguments that are not exactly one valid JSON value, are sent as written.
+`FallbackChatModel.CanonicalReplay` does the same for the calls of models
+later in its chain. Do not turn the option on in two wrappers nested in each
+other: they share the one mark.
+
+The rewrite changes a request only where the adapter sends the arguments as
+the model wrote them, as this package's OpenAI Chat Completions and Responses
+adapters do; Ollama's native adapter removes the spaces but keeps the key
+order. The Anthropic and Gemini adapters already send the arguments as a
+parsed object, which Go encodes with sorted keys, so the option changes
+nothing there.
+
+**The measurement.** It comes from the benchmark of a Main Thread prototype
+(see [its evidence](design/main-thread.md#17-evidence)), with `gpt-6-luna`
+on the OpenAI Responses API as the cloud and Qwen3.5-4B as the local model.
+Recorded requests holding the local model's calls were sent again directly,
+not through this package: 11 requests (one chosen because it had run away in
+a live run), 30 times each, with output capped at 8,000 tokens (the largest
+ordinary reply was 7,171). As recorded, 21 to 27 of 330 replies ran into the
+cap in each of three passes; with the keys sorted, 0 of 330 in each of two
+passes, once compact and once with the spaces kept. Removing only the spaces
+gave 23 of 329, so the key order is what matters. Every such reply was a
+`write_file`, and all came on the 8 requests where the local model wrote
+`path` first. In live runs, without a cap, such replies went on to the
+model's 128K output limit. This is one cloud model, one local model and one
+tool; the rewrite applies to every marked call, and its effect on other tools
+and other models is not established.
+
 ## Context Window and Timeouts for Local Models
 
 Two settings that cloud deployments never touch matter on the edge. Neither is

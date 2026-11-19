@@ -11,6 +11,22 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Added — canonical replay of a local model's tool calls (experimental)
+
+- `model.WithCanonicalReplay()` makes a `ConnectivityAwareModel` send the
+  cloud the arguments of the local model's tool calls as compact JSON with
+  sorted keys; `FallbackChatModel.CanonicalReplay` does the same for the calls
+  of models later in the chain. The calls are marked in `ToolCallBlock.Extra`
+  (`agentscope_writer_rank`) as they pass through and rewritten only in the
+  copy of the history sent to a more preferred model: stored messages, the
+  local model's requests and each model's own calls are unchanged. Both are
+  off by default. In a replay of 11 recorded requests holding a local
+  model's `write_file` calls, `gpt-6-luna` ran into an 8,000-token cap on 21
+  to 27 of 330 replies per pass, all where the local model wrote `path`
+  first, and on none with the keys sorted. Only that tool and that pair of
+  models were measured, and the replay did not run this code. See
+  [canonical replay](docs/edge-deployment.md#replaying-the-local-models-tool-calls-experimental).
+
 ### Fixed — DashScope TTS stream failures
 
 - DashScope realtime `SynthesizeStream` now emits a terminal `Response.Err`

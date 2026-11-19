@@ -588,6 +588,12 @@ Automatic failover from a primary to a backup provider:
 cm := model.NewFallbackChatModel(primaryModel, fallbackModel)
 ```
 
+With a cloud primary and a local fallback, the cloud later receives the tool
+calls the local model wrote. Set `cm.CanonicalReplay = true` (experimental) to
+send each model the arguments of calls written by models later in the chain
+as compact JSON with sorted keys; see
+[replaying the local model's tool calls](edge-deployment.md#replaying-the-local-models-tool-calls-experimental).
+
 ## Structured Output
 
 Force any model to produce JSON matching a schema:

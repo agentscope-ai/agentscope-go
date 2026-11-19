@@ -18,6 +18,16 @@ type FallbackChatModel struct {
 	Fallback   ChatModel // second model, when constructed via NewFallbackChatModel
 	Models     []ChatModel
 	MaxRetries int // extra retries on the FIRST model before advancing; 0 means try once
+
+	// CanonicalReplay (EXPERIMENTAL) sends each model the arguments of the
+	// tool calls written by models later in the chain as compact JSON with
+	// sorted keys. With a cloud primary and a local fallback, the cloud then
+	// receives the local model's calls that way, as ConnectivityAwareModel's
+	// WithCanonicalReplay does: the calls a fallback model writes are marked
+	// (ToolCallBlock.Extra) and rewritten in the copy of the history sent to
+	// a model ahead of it. Stored messages and each model's own calls are
+	// unchanged. Calls written while it was off carry no mark.
+	CanonicalReplay bool
 }
 
 // NewFallbackChatModel creates a two-model failover (primary -> fallback).
@@ -79,8 +89,11 @@ func (f *FallbackChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts 
 				case <-timer.C:
 				}
 			}
-			resp, err := m.Chat(ctx, msgs, opts...)
+			resp, err := m.Chat(ctx, f.msgsFor(msgs, idx), opts...)
 			if err == nil {
+				if f.CanonicalReplay {
+					resp = markWriter(resp, idx)
+				}
 				return resp, nil
 			}
 			if isCanceled(ctx, err) {
@@ -102,8 +115,11 @@ func (f *FallbackChatModel) ChatStream(ctx context.Context, msgs []*message.Msg,
 	models := f.effectiveModels()
 	var lastErr error
 	for idx, m := range models {
-		ch, err := m.ChatStream(ctx, msgs, opts...)
+		ch, err := m.ChatStream(ctx, f.msgsFor(msgs, idx), opts...)
 		if err == nil {
+			if f.CanonicalReplay && ch != nil {
+				ch = markWriterStream(ctx, ch, idx)
+			}
 			return ch, nil
 		}
 		if isCanceled(ctx, err) {
@@ -115,6 +131,14 @@ func (f *FallbackChatModel) ChatStream(ctx context.Context, msgs []*message.Msg,
 		}
 	}
 	return nil, lastErr
+}
+
+// msgsFor is the history the model at idx receives (CanonicalReplay).
+func (f *FallbackChatModel) msgsFor(msgs []*message.Msg, idx int) []*message.Msg {
+	if f.CanonicalReplay {
+		return canonicalFor(msgs, idx)
+	}
+	return msgs
 }
 
 func (f *FallbackChatModel) CountTokens(msgs []*message.Msg, tools []ToolSchema) int {
