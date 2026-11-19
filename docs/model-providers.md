@@ -210,6 +210,14 @@ cm, _ := model.NewDeepSeekChatModel(model.DeepSeekConfig{
 
 Models: `deepseek-chat`, `deepseek-reasoner`, `deepseek-v4-flash`, `deepseek-v4-pro`
 
+#### DeepSeek thinking (unreleased)
+
+In both `Chat` and `ChatStream`, `model.WithThinking(true, 0)` sends
+`thinking.type = "enabled"`. `model.WithThinking(false, 0)` or
+`model.WithThinkingDisabled()` sends `"disabled"`. Leaving the option unset
+omits `thinking` and uses the provider default. The adapter ignores the budget
+argument, including positive values; use zero for the toggle.
+
 ### Google Gemini
 
 ```go
@@ -322,6 +330,11 @@ cm, _ := model.NewMoonshotChatModel(model.MoonshotConfig{
 Models: `kimi-k2.5`, `kimi-k2.6`, `kimi-k3`, `moonshot-v1-8k`, `moonshot-v1-32k`, `moonshot-v1-128k`
 
 **Kimi K3** — Latest Kimi model with 256K context, 64K output. Supports text, vision (JPEG/PNG/GIF/WebP), video (MP4), and extended thinking.
+
+Moonshot uses the same [thinking options](#deepseek-thinking-unreleased) as
+DeepSeek. The Kimi K3 IDs `kimi-k3`, `kimi-k3.1-pro` and
+`kimi-k3.1-pro-highspeed` always omit the switch because thinking is always
+enabled.
 
 ### xAI (Grok)
 
@@ -574,6 +587,10 @@ resp, _ := cm.Chat(ctx, msgs,
     model.WithSeed(42), // passed through on OpenAI-family providers
 )
 ```
+
+Thinking budgets are provider-specific. DeepSeek and Moonshot use only the
+enable/disable flag; see [thinking options](#deepseek-thinking-unreleased) for
+the request mapping and [Moonshot](#moonshot-kimi) for Kimi K3 exceptions.
 
 For `OpenAIChatModel.Chat` and `AnthropicChatModel.Chat`, `model.WithRetries`
 configures additional attempts and the delay between them. Their retry waits

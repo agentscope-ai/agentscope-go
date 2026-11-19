@@ -11,6 +11,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — explicit DeepSeek and Moonshot thinking
+
+- Honor `WithThinking(true, 0)` in DeepSeek and non-K3 Moonshot buffered and
+  streamed calls. Explicit enable now sends `thinking.type = "enabled"`
+  instead of omitting the option.
+
 ### Fixed — DashScope TTS stream failures
 
 - DashScope realtime `SynthesizeStream` now emits a terminal `Response.Err`
