@@ -130,12 +130,12 @@ arguments that are not exactly one valid JSON value, are sent as written.
 later in its chain. Do not turn the option on in two wrappers nested in each
 other: they share the one mark.
 
-The rewrite changes a request only where the adapter sends the arguments as
-the model wrote them, as this package's OpenAI Chat Completions and Responses
-adapters do; Ollama's native adapter removes the spaces but keeps the key
-order. The Anthropic and Gemini adapters already send the arguments as a
-parsed object, which Go encodes with sorted keys, so the option changes
-nothing there.
+The rewrite changes what is sent wherever the adapter keeps the model's key
+order: this package's OpenAI Chat Completions and Responses adapters send the
+arguments as the model wrote them, and Ollama's native adapter removes the
+spaces but keeps the order. The Anthropic and Gemini adapters already send
+the arguments as a parsed object, which Go encodes with sorted keys, so the
+option changes nothing there.
 
 **The measurement.** It comes from the benchmark of a Main Thread prototype
 (see [its evidence](design/main-thread.md#17-evidence)), with `gpt-6-luna`
