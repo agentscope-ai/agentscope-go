@@ -11,6 +11,13 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — Gemini tool result IDs
+
+- Gemini adapter and formatter now carry nonempty tool-result IDs in
+  `functionResponse.id` (#138, item 22). Provider-issued `functionCall.id`
+  is preserved; calls and results echo the same ID, using the existing
+  generated ID when the provider omits one.
+
 ### Fixed — DashScope TTS stream failures
 
 - DashScope realtime `SynthesizeStream` now emits a terminal `Response.Err`

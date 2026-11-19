@@ -17,9 +17,9 @@ import (
 func TestGeminiToolResultErrorWire(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
-			requests := make(chan geminiRequest, 1)
+			requests := make(chan map[string]any, 1)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var req geminiRequest
+				var req map[string]any
 				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 					t.Errorf("decode request: %v", err)
 					http.Error(w, "bad request", http.StatusBadRequest)
@@ -45,6 +45,7 @@ func TestGeminiToolResultErrorWire(t *testing.T) {
 				message.ToolResultBlock{Type: "tool_result", ID: "failed", Name: "failure", State: message.ToolResultError, Output: []message.ContentBlock{message.TextBlock{Text: "first"}, message.TextBlock{Text: "second"}}},
 				message.ToolResultBlock{Type: "tool_result", ID: "empty", Name: "empty", State: message.ToolResultError, Output: ""},
 				message.ToolResultBlock{Type: "tool_result", ID: "denied", Name: "denied", State: message.ToolResultDenied, Output: "no"},
+				message.ToolResultBlock{Type: "tool_result", Name: "legacy", Output: "no ID"},
 			}
 			msg := message.NewMsg("worker", message.RoleUser, blocks)
 			before, err := json.Marshal(msg)
@@ -67,12 +68,33 @@ func TestGeminiToolResultErrorWire(t *testing.T) {
 				t.Fatal(callErr)
 			}
 			select {
-			case req := <-requests:
+			case raw := <-requests:
+				parts := raw["contents"].([]any)[0].(map[string]any)["parts"].([]any)
+				for i, wantID := range []string{"ok", "failed", "empty", "denied", ""} {
+					result := parts[i].(map[string]any)["functionResponse"].(map[string]any)
+					gotID, present := result["id"]
+					if wantID == "" {
+						if present {
+							t.Errorf("empty tool result ID must be omitted, got %v", gotID)
+						}
+					} else if gotID != wantID {
+						t.Errorf("result %d: wire id = %v, want %q", i, gotID, wantID)
+					}
+				}
+				data, err := json.Marshal(raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var req geminiRequest
+				if err := json.Unmarshal(data, &req); err != nil {
+					t.Fatal(err)
+				}
 				want := []geminiContent{{Role: "user", Parts: []geminiPart{
-					{FunctionResponse: &geminiFunctionResponse{Name: "success", Response: map[string]any{"result": "ok"}}},
-					{FunctionResponse: &geminiFunctionResponse{Name: "failure", Response: map[string]any{"error": "first\nsecond"}}},
-					{FunctionResponse: &geminiFunctionResponse{Name: "empty", Response: map[string]any{"error": ""}}},
-					{FunctionResponse: &geminiFunctionResponse{Name: "denied", Response: map[string]any{"result": "no"}}},
+					{FunctionResponse: &geminiFunctionResponse{ID: "ok", Name: "success", Response: map[string]any{"result": "ok"}}},
+					{FunctionResponse: &geminiFunctionResponse{ID: "failed", Name: "failure", Response: map[string]any{"error": "first\nsecond"}}},
+					{FunctionResponse: &geminiFunctionResponse{ID: "empty", Name: "empty", Response: map[string]any{"error": ""}}},
+					{FunctionResponse: &geminiFunctionResponse{ID: "denied", Name: "denied", Response: map[string]any{"result": "no"}}},
+					{FunctionResponse: &geminiFunctionResponse{Name: "legacy", Response: map[string]any{"result": "no ID"}}},
 				}}}
 				if !reflect.DeepEqual(req.Contents, want) {
 					gotJSON, _ := json.Marshal(req.Contents)
