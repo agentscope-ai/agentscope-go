@@ -11,6 +11,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — scheduler cancellation
+
+- `InMemoryScheduler` preserves the canceled status when a running callback
+  returns and skips callbacks for tasks canceled before they start.
+
 ### Fixed — DashScope TTS stream failures
 
 - DashScope realtime `SynthesizeStream` now emits a terminal `Response.Err`
