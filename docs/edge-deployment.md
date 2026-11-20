@@ -141,32 +141,33 @@ but keeps the order. The Anthropic and Gemini adapters already send the
 arguments as a parsed object, which Go encodes with sorted keys, so the
 option changes nothing there.
 
-With the Responses adapter as the cloud, one more part of a local call goes
-out as written: the adapter sends `ToolCallBlock.ID` as the `function_call`
-item's `id`, so a call from a vLLM server carries an id such as
-`chatcmpl-tool-…`. The benchmark's harness removed every item id that did
-not start with `fc` before sending, so the measurement below never sent these
-ids. Whether the Responses API accepts them is not established:
-{{RESPONSES_ID_STATUS}}. If it does not, the cloud request fails before the
-rewritten arguments matter, and the option has no effect on that setup.
+On a Responses cloud the option does not take effect yet. The Responses
+adapter sends each call's `ToolCallBlock.ID` as the `function_call` item's
+`id`, and the API rejects an item id that does not begin with `fc`, such as
+a vLLM server's `chatcmpl-tool-…`. So the cloud request fails whenever the
+history holds such a call, with the option or without it, and a
+`ConnectivityAwareModel` falls back to the local model. The fix is open item
+R1 in [#125](https://github.com/agentscope-ai/agentscope-go/issues/125). Clouds
+on the Chat Completions format accept any call ID and are not affected.
 
 **The measurement.** It comes from the benchmark of a Main Thread prototype,
-recorded in the harness's
-[pre-registration, Amendment 8](https://github.com/thomeal/agentscope-go/blob/5c334a054e66147cd7f2f4edbf0cfa353b76ebcf/experiments/stage0/prereg.md#amendment-8),
 with `gpt-6-luna` on the OpenAI Responses API as the cloud and Qwen3.5-4B as
-the local model. Recorded requests holding the local model's calls were sent
-again directly, not through this package: 11 requests (one chosen because it
-had run away in a live run), 30 times each, with output capped at 8,000
-tokens (the largest ordinary reply was 7,171). As recorded, 21 to 27 of 330
-replies ran into the cap in each of three passes; with the keys sorted, 0 of
-330 in each of two passes, once compact and once with the spaces kept.
-Removing only the spaces gave 23 of 329. In this replay, sorting the keys
-removed the runaways; removing the spaces made no measurable difference.
-Every such reply was a `write_file`, and all came on the 8 requests where the
-local model wrote `path` first. In live runs, without a cap, such replies
-went on to the model's 128K output limit. This is one cloud model, one local
-model and one tool; the rewrite applies to every marked call, and its effect
-on other tools and other models is not established.
+the local model. 11 recorded requests holding the local model's calls (one
+chosen because it had run away in a live run) were sent 30 times each, with
+output capped at 8,000 tokens and the local calls' item ids removed.
+Re-sent as recorded, 21 to 27 of 330 replies ran into the cap per pass, and
+0 of 330 with the keys sorted; removing only the spaces made no measurable
+difference
+([Amendment 8](https://github.com/thomeal/agentscope-go/blob/5c334a054e66147cd7f2f4edbf0cfa353b76ebcf/experiments/stage0/prereg.md#amendment-8)).
+Sent through `ConnectivityAwareModel` and the Responses adapter, 20 of 330
+ran into the cap with the option off and 0 of 330 with it on
+([Amendment 22](https://github.com/thomeal/agentscope-go/blob/938defc32818310878a98bd80b0e5b03fc1b3aa8/experiments/stage0/prereg.md#amendment-22-the-librarys-canonical-replay-on-amendment-8s-prompts)).
+They all came on requests where the local model wrote `path` first. In live
+runs, without a cap, such replies went on to the model's 128K output limit.
+This is one cloud model, one local model and one tool, on buffered `Chat`
+calls; the rewrite applies to every marked call, and its effect in live
+sessions, on streamed calls, on other tools and on other models is not
+established.
 
 ## Context Window and Timeouts for Local Models
 

@@ -23,8 +23,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   off by default. In a replay of 11 recorded requests holding a local
   model's `write_file` calls, `gpt-6-luna` ran into an 8,000-token cap on 21
   to 27 of 330 replies per pass, all where the local model wrote `path`
-  first, and on none with the keys sorted. Only that tool and that pair of
-  models were measured, and the replay did not run this code. See
+  first, and on none with the keys sorted; sent through this code, on 20 of
+  330 with the option off and none with it on. Only that tool and that pair
+  of models were measured, on buffered `Chat` calls. On a Responses cloud the
+  option takes effect only once open item R1 in
+  [#125](https://github.com/agentscope-ai/agentscope-go/issues/125) is fixed.
+  See
   [canonical replay](docs/edge-deployment.md#replaying-the-local-models-tool-calls-experimental).
 
 ### Fixed — DashScope TTS stream failures
