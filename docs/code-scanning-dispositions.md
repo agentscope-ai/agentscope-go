@@ -114,6 +114,32 @@ length of an already-allocated in-memory slice. Overflow would require a slice
 near 2^63 elements on 64-bit (or beyond the 32-bit address space), unreachable on
 every supported platform. Disposition: **false positive** (unreachable).
 
+## Post-fix re-flags: CodeQL does not model the added guard
+
+A correct fix can still leave a CodeQL alert: the rule re-flags the sink because
+the new guard is not a modeled sanitizer. These alerts appear on the fix PR's
+ref before merge and are triaged against the guard's source, not dismissed as a
+class. Dismissing these PR-ref re-flags does not close the original `b81fddf`
+alerts; those are re-triaged when the fix merges and main is re-analyzed.
+
+- **bubblewrap symlink peel (PR #192, alerts #139/#140/#141)**: `resolve`
+  returns `cleaned`, which is independently contained (separator-aware lexical
+  check plus the `evalSymlinksLenient` re-check). The added peel loop's
+  `os.Lstat`/`os.Readlink` (`pkg/agentscope/workspace/bubblewrap.go:215/219/229`)
+  are metadata-only reads that decide whether to **reject** a dangling symlink
+  chain; the peeled `target` is never returned and never used for content I/O.
+  Disposition: **false positive** (confinement mechanism, category 3 above).
+- **container file paths (PR #194, alerts #142/#143)**: the flagged `sh -c`
+  sinks are the `WriteFile` parent-directory `mkdir`
+  (`applecontainer.go:111`, `shellQuote(dir)`) and the docker write
+  (`docker.go:108`, `cat > shellQuote(fullPath)`). Both interpolate the path
+  through `shellQuote` (`pkg/agentscope/workspace/k8s.go:517`), the canonical
+  POSIX single-quote escape (`'` -> `'\''`); the applecontainer `tee` write
+  passes the path as argv (no shell). CodeQL still flags the sinks because
+  `shellQuote` is not a modeled sanitizer. The commands run **inside the
+  container** (the trust boundary). Disposition: **false positive** (correctly
+  quoted; container-scoped).
+
 ## OpenSSF Scorecard
 
 - **Branch-Protection (#1) / Code-Review (#26)**: at `b81fddf`, `main` is **not
@@ -122,11 +148,19 @@ every supported platform. Disposition: **false positive** (unreachable).
   status checks is the remediation, not a completed disposition.
 - **CIIBestPractices (#27)**: the CII Best Practices badge is an optional
   registration. Disposition: **won't fix** (optional) unless pursued.
-- **Vulnerabilities (#28)**: the OSV list matches the whole dependency graph.
-  `.github/workflows/security.yml` runs `govulncheck` as an **advisory** reachability scan
-  (`continue-on-error: true`, `./pkg/...`), separate from Scorecard's OSV
-  findings; it is not a blocking gate at this revision. Cross-check advisories
-  there before acting.
+- **Vulnerabilities (#28)**: the OSV list matches the whole dependency graph
+  (32 advisories at `b81fddf`). `.github/workflows/security.yml` runs
+  `govulncheck` as an **advisory** reachability scan (`continue-on-error: true`,
+  `./pkg/...`), separate from Scorecard's OSV findings; it is not a blocking gate
+  at this revision. The reachability scan reports 15 called vulnerabilities:
+  Go standard-library issues (`net/http`, `crypto/x509`, `crypto/tls`,
+  `net/textproto`, `html/template`) fixed only in Go 1.26.x;
+  `golang.org/x/net@v0.57.0` (fixed in v0.60.0, which declares Go 1.26); and
+  `google.golang.org/grpc@v1.83.0` (fixed in v1.83.1, which declares Go 1.25).
+  Only the grpc patch bump is actionable on Go 1.25; the x/net and
+  standard-library fixes require the Go 1.26 migration that `security.yml`
+  defers ("advisory until Go 1.26"). This alert is **open pending the grpc bump
+  and the Go 1.26 migration**, not a false positive: the findings are reachable.
 - **Pinned-Dependencies**: addressed by pinning GitHub Actions and container
   images by hash; dependabot (`.github/dependabot.yml`) keeps the Actions and
   Dockerfile digests current (it does not update the apidiff commit pin).
