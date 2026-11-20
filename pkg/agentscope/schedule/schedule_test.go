@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -322,4 +323,80 @@ func TestInMemorySchedulerDoesNotStartCanceledEntry(t *testing.T) {
 	if ran || task.Status != StatusCanceled || !task.LastRunAt.IsZero() {
 		t.Fatalf("after a canceled entry was selected: ran=%t, task=%+v", ran, task)
 	}
+}
+
+func TestInMemorySchedulerCancelStopsRecurringTask(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := NewInMemoryScheduler()
+		defer s.Close()
+		ctx := context.Background()
+		const interval = time.Second
+		calls := 0
+		id, err := s.Schedule(ctx, &Task{Interval: interval}, func(runCtx context.Context, _ *Task) error {
+			calls++
+			<-runCtx.Done()
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		if calls != 1 {
+			t.Fatalf("before Cancel: calls = %d, want 1", calls)
+		}
+
+		// Let the next tick become due while the first callback is still running.
+		time.Sleep(interval)
+		if err := s.Cancel(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(3 * interval)
+		synctest.Wait()
+
+		if calls != 1 {
+			t.Errorf("after Cancel: calls = %d, want 1", calls)
+		}
+		task, err := s.Get(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if task.Status != StatusCanceled || task.LastRunAt.IsZero() {
+			t.Errorf("after callback exit: status = %s, last run = %s; want canceled with a recorded run", task.Status, task.LastRunAt)
+		}
+	})
+}
+
+func TestInMemorySchedulerDetachedCallbackLeavesReplacementPending(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := NewInMemoryScheduler()
+		defer s.Close()
+		ctx := context.Background()
+		task := &Task{ID: "reused"}
+		var rescheduleErr error
+		id, err := s.Schedule(ctx, task, func(_ context.Context, finished *Task) error {
+			// Detach the fired entry during callback cleanup, then reuse the task
+			// before the old invocation gets a chance to record its result.
+			s.Remove(finished.ID)
+			finished.RunAt = time.Now().Add(time.Hour)
+			_, rescheduleErr = s.Schedule(ctx, finished, func(context.Context, *Task) error {
+				return nil
+			})
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		if rescheduleErr != nil {
+			t.Fatal(rescheduleErr)
+		}
+
+		replacement, err := s.Get(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if replacement.Status != StatusPending || !replacement.LastRunAt.IsZero() {
+			t.Errorf("replacement status = %s, last run = %s; want pending with no recorded run", replacement.Status, replacement.LastRunAt)
+		}
+	})
 }
