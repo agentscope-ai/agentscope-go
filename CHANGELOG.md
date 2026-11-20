@@ -11,6 +11,14 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — workspace session ID validation
+
+- `WorkspaceManager.GetOrCreate` now rejects session IDs that are empty, start
+  with a dot, or contain path separators, mirroring `Share`; the workspace
+  skill route maps an invalid ID to 400 instead of 500. This closes a path
+  traversal where a crafted `session_id` could create a workspace outside the
+  configured base directory.
+
 ### Fixed — DashScope TTS stream failures
 
 - DashScope realtime `SynthesizeStream` now emits a terminal `Response.Err`
