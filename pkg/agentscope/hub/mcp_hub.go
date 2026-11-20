@@ -144,6 +144,11 @@ func (h *MCPHub) Install(ctx context.Context, cardID string, targetDir string) e
 		return fmt.Errorf("hub: create target dir: %w", err)
 	}
 
+	// validSlug excludes path separators and rejects "."/"..", so cardID is a
+	// single safe component and Join cannot escape targetDir.
+	if !validSlug(cardID) {
+		return fmt.Errorf("hub: invalid mcp id %q", cardID)
+	}
 	outPath := filepath.Join(targetDir, cardID+".json")
 	f, err := os.Create(outPath)
 	if err != nil {
