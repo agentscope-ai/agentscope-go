@@ -110,14 +110,22 @@ func TestCanonicalReplayThroughTheAgent(t *testing.T) {
 		t.Fatalf("cloud requests after the refusal = %d, want 1", len(bodies))
 	}
 	var args string
+	answered := false
 	items, _ := bodies[0]["input"].([]any)
 	for _, it := range items {
-		if m, _ := it.(map[string]any); m["type"] == "function_call" && m["call_id"] == "call_local" {
+		m, _ := it.(map[string]any)
+		switch {
+		case m["type"] == "function_call" && m["call_id"] == "call_local":
 			args, _ = m["arguments"].(string)
+		case m["type"] == "function_call_output" && m["call_id"] == "call_local":
+			answered = true
 		}
 	}
 	if args != `{"content":"package a\n","path":"a.go"}` {
 		t.Fatalf("the local call reached the cloud as %q", args)
+	}
+	if !answered {
+		t.Fatal("the cloud's request carries the local call without its result")
 	}
 
 	var stored *message.ToolCallBlock

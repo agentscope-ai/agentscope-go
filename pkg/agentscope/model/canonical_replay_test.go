@@ -151,20 +151,50 @@ func arguments(t *testing.T, body map[string]any) map[string]string {
 	return out
 }
 
-// historyAfter is the conversation after the local model's reply: a call
-// the cloud wrote earlier (unmarked, in a non-canonical form), the local
-// model's reply, and both results.
+// checkPaired fails unless every function_call in a Responses request body
+// has a function_call_output with the same call_id.
+func checkPaired(t *testing.T, body map[string]any) {
+	t.Helper()
+	outputs := map[string]bool{}
+	var calls []string
+	items, _ := body["input"].([]any)
+	for _, it := range items {
+		m, _ := it.(map[string]any)
+		id, _ := m["call_id"].(string)
+		switch m["type"] {
+		case "function_call":
+			calls = append(calls, id)
+		case "function_call_output":
+			outputs[id] = true
+		}
+	}
+	if len(calls) == 0 {
+		t.Fatal("the request carries no function_call")
+	}
+	for _, id := range calls {
+		if !outputs[id] {
+			t.Errorf("function_call %q has no function_call_output in the request", id)
+		}
+	}
+}
+
+// historyAfter is the conversation after the local model's reply, stored as
+// UnifiedAgent stores one reply: a single assistant message holding a call
+// the cloud wrote earlier (unmarked, in a non-canonical form) and its
+// result, then the local model's reply and its result.
 func historyAfter(local []message.ContentBlock) []*message.Msg {
 	cloudOwn := message.ToolCallBlock{Type: "tool_call", ID: "call_cloud", Name: "write_file",
 		Input: `{"path": "b.go", "content": "package b\n"}`}
+	result := func(id string) message.ToolResultBlock {
+		return message.ToolResultBlock{Type: "tool_result", ID: id, Name: "write_file",
+			Output: []message.ContentBlock{message.TextBlock{Type: "text", Text: "ok"}}}
+	}
+	reply := []message.ContentBlock{cloudOwn, result("call_cloud")}
+	reply = append(reply, local...)
+	reply = append(reply, result("call_local"))
 	return []*message.Msg{
 		message.UserMsg("user", "write two files"),
-		message.NewMsg("assistant", message.RoleAssistant, []message.ContentBlock{cloudOwn}),
-		message.NewMsg("system", message.RoleSystem, []message.ContentBlock{message.ToolResultBlock{Type: "tool_result", ID: "call_cloud", Name: "write_file",
-			Output: []message.ContentBlock{message.TextBlock{Type: "text", Text: "ok"}}}}),
-		message.NewMsg("assistant", message.RoleAssistant, local),
-		message.NewMsg("system", message.RoleSystem, []message.ContentBlock{message.ToolResultBlock{Type: "tool_result", ID: "call_local", Name: "write_file",
-			Output: []message.ContentBlock{message.TextBlock{Type: "text", Text: "ok"}}}}),
+		message.NewMsg("assistant", message.RoleAssistant, reply),
 	}
 }
 
@@ -296,6 +326,7 @@ func testCanonicalReplayWire(t *testing.T, wrapper string, canonical, stream boo
 	if len(bodies) != 1 {
 		t.Fatalf("cloud saw %d requests after the refusal, want 1", len(bodies))
 	}
+	checkPaired(t, bodies[0])
 	args := arguments(t, bodies[0])
 	wantLocal := localCall("").Input
 	if canonical {
