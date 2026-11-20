@@ -293,8 +293,11 @@ func (s *InMemoryScheduler) Close() error {
 
 	for _, e := range s.tasks {
 		e.cancel()
-		if e.task.Status == StatusPending || e.task.Status == StatusRunning {
-			e.task.Status = StatusCanceled
+		task := e.task
+		// A failed recurring task is still scheduled for its next run.
+		if task.Status == StatusPending || task.Status == StatusRunning ||
+			(task.Status == StatusFailed && task.Interval > 0) {
+			task.Status = StatusCanceled
 		}
 	}
 

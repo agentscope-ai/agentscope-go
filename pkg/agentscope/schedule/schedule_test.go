@@ -400,3 +400,53 @@ func TestInMemorySchedulerDetachedCallbackLeavesReplacementPending(t *testing.T)
 		}
 	})
 }
+
+func TestInMemorySchedulerCloseAfterCallbackFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		interval time.Duration
+		want     TaskStatus
+	}{
+		{name: "one-shot", want: StatusFailed},
+		{name: "recurring", interval: time.Hour, want: StatusCanceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				s := NewInMemoryScheduler()
+				defer s.Close()
+				ctx := context.Background()
+				callbackErr := fmt.Errorf("callback failed")
+				id, err := s.Schedule(ctx, &Task{Interval: tc.interval}, func(context.Context, *Task) error {
+					return callbackErr
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				synctest.Wait()
+
+				before, err := s.Get(ctx, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if before.Status != StatusFailed || before.Error != callbackErr.Error() || before.LastRunAt.IsZero() {
+					t.Fatalf("before Close: status = %s, error = %q, last run = %s; want a recorded failure", before.Status, before.Error, before.LastRunAt)
+				}
+
+				if err := s.Close(); err != nil {
+					t.Fatal(err)
+				}
+				synctest.Wait()
+				after, err := s.Get(ctx, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if after.Status != tc.want {
+					t.Errorf("after Close: status = %s, want %s", after.Status, tc.want)
+				}
+				if after.Error != before.Error || !after.LastRunAt.Equal(before.LastRunAt) {
+					t.Errorf("after Close: error = %q, last run = %s; want %q and %s", after.Error, after.LastRunAt, before.Error, before.LastRunAt)
+				}
+			})
+		})
+	}
+}
