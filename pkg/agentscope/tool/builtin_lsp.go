@@ -72,6 +72,11 @@ func (t *lspTool) Execute(ctx context.Context, args map[string]any) (*ToolRespon
 	if filePath == "" {
 		return NewErrorResponse(fmt.Errorf("filePath is required")), nil
 	}
+	resolvedPath, err := resolvePath(ctx, filePath)
+	if err != nil {
+		return NewErrorResponse(fmt.Errorf("invalid filePath: %w", err)), nil
+	}
+	filePath = resolvedPath
 
 	line := 0
 	if v, ok := args["line"].(float64); ok {
