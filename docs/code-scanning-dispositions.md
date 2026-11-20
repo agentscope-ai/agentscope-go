@@ -70,7 +70,9 @@ The cluster splits into three groups:
 
 1. **Genuine gaps — pending fixes, do NOT dismiss at `b81fddf`.** The guards are
    absent from this revision; open PRs add them:
-   - workspace-creation ID validation (`app.WorkspaceManager.GetOrCreate`) — #191;
+   - workspace-creation ID validation (`app.WorkspaceManager.GetOrCreate`) —
+     #191, **merged at `4dec635`**; alert #78 re-flagged on main and is triaged
+     under Post-fix re-flags below;
    - bubblewrap symlink + dangling-chain confinement — #192;
    - hub installer card-ID validation (`SkillHub`/`MCPHub.Install`) — #193;
    - file-tool jail confinement (`view_text_file`/`Glob`/`LSP` routed through
@@ -118,10 +120,20 @@ every supported platform. Disposition: **false positive** (unreachable).
 
 A correct fix can still leave a CodeQL alert: the rule re-flags the sink because
 the new guard is not a modeled sanitizer. These alerts appear on the fix PR's
-ref before merge and are triaged against the guard's source, not dismissed as a
-class. Dismissing these PR-ref re-flags does not close the original `b81fddf`
-alerts; those are re-triaged when the fix merges and main is re-analyzed.
+ref before merge and can reappear on main once the fix merges and CodeQL
+re-analyzes; they are triaged against the guard's source, not dismissed as a
+class. Dismissing a PR-ref re-flag does not close the original `b81fddf` alert;
+that is re-triaged when the fix merges and main is re-analyzed.
 
+- **workspace ID validation (PR #191, alert #78, merged at `4dec635`)**:
+  `GetOrCreate` and `Share` validate the workspace ID with `validWorkspaceID`
+  (`pkg/agentscope/app/workspace_manager.go:49`), which rejects empty IDs,
+  leading dots and any `/` or `\` (a single safe path component), before
+  `createWorkspace` joins it under `baseDir` and `NewLocalWorkspace` calls
+  `os.MkdirAll` (`workspace.go:108`). In `Share` the `sessionID` only keys the
+  bindings map, never the path. CodeQL does not model `validWorkspaceID`, so the
+  sink re-flagged on main after the merge. Disposition: **false positive**
+  (validation guard present at `4dec635`).
 - **bubblewrap symlink peel (PR #192, alerts #139/#140/#141)**: `resolve`
   returns `cleaned`, which is independently contained (separator-aware lexical
   check plus the `evalSymlinksLenient` re-check). The added peel loop's
