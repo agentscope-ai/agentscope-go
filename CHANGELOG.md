@@ -11,6 +11,14 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — container workspace shell quoting
+
+- Docker and Apple container file operations now single-quote paths with
+  `shellQuote` instead of `%q`. Go's `%q` escapes double quotes and backslashes but leaves `$` and backtick
+  command substitution active inside shell double quotes, so a path containing
+  such metacharacters could trigger command substitution inside the container;
+  single-quoting neutralizes them.
+
 ### Fixed — DashScope TTS stream failures
 
 - DashScope realtime `SynthesizeStream` now emits a terminal `Response.Err`

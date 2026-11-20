@@ -101,18 +101,18 @@ func (w *DockerWorkspace) WriteFile(ctx context.Context, path string, data []byt
 	fullPath := w.resolvePath(path)
 	// Create parent directory
 	dir := fullPath[:strings.LastIndex(fullPath, "/")]
-	if _, err := w.backend.ExecCommand(ctx, fmt.Sprintf("mkdir -p %q", dir)); err != nil {
+	if _, err := w.backend.ExecCommand(ctx, fmt.Sprintf("mkdir -p %s", shellQuote(dir))); err != nil {
 		return err
 	}
 	// Write via stdin pipe
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", w.containerID, "sh", "-c", fmt.Sprintf("cat > %q", fullPath))
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", w.containerID, "sh", "-c", fmt.Sprintf("cat > %s", shellQuote(fullPath)))
 	cmd.Stdin = bytes.NewReader(data)
 	return cmd.Run()
 }
 
 func (w *DockerWorkspace) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	fullPath := w.resolvePath(path)
-	result, err := w.backend.ExecCommand(ctx, fmt.Sprintf("cat %q", fullPath))
+	result, err := w.backend.ExecCommand(ctx, fmt.Sprintf("cat %s", shellQuote(fullPath)))
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func (w *DockerWorkspace) ReadFile(ctx context.Context, path string) ([]byte, er
 
 func (w *DockerWorkspace) ListFiles(ctx context.Context, dir string) ([]FileInfo, error) {
 	fullDir := w.resolvePath(dir)
-	result, err := w.backend.ExecCommand(ctx, fmt.Sprintf("find %q -maxdepth 1 -printf '%%y %%s %%P\\n' 2>/dev/null || ls -la %q", fullDir, fullDir))
+	result, err := w.backend.ExecCommand(ctx, fmt.Sprintf("find %s -maxdepth 1 -printf '%%y %%s %%P\\n' 2>/dev/null || ls -la %s", shellQuote(fullDir), shellQuote(fullDir)))
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func (w *DockerWorkspace) ListFiles(ctx context.Context, dir string) ([]FileInfo
 
 func (w *DockerWorkspace) RemoveFile(ctx context.Context, path string) error {
 	fullPath := w.resolvePath(path)
-	result, err := w.backend.ExecCommand(ctx, fmt.Sprintf("rm -f %q", fullPath))
+	result, err := w.backend.ExecCommand(ctx, fmt.Sprintf("rm -f %s", shellQuote(fullPath)))
 	if err != nil {
 		return err
 	}
