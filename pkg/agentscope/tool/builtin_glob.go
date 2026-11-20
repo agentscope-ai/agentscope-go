@@ -48,7 +48,7 @@ func (t *globTool) Execute(ctx context.Context, args map[string]any) (*ToolRespo
 	if v, ok := args["base_dir"].(string); ok && v != "" {
 		baseDir = v
 	}
-	baseDir, err := filepath.Abs(baseDir)
+	baseDir, err := resolvePath(ctx, baseDir)
 	if err != nil {
 		return NewErrorResponse(fmt.Errorf("invalid base_dir: %w", err)), nil
 	}
@@ -59,7 +59,7 @@ func (t *globTool) Execute(ctx context.Context, args map[string]any) (*ToolRespo
 		if err != nil {
 			return NewErrorResponse(fmt.Errorf("glob: %w", err)), nil
 		}
-		return formatGlobResult(matches), nil
+		return formatGlobResult(confineGlobMatches(baseDir, matches)), nil
 	}
 
 	// Simple glob via filepath.Glob
@@ -69,7 +69,7 @@ func (t *globTool) Execute(ctx context.Context, args map[string]any) (*ToolRespo
 		return NewErrorResponse(fmt.Errorf("glob: %w", err)), nil
 	}
 
-	return formatGlobResult(matches), nil
+	return formatGlobResult(confineGlobMatches(baseDir, matches)), nil
 }
 
 func globDoublestar(baseDir, pattern string) ([]string, error) {
@@ -115,6 +115,23 @@ func globDoublestar(baseDir, pattern string) ([]string, error) {
 		return nil
 	})
 	return matches, err
+}
+
+// confineGlobMatches drops any match that resolves outside root, so a pattern
+// containing ".." or an inner symlink cannot list paths beyond the (jailed)
+// base directory. Resolution mirrors resolvePath's symlink awareness.
+func confineGlobMatches(root string, matches []string) []string {
+	rootResolved := root
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		rootResolved = r
+	}
+	var kept []string
+	for _, m := range matches {
+		if withinRoot(rootResolved, evalSymlinksLenient(m)) {
+			kept = append(kept, m)
+		}
+	}
+	return kept
 }
 
 func formatGlobResult(matches []string) *ToolResponse {
