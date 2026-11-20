@@ -146,22 +146,26 @@ adapter sends each call's `ToolCallBlock.ID` as the `function_call` item's
 `id`, and the API rejects an item id that does not begin with `fc`, such as
 a vLLM server's `chatcmpl-tool-…`. So the cloud request fails whenever the
 history holds such a call, with the option or without it, and a
-`ConnectivityAwareModel` falls back to the local model. The fix is open item
-R1 in [#125](https://github.com/agentscope-ai/agentscope-go/issues/125). Clouds
-on the Chat Completions format accept any call ID and are not affected.
+`ConnectivityAwareModel` falls back to the local model. The option takes
+effect on a Responses cloud only once the Responses adapter stops sending
+non-`fc` call IDs as `function_call` item ids, which was reported under R1
+in [#125](https://github.com/agentscope-ai/agentscope-go/issues/125). The
+Chat Completions adapters send no item id; foreign call IDs were not tested
+live against them.
 
 **The measurement.** It comes from the benchmark of a Main Thread prototype,
 with `gpt-6-luna` on the OpenAI Responses API as the cloud and Qwen3.5-4B as
 the local model. 11 recorded requests holding the local model's calls (one
 chosen because it had run away in a live run) were sent 30 times each, with
-output capped at 8,000 tokens and the local calls' item ids removed.
-Re-sent as recorded, 21 to 27 of 330 replies ran into the cap per pass, and
-0 of 330 with the keys sorted; removing only the spaces made no measurable
-difference
+output capped at 8,000 tokens. Re-sent as recorded (the benchmark's
+transport had already removed the local calls' item ids), 21 to 27 of 330
+replies ran into the cap per pass, and 0 of 330 with the keys sorted;
+removing only the spaces made no measurable difference
 ([Amendment 8](https://github.com/thomeal/agentscope-go/blob/5c334a054e66147cd7f2f4edbf0cfa353b76ebcf/experiments/stage0/prereg.md#amendment-8)).
-Sent through `ConnectivityAwareModel` and the Responses adapter, 20 of 330
-ran into the cap with the option off and 0 of 330 with it on
-([Amendment 22](https://github.com/thomeal/agentscope-go/blob/938defc32818310878a98bd80b0e5b03fc1b3aa8/experiments/stage0/prereg.md#amendment-22-the-librarys-canonical-replay-on-amendment-8s-prompts)).
+Sent through `ConnectivityAwareModel` and the Responses adapter, with a
+transport that also removed non-`fc` item ids, 20 of 330 ran into the cap
+with the option off and 0 of 330 with it on
+([Amendment 22](https://github.com/thomeal/agentscope-go/blob/f7da54b2195f681d0b9adaeb74fd0ce8d909dc18/experiments/stage0/prereg.md#amendment-22-the-librarys-canonical-replay-on-amendment-8s-prompts)).
 They all came on requests where the local model wrote `path` first. In live
 runs, without a cap, such replies went on to the model's 128K output limit.
 This is one cloud model, one local model and one tool, on buffered `Chat`

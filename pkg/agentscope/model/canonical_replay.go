@@ -88,7 +88,8 @@ func markWriterStream(ctx context.Context, in <-chan ChatResponse, rank int) <-c
 	return out
 }
 
-// discard reads in until it closes.
+// discard reads in until it closes. It relies on the producer closing in,
+// as the ChatStream contract requires.
 func discard(in <-chan ChatResponse) {
 	for range in {
 	}

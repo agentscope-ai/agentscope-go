@@ -614,32 +614,66 @@ func TestMarkWriterStreamStopsWhileSending(t *testing.T) {
 // TestMarkWriterStreamDrainsAfterCancel covers a producer that ignores
 // cancellation: once the caller's context ends and nobody reads the
 // returned channel, the forwarder still drains the source so the producer
-// can finish.
+// can finish. It is checked on both of the forwarder's exits: while it
+// waits for the source, and while it holds a response nobody receives.
 func TestMarkWriterStreamDrainsAfterCancel(t *testing.T) {
-	in := make(chan ChatResponse)
-	done := make(chan struct{})
-	go func() {
+	produce := func(in chan<- ChatResponse, start <-chan struct{}, first, done chan<- struct{}) {
 		defer close(done)
-		for range 3 {
+		<-start
+		in <- ChatResponse{}
+		close(first)
+		for range 2 {
 			in <- ChatResponse{}
 		}
 		in <- ChatResponse{IsLast: true}
 		close(in)
-	}()
-	ctx, cancel := context.WithCancel(context.Background())
-	out := markWriterStream(ctx, in, 1)
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the producer stayed blocked after cancellation")
 	}
-	select {
-	case _, ok := <-out:
-		if ok {
-			t.Fatal("a response arrived after cancellation, with nobody reading")
+	wait := func(t *testing.T, c <-chan struct{}, what string) {
+		t.Helper()
+		select {
+		case <-c:
+		case <-time.After(5 * time.Second):
+			t.Fatal(what)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the forwarder did not close after cancellation")
 	}
+	closed := func(t *testing.T, out <-chan ChatResponse) {
+		t.Helper()
+		select {
+		case _, ok := <-out:
+			if ok {
+				t.Fatal("a response arrived after cancellation, with nobody reading")
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("the forwarder did not close after cancellation")
+		}
+	}
+
+	t.Run("waiting for the source", func(t *testing.T) {
+		in := make(chan ChatResponse)
+		start, first, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		go produce(in, start, first, done)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		// The source has sent nothing, so the forwarder can only see the
+		// cancellation; the producer starts once the forwarder has gone.
+		closed(t, markWriterStream(ctx, in, 1))
+		close(start)
+		wait(t, done, "the producer stayed blocked after cancellation")
+	})
+
+	t.Run("holding a response", func(t *testing.T) {
+		in := make(chan ChatResponse)
+		start, first, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		close(start)
+		go produce(in, start, first, done)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		out := markWriterStream(ctx, in, 1)
+		// The forwarder took the first response and waits to send it on
+		// out, which nobody reads; then the context ends.
+		wait(t, first, "the forwarder never took the first response")
+		cancel()
+		wait(t, done, "the producer stayed blocked after cancellation")
+		closed(t, out)
+	})
 }

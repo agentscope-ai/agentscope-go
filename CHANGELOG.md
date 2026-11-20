@@ -26,8 +26,9 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   first, and on none with the keys sorted; sent through this code, on 20 of
   330 with the option off and none with it on. Only that tool and that pair
   of models were measured, on buffered `Chat` calls. On a Responses cloud the
-  option takes effect only once open item R1 in
-  [#125](https://github.com/agentscope-ai/agentscope-go/issues/125) is fixed.
+  option takes effect only once the Responses adapter stops sending non-`fc`
+  call IDs as `function_call` item ids, which was reported under R1 in
+  [#125](https://github.com/agentscope-ai/agentscope-go/issues/125).
   See
   [canonical replay](docs/edge-deployment.md#replaying-the-local-models-tool-calls-experimental).
 
