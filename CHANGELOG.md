@@ -11,6 +11,13 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — Responses foreign tool-call IDs
+
+- The Responses adapter and public formatter now omit a function-call item's
+  optional `id` when the tool ID does not start with `fc`, preserving `call_id`
+  for result correlation. This avoids invalid item IDs when replaying tool
+  histories from other providers; existing `fc` item IDs remain unchanged.
+
 ### Fixed — workspace session ID validation
 
 - `WorkspaceManager.GetOrCreate` now rejects session IDs that are empty, start

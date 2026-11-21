@@ -2,6 +2,7 @@ package formatter
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/message"
 )
@@ -59,9 +60,12 @@ func (f *OpenAIResponseFormatter) formatMsg(msg *message.Msg) []map[string]any {
 		case message.ToolCallBlock:
 			fc := map[string]any{
 				"type":      "function_call",
-				"id":        blk.ID,
 				"name":      blk.Name,
 				"arguments": blk.Input,
+			}
+			// Only Responses item IDs belong in the optional id field.
+			if strings.HasPrefix(blk.ID, "fc") {
+				fc["id"] = blk.ID
 			}
 			if callID, ok := blk.Extra["call_id"]; ok && callID != "" {
 				fc["call_id"] = callID
