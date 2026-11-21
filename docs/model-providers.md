@@ -73,6 +73,27 @@ cm, _ := model.NewOpenAIResponseModel(&model.OpenAIResponseConfig{
 
 Uses the Responses API (`/v1/responses`) instead of Chat Completions. Default timeout is 5 minutes for long reasoning tasks.
 
+The provider now uses `formatter.OpenAIResponseFormatter` for input conversion.
+`Format` and `FormatMultiAgent` emit the same ordered input items as model
+requests: complete `responses_item` reasoning metadata (including encrypted
+content, with null map fields omitted), native tool-result images, hints as
+user segments in place, and original call-ID mapping across messages. The
+formatter's existing media filter and sender policy remain available; it still
+skips system messages, while the provider separately extracts instructions.
+Legacy `reasoning_item_id` references remain supported, including when that
+history is sent through the provider.
+
+For callers inspecting formatter maps, a single-text segment now has string
+`content`; multimodal/multiple-part segments use arrays. Text is flushed at
+tool/reasoning/hint boundaries instead of collected at the start of a turn.
+Empty messages produce empty string content, and otherwise unsupported turns
+use the provider's existing content-omitted placeholder. Tool results inherit
+the preceding call's original ID unless valid explicit result metadata
+supplies one. Missing, empty or non-string call-ID metadata falls back to the
+block ID. Consumers should read the ordered items and support both content
+shapes. Public interfaces are unchanged. These are conversion fixtures, not
+new live-provider acceptance claims.
+
 Both `Chat` and `ChatStream` preserve direct `DataBlock` images as
 `input_image` parts, using the original URL or a base64 data URL. A
 `HintBlock` becomes user input at its position in the history, including
