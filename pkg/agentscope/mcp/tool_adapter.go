@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/model"
@@ -45,14 +46,18 @@ func (t *MCPTool) Execute(ctx context.Context, args map[string]any) (*tool.ToolR
 // NewMCPToolkit creates a Toolkit containing all tools from an MCP client.
 // Use opts to filter tools by enable/disable lists.
 func NewMCPToolkit(ctx context.Context, client Client, opts ...MCPToolkitOption) (*tool.Toolkit, error) {
-	schemas, err := client.ListTools(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	cfg := mcpToolkitConfig{}
 	for _, o := range opts {
 		o(&cfg)
+	}
+
+	if cfg.executionTimeout < 0 {
+		return nil, fmt.Errorf("mcp toolkit: ExecutionTimeout must be non-negative")
+	}
+
+	schemas, err := client.ListTools(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var tools []tool.Tool
