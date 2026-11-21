@@ -568,6 +568,8 @@ func (o SummaryApplyOptions) withDefaults(window int) SummaryApplyOptions {
 // messages, also under WithContentBlockCompaction: the host chooses when it
 // applies.
 func (a *UnifiedAgent) ApplySummary(ctx context.Context, snap *ForkSnapshot, text string, opt SummaryApplyOptions) error {
+	finishRetentionWrite := a.beginRetentionWrite()
+	defer finishRetentionWrite()
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -676,6 +678,8 @@ type SummaryOffer struct {
 // fired. OfferSummary then returns an error, and an offer loaded from a
 // checkpoint is dropped at the trigger, which compresses synchronously.
 func (a *UnifiedAgent) OfferSummary(ctx context.Context, snap *ForkSnapshot, text string, opt SummaryApplyOptions) error {
+	finishRetentionWrite := a.beginRetentionWrite()
+	defer finishRetentionWrite()
 	if ctx == nil {
 		ctx = context.Background()
 	}

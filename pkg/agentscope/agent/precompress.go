@@ -117,6 +117,7 @@ func (a *UnifiedAgent) maybeArmPrecompress(ctx context.Context, cfg *ContextConf
 	systemPrompt := a.systemPrompt
 	plan := append([]tool.PlanItem(nil), a.state.Plan...)
 	thread := threadPromptMsgs(a.name, a.state.PeerSummary)
+	a.invalidateRetentionLocked()
 	a.precompressRunning = true
 	a.mu.Unlock()
 
@@ -135,6 +136,7 @@ func (a *UnifiedAgent) maybeArmPrecompress(ctx context.Context, cfg *ContextConf
 func (a *UnifiedAgent) runPrecompress(ctx context.Context, cfg *ContextConfig, ctxSize int, snapshot []*message.Msg, prefix, prevSummary, systemPrompt string, thread []*message.Msg, plan []tool.PlanItem) {
 	defer func() {
 		a.mu.Lock()
+		a.invalidateRetentionLocked()
 		a.precompressRunning = false
 		a.mu.Unlock()
 	}()
@@ -209,6 +211,7 @@ func (a *UnifiedAgent) runPrecompress(ctx context.Context, cfg *ContextConfig, c
 // reload. Caller holds a.mu.
 func (a *UnifiedAgent) readyLocked() *precompressResult {
 	if a.pendingPrecompress == nil && a.state.SummaryOffer != nil {
+		a.invalidateRetentionLocked()
 		if a.contentBlockCompaction {
 			// Offers are off under the block-level splitter (OfferSummary);
 			// one loaded from a checkpoint is dropped.
@@ -224,6 +227,7 @@ func (a *UnifiedAgent) readyLocked() *precompressResult {
 // dropReadyLocked drops the summary waiting for the trigger, the state's
 // offer included. Caller holds a.mu.
 func (a *UnifiedAgent) dropReadyLocked() {
+	a.invalidateRetentionLocked()
 	a.pendingPrecompress = nil
 	a.state.SummaryOffer = nil
 }

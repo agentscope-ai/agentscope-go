@@ -41,6 +41,8 @@ var errStrictStale = errors.New("agent: strict compaction: the context changed d
 // still-valid background precompression result applies instantly unless
 // opts.Prompt asks for a different summary.
 func (a *UnifiedAgent) CompactStrict(ctx context.Context, opts CompactStrictOptions) (bool, error) {
+	finishRetentionWrite := a.beginRetentionWrite()
+	defer finishRetentionWrite()
 	if ctx == nil {
 		return false, errors.New("agent: strict compaction: nil context")
 	}
