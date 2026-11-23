@@ -141,17 +141,10 @@ but keeps the order. The Anthropic and Gemini adapters already send the
 arguments as a parsed object, which Go encodes with sorted keys, so the
 option changes nothing there.
 
-On a Responses cloud the option does not take effect yet. The Responses
-adapter sends each call's `ToolCallBlock.ID` as the `function_call` item's
-`id`, and the API rejects an item id that does not begin with `fc`, such as
-a vLLM server's `chatcmpl-tool-…`. So the cloud request fails whenever the
-history holds such a call, with the option or without it, and a
-`ConnectivityAwareModel` falls back to the local model. The option takes
-effect on a Responses cloud only once the Responses adapter stops sending
-non-`fc` call IDs as `function_call` item ids, which was reported under R1
-in [#125](https://github.com/agentscope-ai/agentscope-go/issues/125). The
-Chat Completions adapters send no item id; foreign call IDs were not tested
-live against them.
+The Responses adapter writes a call's ID as the `function_call` item `id`
+only when it begins with `fc`, and sends it as `call_id` either way, so the
+local model's calls (a vLLM server's `chatcmpl-tool-…`, for example) reach a
+Responses cloud and the option applies there.
 
 **The measurement.** It comes from the benchmark of a Main Thread prototype,
 with `gpt-6-luna` on the OpenAI Responses API as the cloud and Qwen3.5-4B as
@@ -163,8 +156,8 @@ replies ran into the cap per pass, and 0 of 330 with the keys sorted;
 removing only the spaces made no measurable difference
 ([Amendment 8](https://github.com/thomeal/agentscope-go/blob/5c334a054e66147cd7f2f4edbf0cfa353b76ebcf/experiments/stage0/prereg.md#amendment-8)).
 Sent through `ConnectivityAwareModel` and the Responses adapter, with a
-transport that also removed non-`fc` item ids, 20 of 330 ran into the cap
-with the option off and 0 of 330 with it on
+transport that removed non-`fc` item ids as the adapter now does itself, 20
+of 330 ran into the cap with the option off and 0 of 330 with it on
 ([Amendment 22](https://github.com/thomeal/agentscope-go/blob/f7da54b2195f681d0b9adaeb74fd0ce8d909dc18/experiments/stage0/prereg.md#amendment-22-the-librarys-canonical-replay-on-amendment-8s-prompts)).
 They all came on requests where the local model wrote `path` first. In live
 runs, without a cap, such replies went on to the model's 128K output limit.

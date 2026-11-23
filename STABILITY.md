@@ -230,11 +230,7 @@ ports and deferred work, including realtime/TUI, SOP and model-context wiring.
   `ToolCallBlock.Extra` (`agentscope_writer_rank`), which is stored with
   messages and checkpoints, and rewrite only the copy of the history sent to
   a more preferred model. Measured on one cloud model, one local model and
-  `write_file` only, on buffered `Chat` calls. On a Responses cloud they take
-  effect only once the Responses adapter stops sending non-`fc` call IDs as
-  `function_call` item ids, which was reported under R1 in
-  [#125](https://github.com/agentscope-ai/agentscope-go/issues/125).
-  See
+  `write_file` only, on buffered `Chat` calls. See
   [canonical replay](docs/edge-deployment.md#replaying-the-local-models-tool-calls-experimental).
 
 - Experimental `evalkit.Runner.RunManagedLoad` evaluates the managed entry point
