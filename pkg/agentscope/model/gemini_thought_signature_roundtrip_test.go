@@ -22,10 +22,11 @@ func TestGeminiThoughtSignatureRoundTrip(t *testing.T) {
 		t.Run(fmt.Sprint(stream), func(t *testing.T) {
 			requests := 0
 			var secondBody geminiRequest
+			var secondWire map[string]any
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests++
-				var req geminiRequest
-				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				var wire map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&wire); err != nil {
 					t.Error(err)
 					http.Error(w, "decode", 400)
 					return
@@ -35,14 +36,23 @@ func TestGeminiThoughtSignatureRoundTrip(t *testing.T) {
 					if stream {
 						w.Header().Set("Content-Type", "text/event-stream")
 						fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"thought\":true,\"text\":\"thinking\"}]}}]}\n\n")
-						fmt.Fprintf(w, "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"functionCall\":{\"name\":\"get_weather\",\"args\":{\"city\":\"Tokyo\"}},\"thoughtSignature\":%q}]}}]}\n\n", sig)
+						fmt.Fprintf(w, "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"functionCall\":{\"id\":\"provider-tokyo\",\"name\":\"get_weather\",\"args\":{\"city\":\"Tokyo\"}},\"thoughtSignature\":%q}]}}]}\n\n", sig)
 						fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"functionCall\":{\"name\":\"get_weather\",\"args\":{\"city\":\"Paris\"}}}]},\"finishReason\":\"STOP\"}]}\n\n")
 					} else {
-						fmt.Fprintf(w, `{"candidates":[{"content":{"role":"model","parts":[{"thought":true,"text":"thinking"},{"functionCall":{"name":"get_weather","args":{"city":"Tokyo"}},"thoughtSignature":%q},{"functionCall":{"name":"get_weather","args":{"city":"Paris"}}}]},"finishReason":"STOP"}]}`, sig)
+						fmt.Fprintf(w, `{"candidates":[{"content":{"role":"model","parts":[{"thought":true,"text":"thinking"},{"functionCall":{"id":"provider-tokyo","name":"get_weather","args":{"city":"Tokyo"}},"thoughtSignature":%q},{"functionCall":{"name":"get_weather","args":{"city":"Paris"}}}]},"finishReason":"STOP"}]}`, sig)
 					}
 					return
 				}
-				secondBody = req
+				secondWire = wire
+				encoded, err := json.Marshal(wire)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				if err := json.Unmarshal(encoded, &secondBody); err != nil {
+					t.Error(err)
+					return
+				}
 				if stream {
 					fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"done\"}]},\"finishReason\":\"STOP\"}]}\n\n")
 				} else {
@@ -88,6 +98,9 @@ func TestGeminiThoughtSignatureRoundTrip(t *testing.T) {
 				t.Fatalf("calls=%+v", resp.Content)
 			}
 			signed := calls[0]
+			if signed.ID != "provider-tokyo" {
+				t.Errorf("provider call ID = %q, want provider-tokyo", signed.ID)
+			}
 			if got, _ := signed.Extra["thought_signature"].(string); got != sig {
 				t.Fatalf("signed call extra=%v, want %q", signed.Extra, sig)
 			}
@@ -95,7 +108,7 @@ func TestGeminiThoughtSignatureRoundTrip(t *testing.T) {
 			if _, has := plain.Extra["thought_signature"]; has {
 				t.Fatalf("unsigned call extra=%v", plain.Extra)
 			}
-			if signed.ID == plain.ID {
+			if plain.ID == "" || signed.ID == plain.ID {
 				t.Fatalf("call ids collide: %q", signed.ID)
 			}
 
@@ -138,6 +151,16 @@ func TestGeminiThoughtSignatureRoundTrip(t *testing.T) {
 
 			if len(secondBody.Contents) != 3 {
 				t.Fatalf("contents=%+v", secondBody.Contents)
+			}
+			wireContents := secondWire["contents"].([]any)
+			wireCalls := wireContents[1].(map[string]any)["parts"].([]any)
+			wireResults := wireContents[2].(map[string]any)["parts"].([]any)
+			for i, wantID := range []string{signed.ID, plain.ID} {
+				callID := wireCalls[i].(map[string]any)["functionCall"].(map[string]any)["id"]
+				resultID := wireResults[i].(map[string]any)["functionResponse"].(map[string]any)["id"]
+				if callID != wantID || resultID != wantID {
+					t.Errorf("call %d: request call/result IDs = %v/%v, want %q", i, callID, resultID, wantID)
+				}
 			}
 			parts := secondBody.Contents[1].Parts
 			if len(parts) != 2 || parts[0].FunctionCall == nil || parts[1].FunctionCall == nil {
