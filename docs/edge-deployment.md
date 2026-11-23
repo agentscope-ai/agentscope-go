@@ -142,7 +142,7 @@ arguments as a parsed object, which Go encodes with sorted keys, so the
 option changes nothing there.
 
 The Responses adapter writes a call's ID as the `function_call` item `id`
-only when it begins with `fc`, and sends it as `call_id` either way, so the
+only when it begins with `fc`, and keeps its `call_id`, so the
 local model's calls (a vLLM server's `chatcmpl-tool-…`, for example) reach a
 Responses cloud and the option applies there.
 
