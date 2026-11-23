@@ -100,6 +100,12 @@ stored tool results. The adapter preserves a nonempty string `call_id` in
 fragments still correlate through `item_id`; a completed function-call
 item can supply the call ID if the initial item omitted it.
 
+When replaying foreign tool calls, the adapter and public formatter omit the
+optional function-call item `id` unless it starts with `fc`. The tool ID remains
+available as `call_id` (or its explicit metadata override); stored history is
+unchanged. This keeps other providers' tool IDs out of the Responses item-ID
+field without renaming the call/result correlation IDs.
+
 When replaying history, the adapter uses that original call ID for the
 function call and its later results. A result's explicit nonempty string
 `Metadata["call_id"]` takes precedence over the preceding call's mapping;

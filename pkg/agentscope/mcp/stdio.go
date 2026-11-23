@@ -42,6 +42,9 @@ type StdioClient struct {
 // subprocess lifetime: the server process lives until Close or Reconnect, so
 // request-scoped contexts are safe to pass here.
 func NewStdioClient(ctx context.Context, cfg *StdioConfig) (*StdioClient, error) {
+	if cfg.ExecutionTimeout < 0 {
+		return nil, fmt.Errorf("mcp stdio: ExecutionTimeout must be non-negative")
+	}
 	c := &StdioClient{cfg: cfg, nextID: 1}
 	if err := c.start(ctx); err != nil {
 		return nil, err

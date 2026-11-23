@@ -492,6 +492,9 @@ func (a *App) workspaceSkillStore(r *http.Request) (*skill.Store, string, int, e
 	}
 	ws, err := a.wsMgr.GetOrCreate(sessionID)
 	if err != nil {
+		if errors.Is(err, errInvalidWorkspaceID) {
+			return nil, "", http.StatusBadRequest, fmt.Errorf("workspace for session %s: %w", sessionID, err)
+		}
 		return nil, "", http.StatusInternalServerError, fmt.Errorf("workspace for session %s: %w", sessionID, err)
 	}
 	return skill.NewStore(ws.BasePath()), r.URL.Query().Get("agent_id"), 0, nil

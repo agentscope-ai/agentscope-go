@@ -29,6 +29,25 @@ cloud cost, latency or energy benefits. These packages' only live runs were in a
 comparison that was withdrawn; only one routing observation from it is used
 (the `hybrid` default).
 
+[Main Thread design](design/main-thread.md) explains why the runtime is
+shaped this way, what it replaces, how it behaves across failures, what the
+benchmark of a prototype measured and what is left open.
+
+## Run the offline example
+
+```bash
+go run ./examples/main_thread
+go test -count=1 ./pkg/agentscope/thread/... ./examples/main_thread
+```
+
+The [example](../examples/main_thread/) runs a short session between an edge
+agent and a cloud team (a master with one researcher): a query the cloud
+answers with its researcher, a transfer of the foreground to the edge, a
+query the user names for the edge, and a query that needs the device's tools,
+for which the edge assigns a background task to the cloud whose report wakes
+it. It prints the log, the owner and the ledger. Every model is scripted, the
+routing classifier is the offline fake, and nothing leaves the process.
+
 ## Concepts
 
 **Participants.** A participant implements `thread.Participant`. Its
@@ -46,7 +65,7 @@ never be written as a reply. It is kept as a report with a
 
 **No privacy classes.** Every participant may read every entry, and the
 cloud imports the edge's entries like any others. Keeping some data on the
-device is future work.
+device is future work; see [Main Thread privacy](design/main-thread-privacy.md).
 
 **Cursors.** Each participant reports the last entry it imported
 (`ParticipantState.Cursor`). The cursor and the imported content change in
@@ -73,8 +92,8 @@ The invariants the Coordinator keeps are listed in
 5. When the activation ends, the visible text and the tool digest are sealed
    into a reply entry. An interrupted run gets an `interrupted` marker. A
    failed one gets a `failed` marker with the error, `unknown_effects` when
-   it had called tools, then one failover to another participant that may
-   take the query, or `no_owner`. The entry that ends the run (the `failed`
+   it had called tools, then one failover to the first other available
+   participant, or `no_owner`. The entry that ends the run (the `failed`
    or `interrupted` marker, else the reply) lists the inputs it took besides
    its trigger (`Entry.Steered`): the steering and the older inputs its cycle
    carried as context. An input that found no owner waits parked: it does
@@ -86,8 +105,8 @@ The invariants the Coordinator keeps are listed in
 
 A user message never changes the route while an activation runs: it steers
 the running owner. The failover is the one automatic handover. When the
-owner fails, the Coordinator picks another participant that may take the
-query and queues its activation; if that participant is running a
+owner fails, the Coordinator picks the first other available participant
+(once per query) and queues its activation; if that participant is running a
 background task, the failover waits behind the task instead of interrupting
 it. The new owner's input is one line:
 
@@ -322,14 +341,14 @@ it writes.
 * **Peer summary (for the edge).** Summaries are written by the cloud's
   `thread.Forker` from a fork of its last request, without touching its main
   context. At the end of a cloud reply, when what a handover would bring the
-  edge (its newest peer summary plus the entries after it, plus what the
-  reply added) reaches `SummaryPolicy.PeerRatio` of the edge's window
-  (default 0.8), so the edge can always take over within its window,
-  failover included; also when the cloud hands the foreground to the edge,
-  or when the cloud's own notes need a covering summary. The summary is
-  appended as a `summary` entry with its coverage: through the cloud's last
-  sealed entry, excluding entries written by others after the cloud's
-  cursor.
+  edge (its newest peer summary plus the entries after it, plus what the reply
+  added) reaches `SummaryPolicy.PeerRatio` of the edge's window (default 0.8),
+  so that a takeover, failover included, usually fits the edge's window
+  without a new fork (the rule predicts the next reply's growth from the last
+  one: an estimate, not a bound); also when the cloud hands the foreground to
+  the edge, or when the cloud's own notes need a covering summary. The summary
+  is appended as a `summary` entry with its coverage: through the cloud's last
+  sealed entry, excluding entries written by others after the cloud's cursor.
 * **Own notes (for the cloud).** The forker also writes notes for the
   cloud's own window once its input reaches `SummaryPolicy.OwnInit` (default
   10,000 tokens), updated whenever the input grew `OwnEvery` (default 5,000).
@@ -343,7 +362,8 @@ it writes.
   by message ID.
 * **Clear rule (edge handover).** When the edge is about to run after another
   participant held the foreground since the edge last acted, and the newest
-  peer summary is newer than the edge's last activity, the edge's context is
+  peer summary covers entries past the edge's last activity (and is not the
+  one its last clear applied), the edge's context is
   replaced in one update that goes with the activation: the peer summary and
   the entries the summary does not cover, including the edge's own when the
   summary excludes them. A clear whose activation fails is not recorded, and

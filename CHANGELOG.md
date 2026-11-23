@@ -17,6 +17,21 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   streamed calls. Explicit enable now sends `thinking.type = "enabled"`
   instead of omitting the option.
 
+### Fixed — Responses foreign tool-call IDs
+
+- The Responses adapter and public formatter now omit a function-call item's
+  optional `id` when the tool ID does not start with `fc`, preserving `call_id`
+  for result correlation. This avoids invalid item IDs when replaying tool
+  histories from other providers; existing `fc` item IDs remain unchanged.
+
+### Fixed — workspace session ID validation
+
+- `WorkspaceManager.GetOrCreate` now rejects session IDs that are empty, start
+  with a dot, or contain path separators, mirroring `Share`; the workspace
+  skill route maps an invalid ID to 400 instead of 500. This closes a path
+  traversal where a crafted `session_id` could create a workspace outside the
+  configured base directory.
+
 ### Fixed — DashScope TTS stream failures
 
 - DashScope realtime `SynthesizeStream` now emits a terminal `Response.Err`
@@ -71,6 +86,23 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   of silently dropping them. Argon/Carbon use the new `WithThinkingLevel` option
   (`LOW`, `MEDIUM`, `HIGH`); incompatible budgets/levels fail before dispatch.
   Unset options retain provider defaults. See [Gemini thinking](docs/model-providers.md#gemini-thinking-unreleased).
+
+### Added — Main Thread example and design notes (experimental)
+
+- **Offline example** (`examples/main_thread/`): an edge agent and a cloud
+  team (a master with one researcher) share one session through the
+  Coordinator, with scripted models and the offline fake classifier. The
+  session shows a query the cloud answers with its researcher, a transfer to
+  the edge, a query the user names for the edge, and a background task whose
+  report wakes the edge; it prints the log, the owner and the ledger, and its
+  test checks the session.
+- **Design notes**: [Main Thread design](docs/design/main-thread.md) explains
+  why the runtime is shaped this way, how it behaves across failures, what
+  the benchmark of a prototype measured, the changes outside the packages
+  and the open questions, with five figures.
+  [Main Thread privacy](docs/design/main-thread-privacy.md) records keeping
+  data on the device and untrusted content as future work. The
+  [guide](docs/main-thread.md) links both and shows how to run the example.
 
 ### Added — Main Thread participants (experimental)
 
