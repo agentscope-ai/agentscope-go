@@ -95,6 +95,7 @@ func WithContextRemainingTool() AgentOption {
 // Validation already happened in the tool; this only records the plan.
 func (a *UnifiedAgent) updatePlanFromTool(_ context.Context, _ string, plan []tool.PlanItem) error {
 	a.mu.Lock()
+	a.invalidateRetentionLocked()
 	defer a.mu.Unlock()
 	a.state.Plan = append([]tool.PlanItem(nil), plan...)
 	return nil

@@ -20,7 +20,7 @@ func TestGeminiFormatterToolCallSignatures(t *testing.T) {
 				message.ToolCallBlock{Type: "tool_call", ID: "local_1", Name: "weather", Input: `{"city":"Paris"}`, Extra: map[string]any{"thought_signature": "opaque+/=signature-1"}},
 				message.ToolCallBlock{Type: "tool_call", ID: "local_2", Name: "time", Input: `{}`, Extra: map[string]any{"thought_signature": "signature-2"}},
 				message.ToolCallBlock{Type: "tool_call", ID: "old", Name: "unsigned", Input: `{}`},
-				message.ToolCallBlock{Type: "tool_call", ID: "empty", Name: "empty", Input: `{}`, Extra: map[string]any{"thought_signature": ""}},
+				message.ToolCallBlock{Type: "tool_call", ID: "", Name: "empty", Input: `{}`, Extra: map[string]any{"thought_signature": ""}},
 				message.ToolCallBlock{Type: "tool_call", ID: "invalid", Name: "invalid", Input: `{}`, Extra: map[string]any{"thought_signature": 42}},
 			}
 			msgs := []*message.Msg{{Role: message.RoleAssistant, Name: "peer", Content: blocks}}
@@ -66,6 +66,9 @@ func TestGeminiFormatterToolCallSignatures(t *testing.T) {
 					args["city"] = "Paris"
 				}
 				want := map[string]any{"functionCall": map[string]any{"name": call.Name, "args": args}}
+				if call.ID != "" {
+					want["functionCall"].(map[string]any)["id"] = call.ID
+				}
 				if signatures[i] != "" {
 					want["thoughtSignature"] = signatures[i]
 				}
