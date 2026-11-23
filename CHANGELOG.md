@@ -11,6 +11,12 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — explicit DeepSeek and Moonshot thinking
+
+- Honor `WithThinking(true, 0)` in DeepSeek and non-K3 Moonshot buffered and
+  streamed calls. Explicit enable now sends `thinking.type = "enabled"`
+  instead of omitting the option.
+
 ### Fixed — Responses foreign tool-call IDs
 
 - The Responses adapter and public formatter now omit a function-call item's
