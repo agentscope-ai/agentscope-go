@@ -1,8 +1,10 @@
 package tool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/message"
@@ -134,5 +136,76 @@ func TestCollectStream_LateStateStillApplies(t *testing.T) {
 	resp := CollectStream(ch)
 	if resp.State != message.ToolResultSuccess {
 		t.Errorf("state = %q, want success", resp.State)
+	}
+}
+
+func TestCollectStreamDataBlocks(t *testing.T) {
+	for _, pointerSource := range []bool{false, true} {
+		t.Run(map[bool]string{false: "value", true: "pointer"}[pointerSource], func(t *testing.T) {
+			data := func(id, name, mediaType, encoded string) message.DataBlock {
+				source := message.Base64Source{Type: "base64", MediaType: mediaType, Data: encoded}
+				var src any = source
+				if pointerSource {
+					src = &source
+				}
+				return message.DataBlock{Type: "data", ID: id, Name: name, Source: src}
+			}
+			first := data("shared", "audio", "audio/wav", "YQ==")
+			second := data("shared", "renamed", "", "YmM=")
+			url := message.DataBlock{Type: "data", ID: "shared", Source: message.URLSource{Type: "url", URL: "https://example.com/audio"}}
+			other := data("other", "", "image/png", "eA==")
+			anonymous := data("", "", "audio/wav", "eg==")
+			chunks := []ToolChunk{
+				{Content: []message.ContentBlock{first, message.TextBlock{Type: "text", ID: "shared", Text: "hello"}, other, url, anonymous}},
+				{Content: []message.ContentBlock{second, message.TextBlock{Type: "text", ID: "shared", Text: " world"}, url, anonymous}},
+				{Content: []message.ContentBlock{data("shared", "", "audio/pcm", "ZA==")}, IsFinal: true, State: message.ToolResultSuccess, Metadata: map[string]any{"done": true}},
+			}
+			before, err := json.Marshal(chunks)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ch := make(chan ToolChunk, len(chunks))
+			for _, chunk := range chunks {
+				ch <- chunk
+			}
+			close(ch)
+			got := CollectStream(ch)
+			want := []message.ContentBlock{
+				data("shared", "renamed", "audio/pcm", "YWJjZA=="),
+				message.TextBlock{Type: "text", ID: "shared", Text: "hello world"},
+				other, url, anonymous, url, anonymous,
+			}
+			if !reflect.DeepEqual(got.Content, want) {
+				t.Fatalf("content = %#v, want %#v", got.Content, want)
+			}
+			if got.State != message.ToolResultSuccess || got.Metadata["done"] != true {
+				t.Fatalf("terminal result = %#v", got)
+			}
+			after, err := json.Marshal(chunks)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatal("input chunks were mutated")
+			}
+		})
+	}
+}
+
+func TestCollectStreamDataPlaceholderPayloads(t *testing.T) {
+	ch := make(chan ToolChunk, 2)
+	for _, payload := range []string{"not-base64", "!"} {
+		ch <- ToolChunk{Content: []message.ContentBlock{message.DataBlock{
+			Type: "data", ID: "audio",
+			Source: message.Base64Source{Type: "base64", MediaType: "audio/wav", Data: payload},
+		}}}
+	}
+	close(ch)
+	got := CollectStream(ch)
+	if len(got.Content) != 1 {
+		t.Fatalf("got %d blocks, want 1", len(got.Content))
+	}
+	if payload := got.Content[0].(message.DataBlock).Source.(message.Base64Source).Data; payload != "not-base64!" {
+		t.Fatalf("payload = %q", payload)
 	}
 }

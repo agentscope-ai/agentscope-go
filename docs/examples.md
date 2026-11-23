@@ -43,6 +43,7 @@ contracts; no real identity-provider or model integration is claimed.
 | [managed_routing_eval](../examples/managed_routing_eval/) | Three managed evaluation groups, bilingual fixtures and explicit live Jev configuration |
 | [managed_routing](../examples/managed_routing/) | Rules, simulated classification, explicit defaults and constrained fallback |
 | [tier_routing](../examples/tier_routing/) | Fixed and three-tier routed fake ChatModels; see the [routing guide](tier-routing.md) |
+| [main_thread](../examples/main_thread/) | A cloud master with a sub-agent and an edge agent sharing one session: routing, transfer, a query named for the edge and a background task; see [Main Thread](main-thread.md) |
 | [embodied_demo](../examples/embodied_demo/) | Single-device observation, planning and simulated actions; see the [demo guide](embodied-demo.md) and [contracts](embodied-contracts.md) |
 | [managed_task](../examples/managed_task/) | Fixed-model managed text execution with a local HTTP fixture |
 | [classifier](../examples/classifier/) | Typed classification with offline fake results and attempt accounting |

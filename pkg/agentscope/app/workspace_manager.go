@@ -58,6 +58,9 @@ func validWorkspaceID(id string) bool {
 // (filesystem work) happens outside the manager lock; a concurrent creator
 // of the same ID wins and this call adopts the winner's instance.
 func (m *WorkspaceManager) GetOrCreate(sessionID string) (workspace.Workspace, error) {
+	if !validWorkspaceID(sessionID) {
+		return nil, fmt.Errorf("%w %q", errInvalidWorkspaceID, sessionID)
+	}
 	m.mu.Lock()
 	if id, bound := m.bindings[sessionID]; bound {
 		if ws, ok := m.workspaces[id]; ok {

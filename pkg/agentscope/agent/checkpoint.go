@@ -47,6 +47,8 @@ func (a *UnifiedAgent) Checkpoint(ctx context.Context) {
 // recovery it includes synchronized counters; automatic safe points stop the
 // reply if persistence fails. Successful saving does not make tools exactly-once.
 func (a *UnifiedAgent) SaveCheckpoint(ctx context.Context) error {
+	finishRetentionWrite := a.beginRetentionWrite()
+	defer finishRetentionWrite()
 	a.checkpointMu.Lock()
 	defer a.checkpointMu.Unlock()
 	if a.stateSaver == nil {
@@ -268,6 +270,7 @@ func (a *UnifiedAgent) repromptAwaitingCalls(ctx context.Context, ch chan<- even
 // confirmation.
 func (a *UnifiedAgent) replaceToolCallInContext(callID string, replacement *message.ToolCallBlock) {
 	a.mu.Lock()
+	a.invalidateRetentionLocked()
 	defer a.mu.Unlock()
 	for i := len(a.state.Context) - 1; i >= 0; i-- {
 		msg := a.state.Context[i]

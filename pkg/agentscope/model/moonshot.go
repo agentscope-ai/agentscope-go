@@ -49,11 +49,13 @@ func applyMoonshotCallOptions(reqBody *openAIChatRequest, callOpts *CallOptions,
 	if callOpts.ToolChoice != nil {
 		reqBody.ToolChoice = formatToolChoice(callOpts.ToolChoice)
 	}
-	// Upstream #2140: DeepSeek/Moonshot disable thinking via
-	// {"thinking":{"type":"disabled"}}, not enable_thinking. The K3 series
-	// always thinks and rejects the switch (upstream #3578).
-	if callOpts.ThinkingEnable != nil && !*callOpts.ThinkingEnable && !isK3 {
-		reqBody.Thinking = &openAIThinking{Type: "disabled"}
+	// The K3 series always thinks and rejects the switch (upstream #3578).
+	if callOpts.ThinkingEnable != nil && !isK3 {
+		thinkingType := "disabled"
+		if *callOpts.ThinkingEnable {
+			thinkingType = "enabled"
+		}
+		reqBody.Thinking = &openAIThinking{Type: thinkingType}
 	}
 }
 
