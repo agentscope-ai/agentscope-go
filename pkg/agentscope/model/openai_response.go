@@ -266,13 +266,18 @@ func (m *openaiResponseModel) formatInputItemsWithCallIDs(msg *message.Msg, call
 			flushContent()
 			callID := responsesCallID(blk.Extra, blk.ID)
 			callIDs[blk.ID] = callID
-			items = append(items, map[string]any{
+			item := map[string]any{
 				"type":      "function_call",
-				"id":        blk.ID,
 				"call_id":   callID,
 				"name":      blk.Name,
 				"arguments": blk.Input,
-			})
+			}
+			// Foreign tool IDs remain valid correlation IDs, but are not
+			// Responses item IDs. Omit the optional item ID when replaying them.
+			if strings.HasPrefix(blk.ID, "fc") {
+				item["id"] = blk.ID
+			}
+			items = append(items, item)
 		case message.ToolResultBlock:
 			flushContent()
 			callID := blk.ID
