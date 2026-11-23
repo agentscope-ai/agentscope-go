@@ -329,6 +329,12 @@ native `tools` field; `model.WithToolChoice` has no native counterpart, so its
 tool whitelist filters the sent tools while a non-default mode is ignored with
 a warning.
 
+If neither of the first two [structured output](#structured-output) attempts
+yields usable JSON and the failure permits a retry, `model.GenerateStructuredOutput`
+sends `think: false` on its next native `/api/chat` request. The option applies
+only to that request. The selected Ollama model determines whether thinking
+can be disabled.
+
 ### Moonshot (Kimi)
 
 ```go

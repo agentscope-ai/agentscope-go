@@ -175,6 +175,11 @@ func (m *OllamaNativeChatModel) ContextSize() int {
 	return m.numCtx
 }
 
+// DisableThinkingOptions requests think:false on the structured-output fallback.
+func (m *OllamaNativeChatModel) DisableThinkingOptions() []CallOption {
+	return []CallOption{WithThinkingDisabled()}
+}
+
 func (m *OllamaNativeChatModel) buildRequest(msgs []*message.Msg, callOpts *CallOptions, stream bool) (*ollamaNativeChatRequest, error) {
 	reqBody := &ollamaNativeChatRequest{
 		Model:    m.model,
