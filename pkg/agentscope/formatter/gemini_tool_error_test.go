@@ -18,6 +18,7 @@ func TestGeminiFormatterToolResultStates(t *testing.T) {
 				blocks := []message.ContentBlock{
 					message.ToolResultBlock{Type: "tool_result", ID: "ok", Name: "control", Output: "ok", State: message.ToolResultSuccess},
 					message.ToolResultBlock{Type: "tool_result", ID: "tested", Name: "lookup", Output: output, State: state},
+					message.ToolResultBlock{Type: "tool_result", Name: "legacy", Output: "no ID"},
 				}
 				msg := message.NewMsg("worker", message.RoleUser, blocks)
 				before, err := json.Marshal(msg)
@@ -43,8 +44,9 @@ func TestGeminiFormatterToolResultStates(t *testing.T) {
 					key = "error"
 				}
 				parts := []map[string]any{
-					{"functionResponse": map[string]any{"name": "control", "response": map[string]any{"result": "ok"}}},
-					{"functionResponse": map[string]any{"name": "lookup", "response": map[string]any{key: text}}},
+					{"functionResponse": map[string]any{"id": "ok", "name": "control", "response": map[string]any{"result": "ok"}}},
+					{"functionResponse": map[string]any{"id": "tested", "name": "lookup", "response": map[string]any{key: text}}},
+					{"functionResponse": map[string]any{"name": "legacy", "response": map[string]any{"result": "no ID"}}},
 				}
 				if multi {
 					parts = append([]map[string]any{{"text": "[worker]: "}}, parts...)

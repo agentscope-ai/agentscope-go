@@ -100,6 +100,12 @@ stored tool results. The adapter preserves a nonempty string `call_id` in
 fragments still correlate through `item_id`; a completed function-call
 item can supply the call ID if the initial item omitted it.
 
+When replaying foreign tool calls, the adapter and public formatter omit the
+optional function-call item `id` unless it starts with `fc`. The tool ID remains
+available as `call_id` (or its explicit metadata override); stored history is
+unchanged. This keeps other providers' tool IDs out of the Responses item-ID
+field without renaming the call/result correlation IDs.
+
 When replaying history, the adapter uses that original call ID for the
 function call and its later results. A result's explicit nonempty string
 `Metadata["call_id"]` takes precedence over the preceding call's mapping;
@@ -210,6 +216,14 @@ cm, _ := model.NewDeepSeekChatModel(model.DeepSeekConfig{
 
 Models: `deepseek-chat`, `deepseek-reasoner`, `deepseek-v4-flash`, `deepseek-v4-pro`
 
+#### DeepSeek thinking (unreleased)
+
+In both `Chat` and `ChatStream`, `model.WithThinking(true, 0)` sends
+`thinking.type = "enabled"`. `model.WithThinking(false, 0)` or
+`model.WithThinkingDisabled()` sends `"disabled"`. Leaving the option unset
+omits `thinking` and uses the provider default. The adapter ignores the budget
+argument, including positive values; use zero for the toggle.
+
 ### Google Gemini
 
 ```go
@@ -220,6 +234,11 @@ cm, _ := model.NewGeminiChatModel(model.GeminiConfig{
 ```
 
 Models: `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-flash-preview`, `gemini-3.1-pro-preview`
+
+Gemini preserves provider-issued tool-call IDs and replays the same ID on
+`functionCall` and `functionResponse`; absent IDs use the existing generated ID.
+The adapter targets the Gemini Developer API. Custom `BaseURL` endpoints must
+accept these ID fields; Vertex-style endpoint compatibility is not guaranteed.
 
 #### Gemini thinking (unreleased)
 
@@ -328,6 +347,11 @@ cm, _ := model.NewMoonshotChatModel(model.MoonshotConfig{
 Models: `kimi-k2.5`, `kimi-k2.6`, `kimi-k3`, `moonshot-v1-8k`, `moonshot-v1-32k`, `moonshot-v1-128k`
 
 **Kimi K3** — Latest Kimi model with 256K context, 64K output. Supports text, vision (JPEG/PNG/GIF/WebP), video (MP4), and extended thinking.
+
+Moonshot uses the same [thinking options](#deepseek-thinking-unreleased) as
+DeepSeek. The Kimi K3 IDs `kimi-k3`, `kimi-k3.1-pro` and
+`kimi-k3.1-pro-highspeed` always omit the switch because thinking is always
+enabled.
 
 ### xAI (Grok)
 
@@ -580,6 +604,10 @@ resp, _ := cm.Chat(ctx, msgs,
     model.WithSeed(42), // passed through on OpenAI-family providers
 )
 ```
+
+Thinking budgets are provider-specific. DeepSeek and Moonshot use only the
+enable/disable flag; see [thinking options](#deepseek-thinking-unreleased) for
+the request mapping and [Moonshot](#moonshot-kimi) for Kimi K3 exceptions.
 
 For `OpenAIChatModel.Chat` and `AnthropicChatModel.Chat`, `model.WithRetries`
 configures additional attempts and the delay between them. Their retry waits

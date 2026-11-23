@@ -78,6 +78,9 @@ type UnifiedAgent struct {
 
 	contentBlockCompaction bool
 	compactionVersion      uint64
+	retentionVersion       retentionVersion
+	retentionWriters       uint64
+	retentionTracking      bool
 
 	// lastModelInputTokens is the provider-reported input size of the most
 	// recent successful model call. It grounds the compression trigger:
@@ -508,6 +511,7 @@ func (a *UnifiedAgent) replyStream(ctx context.Context, input string, resume, pe
 			return nil, fmt.Errorf("agent %s: a conversation is active; submit input via Conversation.Submit", a.name)
 		}
 	}
+	a.invalidateRetentionLocked()
 	a.activeReplies++
 	a.mu.Unlock()
 
@@ -622,6 +626,7 @@ func (a *UnifiedAgent) replyStream(ctx context.Context, input string, resume, pe
 // replyDone releases one in-flight reply slot (see activeReplies).
 func (a *UnifiedAgent) replyDone() {
 	a.mu.Lock()
+	a.invalidateRetentionLocked()
 	a.activeReplies--
 	a.mu.Unlock()
 }
@@ -629,6 +634,7 @@ func (a *UnifiedAgent) replyDone() {
 // coreStarted counts a reply core that is about to run (see runningCores).
 func (a *UnifiedAgent) coreStarted() {
 	a.mu.Lock()
+	a.invalidateRetentionLocked()
 	if a.runningCores == 0 {
 		a.coresIdle = make(chan struct{})
 	}
@@ -639,6 +645,7 @@ func (a *UnifiedAgent) coreStarted() {
 // coreFinished releases a reply core once replyLoop has returned.
 func (a *UnifiedAgent) coreFinished() {
 	a.mu.Lock()
+	a.invalidateRetentionLocked()
 	a.runningCores--
 	if a.runningCores == 0 {
 		close(a.coresIdle)
@@ -675,6 +682,7 @@ func (a *UnifiedAgent) Observe(ctx context.Context, msgs []*message.Msg) error {
 	}
 
 	a.mu.Lock()
+	a.invalidateRetentionLocked()
 	defer a.mu.Unlock()
 	for _, m := range msgs {
 		if m != nil {

@@ -114,6 +114,7 @@ func (a *UnifiedAgent) getExecutableToolCalls() []message.ToolCallBlock {
 // behavior — the context holds the authoritative state.
 func (a *UnifiedAgent) updateToolCallState(callID string, newState message.ToolCallState) {
 	a.mu.Lock()
+	a.invalidateRetentionLocked()
 	defer a.mu.Unlock()
 	// Scan backwards: after a resume the call may live in an assistant
 	// message that is no longer the last context message (a fresh user
@@ -143,6 +144,7 @@ func (a *UnifiedAgent) saveToContext(blocks []message.ContentBlock, usage *model
 	}
 
 	a.mu.Lock()
+	a.invalidateRetentionLocked()
 	defer a.mu.Unlock()
 
 	if len(a.state.Context) > 0 {

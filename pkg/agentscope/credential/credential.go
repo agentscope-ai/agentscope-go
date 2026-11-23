@@ -149,6 +149,21 @@ func (c *KimiCredential) BaseURL() string {
 	return "https://api.moonshot.cn/v1"
 }
 
+// TypeSafeCredential holds credentials for the TypeSafe System One classifier.
+type TypeSafeCredential struct {
+	Key string
+	URL string // Optional full evaluation endpoint.
+}
+
+func (c *TypeSafeCredential) Provider() string { return "typesafe" }
+func (c *TypeSafeCredential) APIKey() string   { return c.Key }
+func (c *TypeSafeCredential) BaseURL() string {
+	if c.URL != "" {
+		return c.URL
+	}
+	return "https://api.typesafe.ai/v1/systemone"
+}
+
 // --- Environment auto-loading ---
 
 // FromEnv attempts to load credentials from environment variables.

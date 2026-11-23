@@ -96,10 +96,12 @@ func (m *DeepSeekChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts 
 	if callOpts.ToolChoice != nil {
 		reqBody.ToolChoice = formatToolChoice(callOpts.ToolChoice)
 	}
-	if callOpts.ThinkingEnable != nil && !*callOpts.ThinkingEnable {
-		// Upstream #2140: DeepSeek/Moonshot disable thinking via
-		// {"thinking":{"type":"disabled"}}, not enable_thinking.
-		reqBody.Thinking = &openAIThinking{Type: "disabled"}
+	if callOpts.ThinkingEnable != nil {
+		thinkingType := "disabled"
+		if *callOpts.ThinkingEnable {
+			thinkingType = "enabled"
+		}
+		reqBody.Thinking = &openAIThinking{Type: thinkingType}
 	}
 
 	var parsed openAIChatResponse
@@ -163,10 +165,12 @@ func (m *DeepSeekChatModel) ChatStream(ctx context.Context, msgs []*message.Msg,
 	if callOpts.ToolChoice != nil {
 		reqBody.ToolChoice = formatToolChoice(callOpts.ToolChoice)
 	}
-	if callOpts.ThinkingEnable != nil && !*callOpts.ThinkingEnable {
-		// Upstream #2140: DeepSeek/Moonshot disable thinking via
-		// {"thinking":{"type":"disabled"}}, not enable_thinking.
-		reqBody.Thinking = &openAIThinking{Type: "disabled"}
+	if callOpts.ThinkingEnable != nil {
+		thinkingType := "disabled"
+		if *callOpts.ThinkingEnable {
+			thinkingType = "enabled"
+		}
+		reqBody.Thinking = &openAIThinking{Type: thinkingType}
 	}
 
 	sseCh, err := httpx.DoSSERequest(
