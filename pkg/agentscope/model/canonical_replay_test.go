@@ -64,6 +64,14 @@ func checkUnmarked(t *testing.T, call *message.ToolCallBlock) {
 
 const canonicalLocalInput = `{"content":"package a\n","path":"a.go"}`
 
+// localID is a tool call ID in the form a vLLM server gives it. The cloud's
+// own call has a Responses item ID and the API's call_id in Extra.
+const (
+	localID     = "chatcmpl-tool-7f3a9c2e1b4d"
+	cloudItemID = "fc_cloud1"
+	cloudCallID = "call_cloud1"
+)
+
 // scriptedLocal answers every call with one tool call and records the
 // histories it received.
 type scriptedLocal struct {
@@ -151,6 +159,21 @@ func arguments(t *testing.T, body map[string]any) map[string]string {
 	return out
 }
 
+// itemIDs returns the item id of each function_call the request sent, by
+// call_id; a call sent without one is absent.
+func itemIDs(body map[string]any) map[string]any {
+	out := map[string]any{}
+	items, _ := body["input"].([]any)
+	for _, it := range items {
+		m, _ := it.(map[string]any)
+		if id, ok := m["id"]; ok && m["type"] == "function_call" {
+			callID, _ := m["call_id"].(string)
+			out[callID] = id
+		}
+	}
+	return out
+}
+
 // checkPaired fails unless every function_call in a Responses request body
 // has a function_call_output with the same call_id.
 func checkPaired(t *testing.T, body map[string]any) {
@@ -183,15 +206,15 @@ func checkPaired(t *testing.T, body map[string]any) {
 // the cloud wrote earlier (unmarked, in a non-canonical form) and its
 // result, then the local model's reply and its result.
 func historyAfter(local []message.ContentBlock) []*message.Msg {
-	cloudOwn := message.ToolCallBlock{Type: "tool_call", ID: "call_cloud", Name: "write_file",
-		Input: `{"path": "b.go", "content": "package b\n"}`}
+	cloudOwn := message.ToolCallBlock{Type: "tool_call", ID: cloudItemID, Name: "write_file",
+		Input: `{"path": "b.go", "content": "package b\n"}`, Extra: map[string]any{"call_id": cloudCallID}}
 	result := func(id string) message.ToolResultBlock {
 		return message.ToolResultBlock{Type: "tool_result", ID: id, Name: "write_file",
 			Output: []message.ContentBlock{message.TextBlock{Type: "text", Text: "ok"}}}
 	}
-	reply := []message.ContentBlock{cloudOwn, result("call_cloud")}
+	reply := []message.ContentBlock{cloudOwn, result(cloudItemID)}
 	reply = append(reply, local...)
-	reply = append(reply, result("call_local"))
+	reply = append(reply, result(localID))
 	return []*message.Msg{
 		message.UserMsg("user", "write two files"),
 		message.NewMsg("assistant", message.RoleAssistant, reply),
@@ -240,7 +263,7 @@ func testCanonicalReplayWire(t *testing.T, wrapper string, canonical, stream boo
 	// local model and the second to the cloud.
 	cc := &cloudCapture{refuse: map[int]bool{1: true, 3: true}}
 	cloud := newResponsesStreamModel(t, cc.handler(t))
-	local := &scriptedLocal{call: localCall("call_local")}
+	local := &scriptedLocal{call: localCall(localID)}
 	var m ChatModel
 	var cam *ConnectivityAwareModel
 	if wrapper == "connectivity" {
@@ -301,7 +324,7 @@ func testCanonicalReplayWire(t *testing.T, wrapper string, canonical, stream boo
 	if got.Input != localCall("").Input {
 		t.Fatalf("the local call returned to the caller changed: %q", got.Input)
 	}
-	if got.Extra["call_id"] != "call_local" {
+	if got.Extra["call_id"] != localID {
 		t.Fatalf("marking dropped the provider's metadata: %v", got.Extra)
 	}
 	checkUnmarked(t, &local.call)
@@ -332,11 +355,20 @@ func testCanonicalReplayWire(t *testing.T, wrapper string, canonical, stream boo
 	if canonical {
 		wantLocal = canonicalLocalInput
 	}
-	if args["call_local"] != wantLocal {
-		t.Errorf("local call reached the cloud as %q, want %q", args["call_local"], wantLocal)
+	if args[localID] != wantLocal {
+		t.Errorf("local call reached the cloud as %q, want %q", args[localID], wantLocal)
 	}
-	if args["call_cloud"] != `{"path": "b.go", "content": "package b\n"}` {
-		t.Errorf("the cloud's own call changed on the wire: %q", args["call_cloud"])
+	if args[cloudCallID] != `{"path": "b.go", "content": "package b\n"}` {
+		t.Errorf("the cloud's own call changed on the wire: %q", args[cloudCallID])
+	}
+	// The local call's ID is not a Responses item ID: it goes out as
+	// call_id only. The cloud's own call keeps its item ID.
+	ids := itemIDs(bodies[0])
+	if id, present := ids[localID]; present {
+		t.Errorf("the local call went out with item id %v", id)
+	}
+	if ids[cloudCallID] != cloudItemID {
+		t.Errorf("the cloud's own call went out with item id %v, want %s", ids[cloudCallID], cloudItemID)
 	}
 	if after := inputsOf(hist); fmt.Sprint(after) != fmt.Sprint(before) {
 		t.Errorf("the caller's history changed: %q -> %q", before, after)

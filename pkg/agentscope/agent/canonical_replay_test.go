@@ -31,7 +31,7 @@ func (l *localWriter) ChatStream(_ context.Context, _ []*message.Msg, _ ...model
 	ch := make(chan model.ChatResponse, 1)
 	if n == 1 {
 		ch <- model.ChatResponse{IsLast: true, StopReason: model.StopReasonToolCalls, Content: []message.ContentBlock{
-			message.ToolCallBlock{Type: "tool_call", ID: "call_local", Name: "write_file", Input: `{"path": "a.go", "content": "package a\n"}`},
+			message.ToolCallBlock{Type: "tool_call", ID: localID, Name: "write_file", Input: `{"path": "a.go", "content": "package a\n"}`},
 		}}
 	} else {
 		ch <- model.ChatResponse{IsLast: true, Content: []message.ContentBlock{message.TextBlock{Type: "text", Text: "local again"}}}
@@ -47,6 +47,10 @@ func (l *localWriter) Chat(ctx context.Context, msgs []*message.Msg, opts ...mod
 }
 
 func (l *localWriter) CountTokens([]*message.Msg, []model.ToolSchema) int { return 0 }
+
+// localID is a tool call ID in the form a vLLM server gives it, which is
+// not a Responses item ID.
+const localID = "chatcmpl-tool-7f3a9c2e1b4d"
 
 // TestCanonicalReplayThroughTheAgent runs a UnifiedAgent on a
 // ConnectivityAwareModel whose cloud is the real Responses adapter. The
@@ -115,9 +119,12 @@ func TestCanonicalReplayThroughTheAgent(t *testing.T) {
 	for _, it := range items {
 		m, _ := it.(map[string]any)
 		switch {
-		case m["type"] == "function_call" && m["call_id"] == "call_local":
+		case m["type"] == "function_call" && m["call_id"] == localID:
 			args, _ = m["arguments"].(string)
-		case m["type"] == "function_call_output" && m["call_id"] == "call_local":
+			if id, ok := m["id"]; ok {
+				t.Errorf("the local call went out with item id %v", id)
+			}
+		case m["type"] == "function_call_output" && m["call_id"] == localID:
 			answered = true
 		}
 	}
@@ -131,7 +138,7 @@ func TestCanonicalReplayThroughTheAgent(t *testing.T) {
 	var stored *message.ToolCallBlock
 	for _, m := range a.state.Context {
 		for _, b := range m.Content {
-			if c, ok := b.(message.ToolCallBlock); ok && c.ID == "call_local" {
+			if c, ok := b.(message.ToolCallBlock); ok && c.ID == localID {
 				stored = &c
 			}
 		}
