@@ -25,6 +25,12 @@ type HttpClient struct {
 
 // NewHttpClient creates an HTTP-based MCP client and initializes the session.
 func NewHttpClient(ctx context.Context, cfg *HttpConfig) (*HttpClient, error) {
+	if cfg.Timeout < 0 {
+		return nil, fmt.Errorf("mcp http: Timeout must be non-negative")
+	}
+	if cfg.ExecutionTimeout < 0 {
+		return nil, fmt.Errorf("mcp http: ExecutionTimeout must be non-negative")
+	}
 	timeout := 30 * time.Second
 	if cfg.Timeout > 0 {
 		timeout = time.Duration(cfg.Timeout) * time.Second

@@ -54,7 +54,7 @@ not establish availability in a particular published release.
 | GGUF | `Piccolo-4B-Q8_0.gguf`, 4,482,403,872 bytes |
 | GGUF SHA-256 | `1372d7521f1b570a0d9284115f7aca989b0ae15cc6dd62d7d125716fd860b69c` |
 
-Compare the [runtime release identity](https://github.com/agentscope-ai/QwenPaw/blob/b02e17b8cf3fdde484f33c6981321280a0417232/plugins/provider/local-llamacpp/runtime-release.json),
+Compare the [runtime release identity](https://github.com/agentscope-ai/QwenPaw/blob/e98928429e72b38fd92a0dc51ffd66e1b303faea/src/qwenpaw/local_models/runtime-release.json),
 [published archive manifest](https://download.qwenpaw.agentscope.io/files/models/llama_cpp/piccolo-v1/runtime-release.json)
 and [model manifest](https://github.com/agentscope-ai/Piccolo/blob/main/models/manifest.json).
 A stock llama.cpp or Ollama chat endpoint does not implement this Piccolo
