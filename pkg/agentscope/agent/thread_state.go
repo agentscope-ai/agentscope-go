@@ -193,6 +193,7 @@ func threadInputFrom(ctx context.Context) (uint64, bool) {
 // tagThreadInputLocked stamps a reply's user message with its thread seq and
 // raises the cursor. Caller holds a.mu.
 func (a *UnifiedAgent) tagThreadInputLocked(m *message.Msg, seq uint64) {
+	a.invalidateRetentionLocked()
 	if m.Metadata == nil {
 		m.Metadata = types.JSONObject{}
 	}
@@ -375,6 +376,7 @@ func (a *UnifiedAgent) checkCursorLocked(cursor uint64) error {
 
 // applyThreadUpdateLocked applies a validated update. Caller holds a.mu.
 func (a *UnifiedAgent) applyThreadUpdateLocked(u *ThreadUpdate) {
+	a.invalidateRetentionLocked()
 	if u.Reset {
 		a.state.Context = nil
 		a.state.Summary = ""
@@ -414,6 +416,7 @@ func (a *UnifiedAgent) applyThreadUpdateLocked(u *ThreadUpdate) {
 // covers and reports whether anything was removed. The context slice is
 // rebuilt rather than filtered in place: earlier snapshots may share it.
 func (a *UnifiedAgent) removeCoveredLocked(ps *PeerSummary) bool {
+	a.invalidateRetentionLocked()
 	kept := make([]*message.Msg, 0, len(a.state.Context))
 	for _, m := range a.state.Context {
 		if seq, ok := ThreadSeqOf(m); ok && ps.Covers(seq) && !holdsToolBlocks(m) {
@@ -448,6 +451,8 @@ func holdsToolBlocks(m *message.Msg) bool {
 // checkpoint. If persisting fails the error is returned, but the update stays
 // applied in memory; retry persistence with SaveCheckpoint.
 func (a *UnifiedAgent) ApplyThreadUpdate(ctx context.Context, u ThreadUpdate) error { //nolint:gocritic // the value parameter keeps the documented API
+	finishRetentionWrite := a.beginRetentionWrite()
+	defer finishRetentionWrite()
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -547,6 +552,7 @@ const threadSummaryAutoNum, threadSummaryAutoDen = 3, 8
 // summary over its new share is elided at once. It is safe for concurrent use.
 func (a *UnifiedAgent) SetThreadSummaryTokens(n int) {
 	a.mu.Lock()
+	a.invalidateRetentionLocked()
 	defer a.mu.Unlock()
 	a.threadSummaryTokens, a.threadSummarySet = n, true
 	a.boundOwnSummaryLocked()
@@ -636,6 +642,7 @@ func (a *UnifiedAgent) reserveTokens(cfg *ContextConfig, ctxSize int) int {
 // share is otherwise applied only when the next summary is written, and the
 // two would exceed the total until then. Caller holds a.mu.
 func (a *UnifiedAgent) boundOwnSummaryLocked() {
+	a.invalidateRetentionLocked()
 	if a.contextCfg == nil || a.state.Summary == "" {
 		return
 	}

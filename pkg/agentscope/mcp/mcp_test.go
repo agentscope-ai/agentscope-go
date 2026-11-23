@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/message"
@@ -423,5 +424,27 @@ func TestMergeToolkits(t *testing.T) {
 	schemas := merged.GetToolSchemas()
 	if len(schemas) != 2 {
 		t.Fatalf("expected 2 tools after merge, got %d", len(schemas))
+	}
+}
+
+func TestRejectNegativeTimeouts(t *testing.T) {
+	ctx := t.Context()
+	_, httpErr := NewHttpClient(ctx, &HttpConfig{Timeout: -1})
+	_, httpExecutionErr := NewHttpClient(ctx, &HttpConfig{ExecutionTimeout: -1})
+	_, stdioErr := NewStdioClient(ctx, &StdioConfig{ExecutionTimeout: -1})
+	_, toolkitErr := NewMCPToolkit(ctx, &mockMCPClient{}, WithExecutionTimeout(-1))
+	for _, tc := range []struct {
+		name  string
+		err   error
+		field string
+	}{
+		{"HTTP", httpErr, "Timeout"},
+		{"HTTP execution", httpExecutionErr, "ExecutionTimeout"},
+		{"stdio execution", stdioErr, "ExecutionTimeout"},
+		{"toolkit execution", toolkitErr, "ExecutionTimeout"},
+	} {
+		if tc.err == nil || !strings.Contains(tc.err.Error(), tc.field+" must be non-negative") {
+			t.Errorf("%s: got %v, want validation error for %s", tc.name, tc.err, tc.field)
+		}
 	}
 }

@@ -32,6 +32,44 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   See
   [canonical replay](docs/edge-deployment.md#replaying-the-local-models-tool-calls-experimental).
 
+### Fixed — Ollama structured output
+
+- Native Ollama now includes the thinking-disabled attempt in the structured
+  output fallback sequence.
+
+### Fixed — scheduler cancellation
+
+- `InMemoryScheduler` preserves the canceled status when a running callback
+  returns and skips callbacks for tasks canceled before they start.
+
+### Fixed — Gemini tool result IDs
+
+- Gemini adapter and formatter now carry nonempty tool-result IDs in
+  `functionResponse.id` (#138, item 22). Provider-issued `functionCall.id`
+  is preserved; calls and results echo the same ID, using the existing
+  generated ID when the provider omits one.
+
+### Fixed — explicit DeepSeek and Moonshot thinking
+
+- Honor `WithThinking(true, 0)` in DeepSeek and non-K3 Moonshot buffered and
+  streamed calls. Explicit enable now sends `thinking.type = "enabled"`
+  instead of omitting the option.
+
+### Fixed — Responses foreign tool-call IDs
+
+- The Responses adapter and public formatter now omit a function-call item's
+  optional `id` when the tool ID does not start with `fc`, preserving `call_id`
+  for result correlation. This avoids invalid item IDs when replaying tool
+  histories from other providers; existing `fc` item IDs remain unchanged.
+
+### Fixed — workspace session ID validation
+
+- `WorkspaceManager.GetOrCreate` now rejects session IDs that are empty, start
+  with a dot, or contain path separators, mirroring `Share`; the workspace
+  skill route maps an invalid ID to 400 instead of 500. This closes a path
+  traversal where a crafted `session_id` could create a workspace outside the
+  configured base directory.
+
 ### Fixed — DashScope TTS stream failures
 
 - DashScope realtime `SynthesizeStream` now emits a terminal `Response.Err`

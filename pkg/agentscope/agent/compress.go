@@ -268,6 +268,8 @@ func (a *UnifiedAgent) Compact(ctx context.Context) (bool, error) {
 // changed context length) rather than from the handler's return value, so the
 // middleware CompressHandler API stays untouched.
 func (a *UnifiedAgent) compressContextWithRatio(ctx context.Context, triggerOverride float64, force bool) (bool, error) {
+	finishRetentionWrite := a.beginRetentionWrite()
+	defer finishRetentionWrite()
 	if a.contextCfg == nil {
 		return false, nil
 	}
@@ -555,6 +557,8 @@ const defaultTruncationNotice = "<system-info>Some earlier messages were truncat
 // summary. The caller bounds recovery attempts, so a context that cannot be
 // shrunk below the window still fails.
 func (a *UnifiedAgent) recoverContextOverflow(ctx context.Context) {
+	finishRetentionWrite := a.beginRetentionWrite()
+	defer finishRetentionWrite()
 	a.mu.Lock()
 	limit := defaultToolResultLimit
 	ctxSize := 0
@@ -593,6 +597,7 @@ func (a *UnifiedAgent) recoverContextOverflow(ctx context.Context) {
 // in the conversation context in place. It reports whether anything changed.
 func (a *UnifiedAgent) truncateContextToolResults(limit int) bool {
 	a.mu.Lock()
+	a.invalidateRetentionLocked()
 	defer a.mu.Unlock()
 	changed := false
 	for _, msg := range a.state.Context {
@@ -1109,6 +1114,7 @@ func cleanReadCacheForReserved(rc *tool.ReadCache, reservedMsgs []*message.Msg) 
 // HintBlocks, matching Python's replacement rules.
 func (a *UnifiedAgent) limitContextImages(maxImages int) {
 	a.mu.Lock()
+	a.invalidateRetentionLocked()
 	defer a.mu.Unlock()
 
 	type imageRef struct {

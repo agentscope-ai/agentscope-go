@@ -138,10 +138,8 @@ func (s *InMemoryScheduler) run(ctx context.Context, entry *scheduledEntry) {
 			select {
 			case <-timer.C:
 			case <-ctx.Done():
-				s.setStatus(task.ID, StatusCanceled)
 				return
 			case <-s.closeCh:
-				s.setStatus(task.ID, StatusCanceled)
 				return
 			}
 		}
@@ -161,10 +159,8 @@ func (s *InMemoryScheduler) runRecurring(ctx context.Context, entry *scheduledEn
 			select {
 			case <-timer.C:
 			case <-ctx.Done():
-				s.setStatus(task.ID, StatusCanceled)
 				return
 			case <-s.closeCh:
-				s.setStatus(task.ID, StatusCanceled)
 				return
 			}
 		}
@@ -173,47 +169,57 @@ func (s *InMemoryScheduler) runRecurring(ctx context.Context, entry *scheduledEn
 	ticker := time.NewTicker(task.Interval)
 	defer ticker.Stop()
 
-	s.executeOnce(ctx, entry)
+	if !s.executeOnce(ctx, entry) {
+		return
+	}
 
 	for {
 		select {
 		case <-ticker.C:
-			s.executeOnce(ctx, entry)
+			if !s.executeOnce(ctx, entry) {
+				return
+			}
 		case <-ctx.Done():
-			s.setStatus(task.ID, StatusCanceled)
 			return
 		case <-s.closeCh:
-			s.setStatus(task.ID, StatusCanceled)
 			return
 		}
 	}
 }
 
-func (s *InMemoryScheduler) executeOnce(ctx context.Context, entry *scheduledEntry) {
-	s.setStatus(entry.task.ID, StatusRunning)
+// executeOnce returns false when the task can no longer start.
+func (s *InMemoryScheduler) executeOnce(ctx context.Context, entry *scheduledEntry) bool {
+	task := entry.task
+	id := task.ID
+	s.mu.Lock()
+	if s.closed || ctx.Err() != nil || s.tasks[id] != entry || task.Status == StatusCanceled {
+		s.mu.Unlock()
+		return false
+	}
+	task.Status = StatusRunning
+	s.mu.Unlock()
 
-	err := entry.fn(ctx, entry.task)
+	err := entry.fn(ctx, task)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	entry.task.LastRunAt = time.Now()
+	if s.tasks[id] != entry {
+		return true
+	}
+	task.LastRunAt = time.Now()
+	if task.Status == StatusCanceled {
+		return true
+	}
 	if err != nil {
-		entry.task.Status = StatusFailed
-		entry.task.Error = err.Error()
-	} else if entry.task.Interval == 0 {
-		entry.task.Status = StatusCompleted
+		task.Status = StatusFailed
+		task.Error = err.Error()
+	} else if task.Interval == 0 {
+		task.Status = StatusCompleted
 	} else {
-		entry.task.Status = StatusPending
+		task.Status = StatusPending
 	}
-}
-
-func (s *InMemoryScheduler) setStatus(taskID string, status TaskStatus) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if e, ok := s.tasks[taskID]; ok {
-		e.task.Status = status
-	}
+	return true
 }
 
 // Remove drops an already-fired task entry, releasing its context. It is a
@@ -230,7 +236,8 @@ func (s *InMemoryScheduler) Remove(taskID string) {
 	}
 }
 
-// Cancel stops a scheduled task.
+// Cancel marks a scheduled task canceled and signals its context. A running
+// callback can finish later without changing the canceled status.
 func (s *InMemoryScheduler) Cancel(_ context.Context, taskID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -265,7 +272,7 @@ func (s *InMemoryScheduler) List(_ context.Context) ([]*Task, error) {
 
 	tasks := make([]*Task, 0, len(s.tasks))
 	for _, e := range s.tasks {
-		// Copy each task: executeOnce/setStatus mutate task fields concurrently,
+		// Copy each task: scheduler operations mutate task fields concurrently,
 		// so handing out the live pointer (as Get avoids by copying) would race.
 		cp := *e.task
 		tasks = append(tasks, &cp)
@@ -286,8 +293,11 @@ func (s *InMemoryScheduler) Close() error {
 
 	for _, e := range s.tasks {
 		e.cancel()
-		if e.task.Status == StatusPending || e.task.Status == StatusRunning {
-			e.task.Status = StatusCanceled
+		task := e.task
+		// A failed recurring task is still scheduled for its next run.
+		if task.Status == StatusPending || task.Status == StatusRunning ||
+			(task.Status == StatusFailed && task.Interval > 0) {
+			task.Status = StatusCanceled
 		}
 	}
 
