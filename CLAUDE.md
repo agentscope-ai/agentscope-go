@@ -309,6 +309,13 @@ request timeout and relies on the caller's context. Do not assume this describes
 every provider-specific transport. Tests for longer calls must cover cancellation
 as well as successful completion.
 
+`ConnectivityAwareModel` with `WithCanonicalReplay` and
+`FallbackChatModel.CanonicalReplay` (experimental) mark tool calls written by
+a less preferred member in `ToolCallBlock.Extra` and rewrite their arguments
+as sorted compact JSON only in the copy sent to a more preferred one; stored
+messages and each member's own calls stay as written. See
+[canonical replay](docs/edge-deployment.md#replaying-the-local-models-tool-calls-experimental).
+
 `SecretStr` and `ResolveAPIKey` support credential handling in provider configs.
 Keep keys out of logs, errors and test fixtures committed to the repository.
 `GenerateStructuredOutput` uses tool calling; its fallback and retry behavior
