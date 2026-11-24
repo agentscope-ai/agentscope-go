@@ -81,6 +81,8 @@ type UnifiedAgent struct {
 	retentionVersion       retentionVersion
 	retentionWriters       uint64
 	retentionTracking      bool
+	retentionOwned         *retentionOwnership
+	retentionRestored      bool
 
 	// lastModelInputTokens is the provider-reported input size of the most
 	// recent successful model call. It grounds the compression trigger:
@@ -291,7 +293,10 @@ func WithStateSaver(s StateSaver) AgentOption {
 }
 
 func WithState(state *AgentState) AgentOption {
-	return func(a *UnifiedAgent) { a.state = state }
+	return func(a *UnifiedAgent) {
+		a.state = state
+		a.retentionRestored = true
+	}
 }
 
 // WithMiddlewares sets the middleware chain for the agent.
@@ -483,6 +488,13 @@ func (a *UnifiedAgent) Reply(ctx context.Context, input string) (*message.Msg, e
 	for i := len(a.state.Context) - 1; i >= 0; i-- {
 		msg := a.state.Context[i]
 		if replyID != "" && msg.ID == replyID && msg.Role == message.RoleAssistant && msg.Name == a.name {
+			if a.retentionOwned != nil {
+				v, err := a.retentionCopyLocked(ctx, msg)
+				if err != nil {
+					return nil, err
+				}
+				return v.(*message.Msg), nil
+			}
 			return msg, nil
 		}
 	}
@@ -663,6 +675,16 @@ func (a *UnifiedAgent) coreFinished() {
 // orphans the call. When a Conversation is active, use Conversation.Submit
 // instead — it injects only at the certified StateReason boundary.
 func (a *UnifiedAgent) Observe(ctx context.Context, msgs []*message.Msg) error {
+	if a.retentionOwned != nil {
+		a.mu.Lock()
+		v, err := a.retentionCopyLocked(ctx, msgs)
+		a.mu.Unlock()
+		if err != nil {
+			return err
+		}
+		msgs = v.([]*message.Msg)
+	}
+
 	for _, m := range msgs {
 		if m == nil {
 			continue

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"strings"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/message"
@@ -18,6 +19,13 @@ func (a *UnifiedAgent) getLastAssistantMsg() *message.Msg {
 	}
 	last := a.state.Context[len(a.state.Context)-1]
 	if last.Role == message.RoleAssistant && last.Name == a.name {
+		if a.retentionOwned != nil {
+			v, err := a.retentionCopyLocked(context.Background(), last)
+			if err == nil {
+				return v.(*message.Msg)
+			}
+			a.retentionOwned.invalid = true
+		}
 		return last
 	}
 	return nil
@@ -146,6 +154,14 @@ func (a *UnifiedAgent) saveToContext(blocks []message.ContentBlock, usage *model
 	a.mu.Lock()
 	a.invalidateRetentionLocked()
 	defer a.mu.Unlock()
+	if a.retentionOwned != nil {
+		v, err := a.retentionCopyLocked(context.Background(), persisted)
+		if err != nil {
+			a.retentionOwned.invalid = true
+		} else {
+			persisted = v.([]message.ContentBlock)
+		}
+	}
 
 	if len(a.state.Context) > 0 {
 		last := a.state.Context[len(a.state.Context)-1]
