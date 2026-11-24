@@ -212,7 +212,10 @@ GetOutputText accessor still returns only the first text block.
 
 `model.ChatModel` defines `Chat`, `ChatStream` and `CountTokens`. Provider adapters
 live in `model/`; OpenAI Chat Completions and Responses have separate
-implementations. The shared Chat Completions parser retains normalized finish reasons in both
+implementations. Responses input conversion lives in
+`formatter/openai_response.go`; the provider reuses the public formatter while
+retaining request construction and response parsing in `model`. The shared
+Chat Completions parser retains normalized finish reasons in both
 buffered and streamed responses; providers retain their own usage semantics.
 Shared types or options do not prove that every provider
 serializes a field or interprets it identically. Trace request construction and
@@ -308,6 +311,13 @@ zero does not disable it. The shared SSE helper removes the client's total
 request timeout and relies on the caller's context. Do not assume this describes
 every provider-specific transport. Tests for longer calls must cover cancellation
 as well as successful completion.
+
+`ConnectivityAwareModel` with `WithCanonicalReplay` and
+`FallbackChatModel.CanonicalReplay` (experimental) mark tool calls written by
+a less preferred member in `ToolCallBlock.Extra` and rewrite their arguments
+as sorted compact JSON only in the copy sent to a more preferred one; stored
+messages and each member's own calls stay as written. See
+[canonical replay](docs/edge-deployment.md#replaying-the-local-models-tool-calls-experimental).
 
 `SecretStr` and `ResolveAPIKey` support credential handling in provider configs.
 Keep keys out of logs, errors and test fixtures committed to the repository.

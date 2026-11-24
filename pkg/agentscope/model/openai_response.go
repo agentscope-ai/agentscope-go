@@ -70,7 +70,10 @@ func (m *openaiResponseModel) Chat(ctx context.Context, msgs []*message.Msg, opt
 		opt(&o)
 	}
 
-	body := m.buildRequestBody(msgs, &o, false)
+	body, err := m.buildRequestBody(msgs, &o, false)
+	if err != nil {
+		return nil, err
+	}
 
 	respBody, err := m.doRequest(ctx, body)
 	if err != nil {
@@ -92,7 +95,10 @@ func (m *openaiResponseModel) ChatStream(ctx context.Context, msgs []*message.Ms
 		opt(&o)
 	}
 
-	body := m.buildRequestBody(msgs, &o, true)
+	body, err := m.buildRequestBody(msgs, &o, true)
+	if err != nil {
+		return nil, err
+	}
 
 	respBody, err := m.doRequest(ctx, body)
 	if err != nil {
@@ -111,26 +117,22 @@ func (m *openaiResponseModel) CountTokens(msgs []*message.Msg, tools []ToolSchem
 func (m *openaiResponseModel) ContextSize() int  { return 200000 }
 func (m *openaiResponseModel) ModelName() string { return m.cfg.Model }
 
-func (m *openaiResponseModel) buildRequestBody(msgs []*message.Msg, opts *CallOptions, stream bool) map[string]any {
+func (m *openaiResponseModel) buildRequestBody(msgs []*message.Msg, opts *CallOptions, stream bool) (map[string]any, error) {
 	body := map[string]any{
 		"model":  m.cfg.Model,
 		"stream": stream,
 	}
 
-	// Convert messages to input items
-	var input []map[string]any
-	callIDs := make(map[string]string)
+	input, err := formatter.NewOpenAIResponseFormatter().Format(msgs)
+	if err != nil {
+		return nil, fmt.Errorf("openai response: format input: %w", err)
+	}
 	for _, msg := range msgs {
-		if msg == nil {
-			continue
-		}
-		if msg.Role == message.RoleSystem {
+		if msg != nil && msg.Role == message.RoleSystem {
 			if txt := msg.GetTextContent("\n"); txt != nil {
 				body["instructions"] = *txt
 			}
-			continue
 		}
-		input = append(input, m.formatInputItemsWithCallIDs(msg, callIDs)...)
 	}
 	body["input"] = input
 
@@ -171,171 +173,11 @@ func (m *openaiResponseModel) buildRequestBody(msgs []*message.Msg, opts *CallOp
 		}
 	}
 
-	return body
-}
-
-// formatInputItems converts one Msg into zero or more Responses API input
-// items. Unlike a one-item-per-message mapping, this preserves multi-block
-// turns faithfully (upstream #2426 and the #2389 family):
-//   - a ThinkingBlock carrying Extra["responses_item"] replays the original
-//     reasoning item (including encrypted_content) so stateless reasoning
-//     continues across turns;
-//   - every ToolCallBlock becomes its own function_call item (previously
-//     only the first survived);
-//   - every ToolResultBlock becomes its own function_call_output item;
-//   - accumulated text is flushed as a message item before the tool calls
-//     that follow it, matching the API's segment ordering.
-func (m *openaiResponseModel) formatInputItems(msg *message.Msg) []map[string]any {
-	return m.formatInputItemsWithCallIDs(msg, make(map[string]string))
-}
-
-// callIDs is request-local: results keep their library correlation ID while
-// the wire uses the original provider call ID from preceding call items.
-func (m *openaiResponseModel) formatInputItemsWithCallIDs(msg *message.Msg, callIDs map[string]string) []map[string]any {
-	role := string(msg.Role)
-
-	blocks := msg.GetContentBlocks()
-	if len(blocks) == 0 {
-		return []map[string]any{{"role": role, "content": ""}}
-	}
-
-	var items []map[string]any
-	var content []map[string]any
-
-	flushContent := func() {
-		if len(content) == 0 {
-			return
-		}
-		if len(content) == 1 {
-			if text, ok := content[0]["text"].(string); ok && content[0]["type"] == "input_text" {
-				items = append(items, map[string]any{"role": role, "content": text})
-			} else {
-				items = append(items, map[string]any{"role": role, "content": content})
-			}
-		} else {
-			items = append(items, map[string]any{"role": role, "content": content})
-		}
-		content = nil
-	}
-
-	for _, b := range blocks {
-		switch blk := b.(type) {
-		case message.ThinkingBlock:
-			raw, ok := blk.Extra["responses_item"].(map[string]any)
-			if !ok || len(raw) == 0 {
-				// A plain thinking block cannot be replayed, and an empty
-				// map would serialize to "{}" and get the whole request
-				// rejected by the API.
-				continue
-			}
-			flushContent() // reasoning starts a new output segment
-			items = append(items, stripJSONNullsMap(raw))
-		case message.TextBlock:
-			content = append(content, map[string]any{
-				"type": "input_text",
-				"text": blk.Text,
-			})
-		case message.DataBlock:
-			if part := responsesInputImage(blk); part != nil {
-				content = append(content, part)
-			}
-		case message.HintBlock:
-			// Hints are user input, including when attached to an assistant
-			// turn. Keep their position between the surrounding segments.
-			flushContent()
-			switch hint := blk.Hint.(type) {
-			case string:
-				items = append(items, map[string]any{"role": "user", "content": hint})
-			case []message.ContentBlock:
-				var parts []map[string]any
-				for _, sub := range hint {
-					switch h := sub.(type) {
-					case message.TextBlock:
-						parts = append(parts, map[string]any{"type": "input_text", "text": h.Text})
-					case message.DataBlock:
-						if part := responsesInputImage(h); part != nil {
-							parts = append(parts, part)
-						}
-					}
-				}
-				if len(parts) > 0 {
-					items = append(items, map[string]any{"role": "user", "content": parts})
-				}
-			}
-		case message.ToolCallBlock:
-			flushContent()
-			callID := responsesCallID(blk.Extra, blk.ID)
-			callIDs[blk.ID] = callID
-			item := map[string]any{
-				"type":      "function_call",
-				"call_id":   callID,
-				"name":      blk.Name,
-				"arguments": blk.Input,
-			}
-			// Foreign tool IDs remain valid correlation IDs, but are not
-			// Responses item IDs. Omit the optional item ID when replaying them.
-			if strings.HasPrefix(blk.ID, "fc") {
-				item["id"] = blk.ID
-			}
-			items = append(items, item)
-		case message.ToolResultBlock:
-			flushContent()
-			callID := blk.ID
-			if original, ok := callIDs[blk.ID]; ok {
-				callID = original
-			}
-			items = append(items, map[string]any{
-				"type":    "function_call_output",
-				"call_id": responsesCallID(blk.Metadata, callID),
-				"output":  formatToolResultOutput(&blk),
-			})
-		}
-	}
-	flushContent()
-	if len(items) == 0 {
-		// Every block was of a type the Responses API cannot carry here
-		// (audio, unsupported sources, ...).
-		// Emitting nothing would silently drop the turn from the
-		// conversation; the old one-item-per-message mapping produced
-		// {"role":...,"content":null} and the API rejected it loudly. Keep
-		// the turn visible with an explicit note instead of losing it.
-		return []map[string]any{{
-			"role":    role,
-			"content": "[content omitted: this turn carried only block types the Responses API cannot replay]",
-		}}
-	}
-	return items
-}
-
-// responsesInputImage preserves image sources without fetching or decoding them.
-// Other media keep the adapter's existing omission policy.
-func responsesInputImage(block message.DataBlock) map[string]any {
-	if !strings.HasPrefix(block.GetMediaType(), "image/") {
-		return nil
-	}
-	var url string
-	switch src := block.Source.(type) {
-	case message.URLSource:
-		url = src.URL
-	case message.Base64Source:
-		url = "data:" + src.MediaType + ";base64," + src.Data
-	default:
-		return nil
-	}
-	return map[string]any{"type": "input_image", "image_url": url}
-}
-
-// responsesCallID accepts only nonempty provider IDs. Old histories and
-// compatible servers without this metadata retain their existing ID fallback.
-func responsesCallID(metadata map[string]any, fallback string) string {
-	if id, ok := metadata["call_id"].(string); ok && id != "" {
-		return id
-	}
-	return fallback
+	return body, nil
 }
 
 func responsesCallExtra(item map[string]any) map[string]any {
-	if id := responsesCallID(item, ""); id != "" {
+	if id, ok := item["call_id"].(string); ok && id != "" {
 		return map[string]any{"call_id": id}
 	}
 	return nil
@@ -369,7 +211,7 @@ func reasoningItemSummaryText(item map[string]any) string {
 //
 // Order matters and must match parseResponse (the non-streaming path), which
 // walks the response's output array in order: reasoning items, then text, then
-// tool calls. formatInputItems replays history in the order the blocks appear,
+// tool calls. The shared formatter replays history in block order,
 // so emitting text first would replay as message(text) -> reasoning: a
 // reasoning item with nothing after it. That is exactly the shape upstream
 // #2426 exists to prevent, and it broke encrypted-reasoning replay because the
@@ -755,52 +597,4 @@ scanLoop:
 		final.Error = fmt.Errorf("openai response: stream ended without response.completed (truncated)")
 	}
 	send(final)
-}
-
-// formatToolResultOutput renders a tool result for the Responses API
-// (upstream #2389): when the result carries image data blocks, the output
-// becomes native content parts (input_text / input_image) instead of being
-// flattened to text; plain results stay a single string.
-func formatToolResultOutput(blk *message.ToolResultBlock) any {
-	list, ok := blk.Output.([]message.ContentBlock)
-	if !ok {
-		return formatter.ConvertToolResultToString(blk.Output)
-	}
-	hasImage := false
-	for _, sub := range list {
-		if db, ok := sub.(message.DataBlock); ok && strings.HasPrefix(db.GetMediaType(), "image/") {
-			hasImage = true
-			break
-		}
-	}
-	if !hasImage {
-		return formatter.ConvertToolResultToString(blk.Output)
-	}
-	parts := make([]map[string]any, 0, len(list))
-	for _, sub := range list {
-		switch b := sub.(type) {
-		case message.TextBlock:
-			parts = append(parts, map[string]any{"type": "input_text", "text": b.Text})
-		case message.DataBlock:
-			if !strings.HasPrefix(b.GetMediaType(), "image/") {
-				parts = append(parts, map[string]any{"type": "input_text", "text": formatter.ConvertToolResultToString([]message.ContentBlock{b})})
-				continue
-			}
-			switch src := b.Source.(type) {
-			case message.URLSource:
-				parts = append(parts, map[string]any{"type": "input_image", "image_url": src.URL})
-			case message.Base64Source:
-				parts = append(parts, map[string]any{
-					"type":      "input_image",
-					"image_url": "data:" + src.MediaType + ";base64," + src.Data,
-				})
-			default:
-				parts = append(parts, map[string]any{"type": "input_text", "text": formatter.ConvertToolResultToString([]message.ContentBlock{b})})
-			}
-		}
-	}
-	if len(parts) == 0 {
-		return formatter.ConvertToolResultToString(blk.Output)
-	}
-	return parts
 }
