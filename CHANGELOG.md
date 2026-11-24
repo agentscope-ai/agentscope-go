@@ -11,6 +11,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Added — Jev model selection
+
+- Jev supports an explicit model override for ordinary classification without
+  changing the client's configured model or managed dispatch target (#138, item 19).
+
 ### Added — canonical replay of a local model's tool calls (experimental)
 
 - `model.WithCanonicalReplay()` makes a `ConnectivityAwareModel` send the
