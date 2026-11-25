@@ -108,7 +108,7 @@ func (w *AppleContainerWorkspace) WriteFile(ctx context.Context, path string, da
 	// Ensure parent directory exists.
 	dir := fullPath[:strings.LastIndex(fullPath, "/")]
 	if dir != "" {
-		mkdirCmd := exec.CommandContext(ctx, "container", "exec", w.name, "--", "sh", "-c", fmt.Sprintf("mkdir -p %q", dir))
+		mkdirCmd := exec.CommandContext(ctx, "container", "exec", w.name, "--", "sh", "-c", fmt.Sprintf("mkdir -p %s", shellQuote(dir)))
 		if out, err := mkdirCmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("workspace: mkdir in container: %s: %w", strings.TrimSpace(string(out)), err)
 		}
