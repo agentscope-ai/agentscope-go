@@ -19,6 +19,14 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   component and a traversing ID can no longer write outside the target
   directory.
 
+### Fixed — bubblewrap workspace symlink confinement
+
+- `BubblewrapWorkspace.resolve` now resolves symlinks and re-checks containment,
+  mirroring `LocalWorkspace`. Because bubblewrap file operations run host-side,
+  a symlink planted inside the root (including a dangling link whose target
+  does not yet exist) could previously redirect host-side reads and writes
+  outside it; such paths now return `ErrPathEscape`.
+
 ### Fixed — Gemini tool history
 
 - Buffered and streamed Gemini requests preserve the text, tool calls, and
