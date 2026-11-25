@@ -344,3 +344,132 @@ func mustBubblewrapWorkspace(t *testing.T) *BubblewrapWorkspace {
 	}
 	return ws
 }
+
+func TestBubblewrapSymlinkEscapeBlocked(t *testing.T) {
+	parent := t.TempDir()
+	outside := filepath.Join(parent, "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("outside secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(parent, "root")
+	ws, err := NewBubblewrapWorkspace(BubblewrapConfig{RootDir: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	if err := os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(root, "link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := ws.ReadFile(ctx, "link"); !errors.Is(err, ErrPathEscape) {
+		t.Fatalf("read through an escaping symlink must be ErrPathEscape, got %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "dirlink")); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.WriteFile(ctx, "dirlink/pwned.txt", []byte("x")); !errors.Is(err, ErrPathEscape) {
+		t.Fatalf("write through an escaping symlinked dir must be ErrPathEscape, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "pwned.txt")); !os.IsNotExist(err) {
+		t.Fatal("no file may land outside via symlink")
+	}
+	if err := os.WriteFile(filepath.Join(root, "real.txt"), []byte("inside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "real.txt"), filepath.Join(root, "inner")); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := ws.ReadFile(ctx, "inner"); err != nil || string(data) != "inside" {
+		t.Fatalf("inner symlink must stay usable: %q %v", data, err)
+	}
+}
+
+func TestBubblewrapDanglingSymlinkWriteBlocked(t *testing.T) {
+	parent := t.TempDir()
+	outside := filepath.Join(parent, "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(parent, "root")
+	ws, err := NewBubblewrapWorkspace(BubblewrapConfig{RootDir: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := os.Symlink(filepath.Join(outside, "planted.txt"), filepath.Join(root, "dangle")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := ws.WriteFile(ctx, "dangle", []byte("escaped")); !errors.Is(err, ErrPathEscape) {
+		t.Fatalf("write through a dangling escaping symlink must be ErrPathEscape, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "planted.txt")); !os.IsNotExist(err) {
+		t.Fatal("no file may be created outside via a dangling symlink")
+	}
+	if err := os.Symlink(filepath.Join(root, "new.txt"), filepath.Join(root, "innerdangle")); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.WriteFile(ctx, "innerdangle", []byte("inside")); err != nil {
+		t.Fatalf("inner dangling symlink write must stay usable: %v", err)
+	}
+}
+
+func TestBubblewrapDanglingSymlinkChainBlocked(t *testing.T) {
+	parent := t.TempDir()
+	outside := filepath.Join(parent, "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(parent, "root")
+	ws, err := NewBubblewrapWorkspace(BubblewrapConfig{RootDir: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	outTarget := filepath.Join(outside, "planted.txt")
+
+	if err := os.Symlink("b", filepath.Join(root, "a")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(outTarget, filepath.Join(root, "b")); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.WriteFile(ctx, "a", []byte("escaped")); !errors.Is(err, ErrPathEscape) {
+		t.Fatalf("relative-first dangling chain must be ErrPathEscape, got %v", err)
+	}
+	if err := os.Symlink(filepath.Join(root, "d"), filepath.Join(root, "c")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outTarget, filepath.Join(root, "d")); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.WriteFile(ctx, "c", []byte("escaped")); !errors.Is(err, ErrPathEscape) {
+		t.Fatalf("absolute-first dangling chain must be ErrPathEscape, got %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("sub/f", filepath.Join(root, "e")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outTarget, filepath.Join(root, "sub", "f")); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.WriteFile(ctx, "e", []byte("escaped")); !errors.Is(err, ErrPathEscape) {
+		t.Fatalf("via-subdir dangling chain must be ErrPathEscape, got %v", err)
+	}
+	if _, err := os.Stat(outTarget); !os.IsNotExist(err) {
+		t.Fatal("no file may be created outside via a dangling chain")
+	}
+	if err := os.Symlink("h", filepath.Join(root, "g")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "new.txt"), filepath.Join(root, "h")); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.WriteFile(ctx, "g", []byte("inside")); err != nil {
+		t.Fatalf("inner dangling chain write must stay usable: %v", err)
+	}
+}

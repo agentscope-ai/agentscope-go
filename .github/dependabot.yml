@@ -6,6 +6,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
   # Keep the digest-pinned reference Dockerfile images current.
   - package-ecosystem: docker
     directory: /

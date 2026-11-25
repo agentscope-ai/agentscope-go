@@ -38,3 +38,11 @@ agentscope-go includes tools that can execute shell commands (`Bash` tool) and r
   [STABILITY.md, Open hardening work](STABILITY.md#open-hardening-work)
 - Never expose the Agent Service HTTP endpoints without authentication
 - Rotate API keys regularly and use `SecretStr` to prevent key leakage in logs
+
+## Code-scanning dispositions
+
+By-design capabilities, existing mitigations, and false positives in the
+code-scanning tab are recorded in
+[docs/code-scanning-dispositions.md](docs/code-scanning-dispositions.md), which
+is cited when such an alert is dismissed. Confirmed exploitable issues are still
+reported privately as above.
