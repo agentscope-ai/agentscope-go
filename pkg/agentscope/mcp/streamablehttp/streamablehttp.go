@@ -9,11 +9,13 @@ package streamablehttp
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -158,6 +160,9 @@ func (c *Client) ListTools(ctx context.Context) ([]model.ToolSchema, error) {
 			},
 		})
 	}
+	slices.SortStableFunc(schemas, func(a, b model.ToolSchema) int {
+		return cmp.Compare(a.Function.Name, b.Function.Name)
+	})
 	return schemas, nil
 }
 

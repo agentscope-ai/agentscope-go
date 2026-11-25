@@ -238,6 +238,77 @@ func TestListTools_Mapping(t *testing.T) {
 	}
 }
 
+func TestListTools_SortedByName(t *testing.T) {
+	listings := [][]map[string]any{
+		{
+			{"name": "zeta", "description": "Z", "inputSchema": map[string]any{"type": "object"}},
+			{"name": "alpha", "description": "A", "inputSchema": map[string]any{"type": "object"}},
+			{"name": "mu", "description": "M", "inputSchema": map[string]any{"type": "object"}},
+		},
+		{
+			{"name": "mu", "description": "M", "inputSchema": map[string]any{"type": "object"}},
+			{"name": "zeta", "description": "Z", "inputSchema": map[string]any{"type": "object"}},
+			{"name": "alpha", "description": "A", "inputSchema": map[string]any{"type": "object"}},
+		},
+	}
+	listCalls := 0
+	rawSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			JSONRPC string `json:"jsonrpc"`
+			ID      any    `json:"id"`
+			Method  string `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.ID == nil {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		var result any
+		switch req.Method {
+		case "initialize":
+			result = map[string]any{
+				"protocolVersion": "2025-03-26",
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+				"serverInfo":      map[string]any{"name": "shuffled", "version": "0.1"},
+			}
+		case "tools/list":
+			tools := listings[listCalls%len(listings)]
+			listCalls++
+			result = map[string]any{"tools": tools}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"result":  result,
+		})
+	}))
+	t.Cleanup(rawSrv.Close)
+
+	c := mustClient(t, rawSrv, &Config{ProtocolVersion: "2025-03-26"})
+	want := []string{"alpha", "mu", "zeta"}
+	for round := range 2 {
+		schemas, err := c.ListTools(context.Background())
+		if err != nil {
+			t.Fatalf("round %d ListTools: %v", round, err)
+		}
+		got := make([]string, len(schemas))
+		for i, s := range schemas {
+			got[i] = s.Function.Name
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("round %d ListTools names = %v, want %v", round, got, want)
+		}
+	}
+}
+
 func TestCallTool_TextResult(t *testing.T) {
 	srv := newFixtureServer(t)
 	c := mustClient(t, srv, nil)
