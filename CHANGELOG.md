@@ -11,6 +11,14 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — turn statistics data race
+
+- The `turn_stats` event copies the reply's statistics under the agent's lock
+  before reading them. A reply started while a canceled reply's tool was
+  still running shares the statistics with that reply's core, which records
+  into them under the lock; the race detector reported the unlocked read.
+  The two replies' counts still mix in that case.
+
 ### Fixed — file-tool workspace jail confinement
 
 - `view_text_file`, `Glob`, and `LSP` now resolve paths through the workspace
