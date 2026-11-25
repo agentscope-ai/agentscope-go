@@ -210,6 +210,18 @@ func (f *Factory) registerBuiltins() {
 		},
 	}
 
+	f.constructors["typesafe"] = func(m map[string]string) (Credential, error) {
+		return &TypeSafeCredential{Key: m["api_key"], URL: m["base_url"]}, nil
+	}
+	f.schemas["typesafe"] = CredentialSchema{
+		Provider:    "typesafe",
+		Description: "TypeSafe System One classifier credentials",
+		Fields: []FieldSchema{
+			{Name: "api_key", Description: "API key", Required: true, Secret: true},
+			{Name: "base_url", Description: "Full evaluation endpoint override"},
+		},
+	}
+
 	f.constructors["kimi"] = func(m map[string]string) (Credential, error) {
 		return &KimiCredential{Key: m["api_key"], URL: m["base_url"]}, nil
 	}
