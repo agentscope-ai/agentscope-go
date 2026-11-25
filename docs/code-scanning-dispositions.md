@@ -68,16 +68,20 @@ ever added.
 This rule fires on any user-influenced path reaching a filesystem operation.
 The cluster splits into three groups:
 
-1. **Genuine gaps — pending fixes, do NOT dismiss at `b81fddf`.** The guards are
-   absent from this revision; open PRs add them:
+1. **Genuine gaps at `b81fddf` — fixes now landed.** The guards were absent from
+   `b81fddf`; the fixes have since merged, and the original alerts are re-triaged
+   under Post-fix re-flags below:
    - workspace-creation ID validation (`app.WorkspaceManager.GetOrCreate`) —
      #191, **merged at `4dec635`**; alert #78 re-flagged on main and is triaged
      under Post-fix re-flags below;
-   - bubblewrap symlink + dangling-chain confinement — #192;
-   - hub installer card-ID validation (`SkillHub`/`MCPHub.Install`) — #193;
+   - bubblewrap symlink + dangling-chain confinement — #192, **merged at
+     `feb0a92`**; original alerts #74-#77 re-flagged on main, triaged below;
+   - hub installer card-ID validation (`SkillHub`/`MCPHub.Install`) — #193,
+     **merged at `4d53b5a`**;
    - file-tool jail confinement (`view_text_file`/`Glob`/`LSP` routed through
-     `resolvePath`) — #195. At `b81fddf` these three tools ignore the jail even
-     when a root is configured.
+     `resolvePath`) — #195, **merged at `1e46758`**; original alerts
+     #57/#58/#63/#70 re-flagged on main, triaged below. At `b81fddf` these three
+     tools ignored the jail even when a root was configured.
 2. **Guarded by design** (dismiss with this note, citing the base revision):
    - `pkg/agentscope/skill/store.go`: `validateAgentID`/`validSkillDirName` reject
      leading dots and separators (lexical traversal guards, not a positive
@@ -151,6 +155,22 @@ that is re-triaged when the fix merges and main is re-analyzed.
   `shellQuote` is not a modeled sanitizer. The commands run **inside the
   container** (the trust boundary). Disposition: **false positive** (correctly
   quoted; container-scoped).
+
+- **bubblewrap file sinks (PR #192, alerts #74/#75/#76/#77 on main `1e46758`)**:
+  the `os.MkdirAll`/`os.WriteFile`/`os.ReadFile`/`os.ReadDir` sinks
+  (`bubblewrap.go:106/110/119/129`) are all fed by `w.resolve`, which now applies
+  separator-aware lexical containment plus `evalSymlinksLenient` and the
+  dangling-chain peel (#192). CodeQL does not model `resolve` as a sanitizer, so
+  the sinks re-flagged on main after the merge. Disposition: **false positive**
+  (confinement guard present at `1e46758`).
+- **file-tool jail sinks (PR #195, alerts #57/#58/#63/#70 on main `1e46758`)**:
+  `view_text_file`'s `os.Stat`/`os.ReadFile` (`builtin.go:138/152`), Glob's
+  `os.Stat` (`builtin_glob.go:87`, with `confineGlobMatches` dropping out-of-root
+  matches) and the LSP `didOpen` `os.ReadFile` (`lsp/server.go:100`) are fed by
+  `resolvePath`, which routes through the workspace jail when a root is set
+  (#195). CodeQL does not model `resolvePath` as a sanitizer. The jail is opt-in;
+  with no root configured the tools are unconfined by design. Disposition:
+  **false positive** (jail guard present at `1e46758`; opt-in confinement).
 
 ## OpenSSF Scorecard
 
