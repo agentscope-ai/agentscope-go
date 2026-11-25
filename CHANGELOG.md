@@ -11,6 +11,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — Gemini tool history
+
+- Buffered and streamed Gemini requests preserve the text, tool calls, and
+  tool-call thought signatures in agent replies that contain tool results (#208).
+
 ### Added — Jev model selection
 
 - Jev supports an explicit model override for ordinary classification without
