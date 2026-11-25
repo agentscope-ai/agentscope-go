@@ -257,7 +257,11 @@ cm, _ := model.NewGeminiChatModel(model.GeminiConfig{
 Models: `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-flash-preview`, `gemini-3.1-pro-preview`
 
 Gemini preserves provider-issued tool-call IDs and replays the same ID on
-`functionCall` and `functionResponse`; absent IDs use the existing generated ID.
+`functionCall` and `functionResponse`. When the provider omits the ID, the adapter
+generates one. For a stored reply with text, calls, and results, the adapter sends
+model text and calls in order, then sends consecutive results as user content.
+Later model text starts a new model entry. Any call's thought signature stays on
+its original call part. This projection leaves the stored reply intact.
 The adapter targets the Gemini Developer API. Custom `BaseURL` endpoints must
 accept these ID fields; Vertex-style endpoint compatibility is not guaranteed.
 
