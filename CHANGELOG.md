@@ -11,12 +11,37 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
-### Fixed — embedding
+### Fixed — file-tool workspace jail confinement
 
-- `OpenAICompatEmbeddingModel` rejects responses whose embedding count differs
-  from the batch input count without caching them, and refetches cached entries
-  whose vector count does not match the input count (#138, item 24; Python
-  [#4234](https://github.com/agentscope-ai/agentscope/pull/4234)).
+- `view_text_file`, `Glob`, and `LSP` now resolve paths through the workspace
+  jail (`resolvePath`), so they honor `WithWorkspaceRoot` like the other file
+  tools instead of bypassing it. `Glob` also filters matches to the base
+  directory (symlink-aware), so a traversing pattern or an inner symlink cannot
+  list paths outside it.
+
+### Fixed — container workspace shell quoting
+
+- Docker and Apple container file operations now single-quote paths with
+  `shellQuote` instead of `%q`. Go's `%q` escapes double quotes and backslashes but leaves `$` and backtick
+  command substitution active inside shell double quotes, so a path containing
+  such metacharacters could trigger command substitution inside the container;
+  single-quoting neutralizes them.
+
+### Fixed — hub installer ID validation
+
+- `SkillHub.Install` and `MCPHub.Install` now validate the card ID against a
+  safe directory-name charset (the guard `ClawHub` uses). The charset excludes
+  path separators and rejects `.`/`..`, so the ID is a single safe path
+  component and a traversing ID can no longer write outside the target
+  directory.
+
+### Fixed — bubblewrap workspace symlink confinement
+
+- `BubblewrapWorkspace.resolve` now resolves symlinks and re-checks containment,
+  mirroring `LocalWorkspace`. Because bubblewrap file operations run host-side,
+  a symlink planted inside the root (including a dangling link whose target
+  does not yet exist) could previously redirect host-side reads and writes
+  outside it; such paths now return `ErrPathEscape`.
 
 ### Fixed — Gemini tool history
 
@@ -354,6 +379,13 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 - Scope OpenAI-compatible and Gemini cache keys to their endpoint and adapter
   family so a shared cache cannot return a different endpoint's vectors. Entries
   written with old keys are repopulated on demand.
+
+### Fixed — embedding
+
+- `OpenAICompatEmbeddingModel` rejects responses whose embedding count differs
+  from the batch input count without caching them, and refetches cached entries
+  whose vector count does not match the input count (#138, item 24; Python
+  [#4234](https://github.com/agentscope-ai/agentscope/pull/4234)).
 
 ### Fixed — multi-agent message names for Chat Completions
 
