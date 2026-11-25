@@ -127,7 +127,7 @@ func (m *OpenAICompatEmbeddingModel) Embed(ctx context.Context, texts []string) 
 		key = endpointCacheKey("openai-compatible", m.baseURL, m.model, m.requestDimensions(), texts)
 	}
 	if key != "" {
-		if embeddings, ok := cache.Retrieve(key); ok {
+		if embeddings, ok := cache.Retrieve(key); ok && len(embeddings) == len(texts) {
 			return &EmbeddingResponse{
 				Embeddings: embeddings,
 				ID:         timestamp(),
@@ -179,7 +179,11 @@ func (m *OpenAICompatEmbeddingModel) callAPI(ctx context.Context, texts []string
 		return nil, fmt.Errorf("embedding API call failed: %w", err)
 	}
 
-	sort.Slice(resp.Data, func(i, j int) bool {
+	if len(resp.Data) != len(texts) {
+		return nil, fmt.Errorf("embedding API returned %d embeddings for %d inputs", len(resp.Data), len(texts))
+	}
+
+	sort.SliceStable(resp.Data, func(i, j int) bool {
 		return resp.Data[i].Index < resp.Data[j].Index
 	})
 

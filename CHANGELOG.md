@@ -11,6 +11,13 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — embedding
+
+- `OpenAICompatEmbeddingModel` rejects responses whose embedding count differs
+  from the batch input count without caching them, and refetches cached entries
+  whose vector count does not match the input count (#138, item 24; Python
+  [#4234](https://github.com/agentscope-ai/agentscope/pull/4234)).
+
 ### Fixed — Gemini tool history
 
 - Buffered and streamed Gemini requests preserve the text, tool calls, and
