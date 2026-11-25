@@ -11,6 +11,14 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — hub installer ID validation
+
+- `SkillHub.Install` and `MCPHub.Install` now validate the card ID against a
+  safe directory-name charset (the guard `ClawHub` uses). The charset excludes
+  path separators and rejects `.`/`..`, so the ID is a single safe path
+  component and a traversing ID can no longer write outside the target
+  directory.
+
 ### Fixed — bubblewrap workspace symlink confinement
 
 - `BubblewrapWorkspace.resolve` now resolves symlinks and re-checks containment,
