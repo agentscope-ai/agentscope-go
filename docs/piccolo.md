@@ -36,7 +36,7 @@ with Piccolo-4B Q8_0. It was exercised on an M4 with 24 GiB unified memory and
 macOS 15.3.1. Model files require approximately 4.48 GB of disk space; this file
 size is not a runtime memory requirement. Other machines still need their own
 capacity and compatibility check. For other platforms, see the upstream
-[runtime guide](https://github.com/agentscope-ai/QwenPaw/blob/main/docs/local-piccolo.md).
+[runtime guide](https://github.com/agentscope-ai/QwenPaw/blob/main/plugins/provider/local-llamacpp/PICCOLO.md).
 
 The W0 environment configuration landed in [PR #111](https://github.com/agentscope-ai/agentscope-go/pull/111).
 Use a source checkout containing that change and this example; the commands do
