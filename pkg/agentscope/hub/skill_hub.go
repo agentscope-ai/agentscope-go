@@ -143,6 +143,11 @@ func (h *SkillHub) Install(ctx context.Context, cardID string, targetDir string)
 		return fmt.Errorf("hub: unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 
+	// validSlug excludes path separators and rejects "."/"..", so cardID is a
+	// single safe component and Join cannot escape targetDir.
+	if !validSlug(cardID) {
+		return fmt.Errorf("hub: invalid skill id %q", cardID)
+	}
 	destDir := filepath.Join(targetDir, cardID)
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return fmt.Errorf("hub: create target dir: %w", err)
