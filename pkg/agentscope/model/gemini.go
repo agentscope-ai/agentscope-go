@@ -167,66 +167,7 @@ func (m *GeminiChatModel) buildRequest(msgs []*message.Msg, callOpts *CallOption
 			continue
 		}
 
-		geminiRole := "user"
-		if role == "assistant" {
-			geminiRole = "model"
-		}
-
-		var parts []geminiPart
-
-		// Tool results
-		toolResults := msg.GetContentBlocks(message.ContentBlockToolResult)
-		if len(toolResults) > 0 {
-			for _, tr := range toolResults {
-				trb := tr.(message.ToolResultBlock)
-				responseKey := "result"
-				if trb.State == message.ToolResultError {
-					responseKey = "error"
-				}
-				parts = append(parts, geminiPart{
-					FunctionResponse: &geminiFunctionResponse{
-						Name: trb.Name,
-						Response: map[string]any{
-							responseKey: formatter.ConvertToolResultToString(trb.Output),
-						},
-					},
-				})
-			}
-			contents = append(contents, geminiContent{Role: "user", Parts: parts})
-			continue
-		}
-
-		// Tool calls
-		toolCalls := msg.GetContentBlocks(message.ContentBlockToolCall)
-		if len(toolCalls) > 0 {
-			for _, tc := range toolCalls {
-				tcb := tc.(message.ToolCallBlock)
-				var args map[string]any
-				_ = json.Unmarshal([]byte(tcb.Input), &args)
-				part := geminiPart{
-					FunctionCall: &geminiFunctionCall{
-						Name: tcb.Name,
-						Args: args,
-					},
-				}
-				// Echo the signature Gemini attached to this call (upstream #2463).
-				if sig, ok := tcb.Extra["thought_signature"].(string); ok && sig != "" {
-					part.ThoughtSignature = sig
-				}
-				parts = append(parts, part)
-			}
-			contents = append(contents, geminiContent{Role: "model", Parts: parts})
-			continue
-		}
-
-		// Text content
-		if txt := geminiTextContent(msg); txt != "" {
-			parts = append(parts, geminiPart{Text: txt})
-		}
-
-		if len(parts) > 0 {
-			contents = append(contents, geminiContent{Role: geminiRole, Parts: parts})
-		}
+		contents = appendGeminiMessage(contents, msg)
 	}
 
 	req := geminiRequest{
@@ -269,6 +210,72 @@ func (m *GeminiChatModel) buildRequest(msgs []*message.Msg, callOpts *CallOption
 	}
 
 	return req, nil
+}
+
+// appendGeminiMessage renders a stored message without changing its blocks.
+func appendGeminiMessage(contents []geminiContent, msg *message.Msg) []geminiContent {
+	textRole := "user"
+	if msg.Role == message.RoleAssistant {
+		textRole = "model"
+	}
+	// Only group parts within this message. A user-role result segment must
+	// also remain separate from any ordinary user text next to it.
+	segmentStart := len(contents)
+	previousIsResult := false
+	appendPart := func(role string, isResult bool, part geminiPart) {
+		if len(contents) == segmentStart || contents[len(contents)-1].Role != role || previousIsResult != isResult {
+			contents = append(contents, geminiContent{Role: role})
+		}
+		current := &contents[len(contents)-1]
+		current.Parts = append(current.Parts, part)
+		previousIsResult = isResult
+	}
+
+	var texts []string
+	flushText := func() {
+		if len(texts) > 0 {
+			appendPart(textRole, false, geminiPart{Text: strings.Join(texts, "\n")})
+			texts = texts[:0]
+		}
+	}
+	for _, block := range msg.Content {
+		switch value := block.(type) {
+		case message.TextBlock:
+			if value.Text != "" {
+				texts = append(texts, value.Text)
+			}
+		case message.ToolCallBlock:
+			flushText()
+			var args map[string]any
+			_ = json.Unmarshal([]byte(value.Input), &args)
+			signature, _ := value.Extra["thought_signature"].(string)
+			appendPart("model", false, geminiPart{
+				FunctionCall: &geminiFunctionCall{
+					ID:   value.ID,
+					Name: value.Name,
+					Args: args,
+				},
+				ThoughtSignature: signature,
+			})
+		case message.ToolResultBlock:
+			flushText()
+			responseKey := "result"
+			if value.State == message.ToolResultError {
+				responseKey = "error"
+			}
+			appendPart("user", true, geminiPart{
+				FunctionResponse: &geminiFunctionResponse{
+					ID:   value.ID,
+					Name: value.Name,
+					Response: map[string]any{
+						responseKey: formatter.ConvertToolResultToString(value.Output),
+					},
+				},
+			})
+		}
+	}
+	flushText()
+	return contents
 }
 
 // isGeminiLevelModel mirrors Python AgentScope at 3fef100e. Keep the gate
@@ -342,11 +349,13 @@ type geminiPart struct {
 }
 
 type geminiFunctionCall struct {
+	ID   string         `json:"id,omitempty"`
 	Name string         `json:"name"`
 	Args map[string]any `json:"args,omitempty"`
 }
 
 type geminiFunctionResponse struct {
+	ID       string         `json:"id,omitempty"`
 	Name     string         `json:"name"`
 	Response map[string]any `json:"response"`
 }
@@ -424,9 +433,13 @@ func parseGeminiResponse(parsed geminiResponse) (*ChatResponse, error) {
 			})
 		} else if part.FunctionCall != nil {
 			argsJSON, _ := json.Marshal(part.FunctionCall.Args)
+			id := part.FunctionCall.ID
+			if id == "" {
+				id = fmt.Sprintf("gemini-call-%s-%d", part.FunctionCall.Name, idx)
+			}
 			tc := message.ToolCallBlock{
 				Type:  "tool_call",
-				ID:    fmt.Sprintf("gemini-call-%s-%d", part.FunctionCall.Name, idx),
+				ID:    id,
 				Name:  part.FunctionCall.Name,
 				Input: string(argsJSON),
 				State: message.ToolCallPending,
@@ -521,9 +534,13 @@ func processGeminiStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh
 				})
 			} else if part.FunctionCall != nil {
 				argsJSON, _ := json.Marshal(part.FunctionCall.Args)
+				id := part.FunctionCall.ID
+				if id == "" {
+					id = fmt.Sprintf("gemini-call-%s-%d", part.FunctionCall.Name, toolCallIdx)
+				}
 				tc := message.ToolCallBlock{
 					Type:  "tool_call",
-					ID:    fmt.Sprintf("gemini-call-%s-%d", part.FunctionCall.Name, toolCallIdx),
+					ID:    id,
 					Name:  part.FunctionCall.Name,
 					Input: string(argsJSON),
 					State: message.ToolCallPending,

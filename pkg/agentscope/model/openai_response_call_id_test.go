@@ -177,7 +177,11 @@ func TestResponsesImportedCallIDs(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newTestResponseModel()
 			msgs := []*message.Msg{{Role: message.RoleAssistant, Content: []message.ContentBlock{message.ToolCallBlock{Type: "tool_call", ID: "fc", Name: "lookup", Input: "{}", Extra: tc.extra}}}, {Role: message.RoleUser, Content: []message.ContentBlock{message.ToolResultBlock{Type: "tool_result", ID: "fc", Output: "ok", Metadata: tc.metadata}}}}
-			items := m.buildRequestBody(msgs, &CallOptions{}, false)["input"].([]map[string]any)
+			body, err := m.buildRequestBody(msgs, &CallOptions{}, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			items := body["input"].([]map[string]any)
 			if items[0]["call_id"] != tc.wantCall || items[1]["call_id"] != tc.wantResult {
 				t.Errorf("items=%v", items)
 			}
@@ -186,7 +190,11 @@ func TestResponsesImportedCallIDs(t *testing.T) {
 			if !reflect.DeepEqual(items, combined) {
 				t.Errorf("merged/split mismatch: %v vs %v", items, combined)
 			}
-			resultOnly := m.buildRequestBody(msgs[1:], &CallOptions{}, false)["input"].([]map[string]any)
+			body, err = m.buildRequestBody(msgs[1:], &CallOptions{}, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resultOnly := body["input"].([]map[string]any)
 			wantStandalone := "fc"
 			if tc.name == "explicit" {
 				wantStandalone = "result_override"
