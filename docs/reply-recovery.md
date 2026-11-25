@@ -13,7 +13,10 @@ logical reply after a crash.
 Add `agent.WithReplyRecovery()` and a `StateSaver` to opt into durable built-in
 reply-budget state. Restore through `LoadCheckpoint` and `WithState`, then call
 `ResumeReplyStream(ctx)` to continue the same reply without appending user input.
-Ordinary `Reply`/`ReplyStream` starts a fresh logical reply with fresh counters.
+Ordinary `Reply`/`ReplyStream` starts a fresh logical reply with fresh counters,
+and its new input closes the calls the checkpoint left without a result instead
+of continuing them (see
+[validation, permissions and recovery](tools.md#validation-permissions-and-recovery)).
 Missing, completed, corrupt or unsupported recovery snapshots fail before work.
 
 Recovery persists an owned, versioned `ReplyRecoveryState`: reply ID, active

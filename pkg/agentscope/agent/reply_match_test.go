@@ -232,19 +232,20 @@ func TestAnswerWithoutReplyIDStillMatches(t *testing.T) {
 	})
 }
 
-// TestResumedCallAcceptsTheCheckpointReplyID: a reply started from a plain
-// checkpoint (WithState, then ReplyStream) gets a new reply ID and asks the
-// parked call again. The host may answer the request it saw before the
-// restart, naming the checkpoint's reply ID, before the new request arrives.
-// That answer reaches the re-asked call; one naming any other reply does not,
-// and the call waits for an answer to the new request.
-func TestResumedCallAcceptsTheCheckpointReplyID(t *testing.T) {
+// TestResumedReplyKeepsTheCheckpointReplyID: ResumeReplyStream continues the
+// checkpoint's reply under its reply ID and asks the parked call again. The
+// host may answer the request it saw before the restart, naming that reply
+// ID, before the new request arrives. That answer reaches the re-asked call;
+// one naming any other reply does not, and the call waits for an answer to
+// the new request. (A reply with new input interrupts the parked call
+// instead: TestNewInputInterruptsUnansweredCalls.)
+func TestResumedReplyKeepsTheCheckpointReplyID(t *testing.T) {
 	cases := []struct {
 		name    string
 		replyID string
 		early   bool // the answer sent before the reply wins
 	}{
-		{"checkpoint reply", "r-old", true},
+		{"checkpoint reply", "saved-reply", true},
 		{"another reply", "r-other", false},
 	}
 	for _, tc := range cases {
@@ -257,27 +258,28 @@ func TestResumedCallAcceptsTheCheckpointReplyID(t *testing.T) {
 				WithToolkit(tool.NewToolkit(echoToolFixtureA())),
 				WithPermissionContext(permission.NewContext(permission.ModeDefault)),
 				WithReactConfig(ReactConfig{MaxIters: 4}),
-				WithState(&AgentState{
-					SchemaVersion: StateSchemaVersion, SessionID: "sess", ReplyID: "r-old",
+				WithState(resumableState(&AgentState{
+					SchemaVersion: StateSchemaVersion, SessionID: "sess",
 					Context: []*message.Msg{
 						message.UserMsg("user", "do the thing"),
 						message.AssistantMsg("cp-agent", []message.ContentBlock{call}),
 					},
-				}),
+				})),
 				WithStateSaver(newFakeStateSaver()),
+				WithReplyRecovery(),
 			)
 			a.SubmitUserConfirm(&event.UserConfirmResultEvent{ReplyID: tc.replyID,
 				ConfirmResults: []event.ConfirmResult{{Confirmed: true, ToolCall: call}}})
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			stream, err := a.ReplyStream(ctx, "continue")
+			stream, err := a.ResumeReplyStream(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
 			for ev := range stream {
 				if e, ok := ev.(event.RequireUserConfirmEvent); ok {
-					if e.ReplyID == "r-old" {
-						t.Errorf("the resumed reply kept the checkpoint's reply ID")
+					if e.ReplyID != "saved-reply" {
+						t.Errorf("the resumed reply asks under reply ID %q, not the checkpoint's", e.ReplyID)
 					}
 					// The answer to the new request denies.
 					go a.SubmitUserConfirm(&event.UserConfirmResultEvent{ReplyID: e.ReplyID,
@@ -304,20 +306,21 @@ func TestResumedCallAcceptsTheCheckpointReplyID(t *testing.T) {
 				WithToolkit(tool.NewToolkit(&validatedExternalTool{BaseTool: tool.BaseTool{ToolName: "question"}})),
 				WithPermissionContext(permission.NewContext(permission.ModeDefault)),
 				WithReactConfig(ReactConfig{MaxIters: 4}),
-				WithState(&AgentState{
-					SchemaVersion: StateSchemaVersion, SessionID: "sess", ReplyID: "r-old",
+				WithState(resumableState(&AgentState{
+					SchemaVersion: StateSchemaVersion, SessionID: "sess",
 					Context: []*message.Msg{
 						message.UserMsg("user", "do the thing"),
 						message.AssistantMsg("cp-agent", []message.ContentBlock{call}),
 					},
-				}),
+				})),
 				WithStateSaver(newFakeStateSaver()),
+				WithReplyRecovery(),
 			)
 			a.SubmitExternalResult(&event.ExternalExecutionResultEvent{ReplyID: tc.replyID,
 				ExecutionResults: []message.ToolResultBlock{{Type: "tool_result", ID: call.ID, Name: call.Name, State: message.ToolResultSuccess, Output: "answer before restart"}}})
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			stream, err := a.ReplyStream(ctx, "continue")
+			stream, err := a.ResumeReplyStream(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -409,109 +412,4 @@ func TestGrantPromptIgnoresAnotherReplysApproval(t *testing.T) {
 	if dirs := a.engine.GrantedDirectories(); len(dirs) > 0 || end == nil || end.State != message.ToolResultError {
 		t.Fatalf("another reply's approval granted %v; result %+v", dirs, end)
 	}
-}
-
-// TestCheckpointBatchAnswersOnlyReaskedCalls: after a plain checkpoint
-// resume, the host answers the request it saw before the restart with a batch
-// naming the checkpoint's reply, and the batch also carries an entry for
-// call_1. The re-asked call_0 takes the batch and parks the call_1 entry. A
-// new call_1 that the resumed reply's model then emits accepts only the new
-// reply ID, so the parked entry must not answer it; the host's answer to the
-// new request does.
-func TestCheckpointBatchAnswersOnlyReaskedCalls(t *testing.T) {
-	restored := func(call message.ToolCallBlock) AgentOption {
-		return WithState(&AgentState{
-			SchemaVersion: StateSchemaVersion, SessionID: "sess", ReplyID: "r-old",
-			Context: []*message.Msg{
-				message.UserMsg("user", "do the thing"),
-				message.AssistantMsg("cp-agent", []message.ContentBlock{call}),
-			},
-		})
-	}
-	responses := func(name string) []model.ChatResponse {
-		next := replyMatchCall(name)
-		next.ID = "call_1"
-		return []model.ChatResponse{
-			{Content: []message.ContentBlock{next}, IsLast: true},
-			{Content: []message.ContentBlock{message.TextBlock{Type: "text", Text: "done"}}, IsLast: true},
-		}
-	}
-
-	t.Run("confirmation", func(t *testing.T) {
-		echoExecutions = 0
-		parked := message.ToolCallBlock{Type: "tool_call", ID: "call_0", Name: "echo_a", Input: `{}`, State: message.ToolCallAsking}
-		a := NewUnifiedAgent("cp-agent", "helpful", &mockChatModel{responses: responses("echo_a")},
-			WithToolkit(tool.NewToolkit(echoToolFixtureA())),
-			WithPermissionContext(permission.NewContext(permission.ModeDefault)),
-			WithReactConfig(ReactConfig{MaxIters: 5}),
-			restored(parked),
-		)
-		extra := parked
-		extra.ID = "call_1"
-		a.SubmitUserConfirm(&event.UserConfirmResultEvent{ReplyID: "r-old",
-			ConfirmResults: []event.ConfirmResult{{Confirmed: true, ToolCall: parked}, {Confirmed: true, ToolCall: extra}}})
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		stream, err := a.ReplyStream(ctx, "continue")
-		if err != nil {
-			t.Fatal(err)
-		}
-		ends := map[string]message.ToolResultState{}
-		for ev := range stream {
-			switch e := ev.(type) {
-			case event.RequireUserConfirmEvent:
-				if e.ToolCalls[0].ID == "call_1" {
-					go a.SubmitUserConfirm(&event.UserConfirmResultEvent{ReplyID: e.ReplyID,
-						ConfirmResults: []event.ConfirmResult{{Confirmed: false, ToolCall: e.ToolCalls[0]}}})
-				}
-			case event.ToolResultEndEvent:
-				ends[e.ToolCallID] = e.State
-			}
-		}
-		if ctx.Err() != nil {
-			t.Fatal("the resumed reply timed out")
-		}
-		if echoExecutions != 1 || ends["call_0"] != message.ToolResultSuccess || ends["call_1"] != message.ToolResultDenied {
-			t.Fatalf("ran %d times (want only call_0), results %v", echoExecutions, ends)
-		}
-	})
-
-	t.Run("external result", func(t *testing.T) {
-		parked := message.ToolCallBlock{Type: "tool_call", ID: "call_0", Name: "question", Input: `{}`, State: message.ToolCallSubmitted}
-		a := NewUnifiedAgent("cp-agent", "helpful", &mockChatModel{responses: responses("question")},
-			WithToolkit(tool.NewToolkit(&validatedExternalTool{BaseTool: tool.BaseTool{ToolName: "question"}})),
-			WithPermissionContext(permission.NewContext(permission.ModeDefault)),
-			WithReactConfig(ReactConfig{MaxIters: 5}),
-			restored(parked),
-		)
-		before := func(id string) message.ToolResultBlock {
-			return message.ToolResultBlock{Type: "tool_result", ID: id, Name: "question", State: message.ToolResultSuccess, Output: "answer before restart"}
-		}
-		a.SubmitExternalResult(&event.ExternalExecutionResultEvent{ReplyID: "r-old",
-			ExecutionResults: []message.ToolResultBlock{before("call_0"), before("call_1")}})
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		stream, err := a.ReplyStream(ctx, "continue")
-		if err != nil {
-			t.Fatal(err)
-		}
-		outputs := map[string]string{}
-		for ev := range stream {
-			switch e := ev.(type) {
-			case event.RequireExternalExecutionEvent:
-				if call := e.ToolCalls[0]; call.ID == "call_1" {
-					go a.SubmitExternalResult(&event.ExternalExecutionResultEvent{ReplyID: e.ReplyID,
-						ExecutionResults: []message.ToolResultBlock{{Type: "tool_result", ID: call.ID, Name: call.Name, State: message.ToolResultSuccess, Output: "answer after restart"}}})
-				}
-			case event.ToolResultTextDeltaEvent:
-				outputs[e.ToolCallID] += e.Delta
-			}
-		}
-		if ctx.Err() != nil {
-			t.Fatal("the resumed reply timed out")
-		}
-		if outputs["call_0"] != "answer before restart" || outputs["call_1"] != "answer after restart" {
-			t.Fatalf("results %v", outputs)
-		}
-	})
 }

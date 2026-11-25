@@ -11,23 +11,64 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Changed — new input interrupts unanswered tool calls
+
+- **BREAKING (behavior)** A reply with new input now closes this agent's
+  tool calls that an earlier reply left without a result: nothing runs and
+  nothing is asked again (#207). Such calls come from a checkpoint saved
+  while a reply waited for an approval or an external result, or before a
+  step's results were recorded. Before (v2.0.11 included), the first reply
+  with new input after a plain restore (`WithState`, then `Reply` or
+  `ReplyStream`) asked again about calls awaiting approval or an external
+  result and recorded each result after the input. Anthropic
+  documents that no message may come between a tool use and its result, and
+  the layout misled compression into keeping no message (below). This
+  includes a thread participant activated with its agent restored while a
+  call awaited approval or its result.
+- Each closed call gets a result with state `interrupted` in its call's
+  message, before the input. The result says that a call awaiting approval
+  did not run and was not refused, and that any other call may or may not
+  have taken effect: a submitted external call, or a pending or allowed call
+  cut off mid-step, which the next reply used to send to the model with no
+  result. A call is closed only when no message holds a result for it and
+  its state is not finished, so results a host stores in messages of their
+  own (as `openaiserver` does) still answer their calls.
+- Before its first model call the reply emits one custom event,
+  `agent.ToolCallsInterruptedEvent` (`tool_calls_interrupted`), listing each
+  closed call's ID, name, input, previous state and result text; it emits no
+  tool events for them, so a thread participant does not count them as calls
+  of its activation. Answers queued for earlier requests are dropped, so a
+  confirmation or external result sent between replies (as
+  `SubmitUserConfirmContext` and `SubmitExternalResultContext` allow) cannot
+  answer a later call that reuses the ID; they are dropped when the reply
+  closes at least one call.
+- While another reply core of the agent has not returned (a canceled reply
+  whose tool ignores cancellation), the reply closes and drops nothing, and
+  overlapping replies stay unsafe as before: that core's results land after
+  the new input, and a submitted call it waits for is requested again. A
+  call it awaits approval for is no longer asked about again: the new reply
+  ends with the waiting message.
+- Migration: to have such calls answered after a restart, enable
+  `WithReplyRecovery` and continue the reply with `ResumeReplyStream` before
+  sending new input; it asks again under the checkpoint's reply ID. It needs
+  the active recovery snapshot that only a reply run with `WithReplyRecovery`
+  saves, so a checkpoint written without it (any v2.0.11 checkpoint) cannot be
+  resumed this way: the next reply with input closes its calls, and the model
+  can make them again.
+
 ### Fixed — compression keeping no message
 
 - When the messages that fit the reserve hold a tool result whose call is in
   an earlier message, compression keeps them and the messages from the
   call's message on. It used to summarize that result and every message
   before it, and kept no message at all when the result was in the last one
-  (#207). A reply produces this layout when a checkpoint saved while it
-  waited for an approval or an external result is restored with `WithState`
-  and continued with new input (`Reply`, `ReplyStream`, or a thread
-  participant's next activation): it asks for the call again and records the
-  result after the input, and its later rounds join the result's message, so
-  that message stays last until the next input. A host-built history can
-  hold it too. This applies to the automatic trigger, `Compact`,
-  `CompactStrict`, the compaction of context-overflow recovery and
-  background precompression under the default `reserve_tail` strategy,
-  without `WithContentBlockCompaction`, whose splitter is unchanged. As for a
-  call still in flight, the kept messages can exceed the reserve, and with a
+  (#207). Replies no longer record such a result (above), but checkpoints
+  written before this change and histories a host builds can hold one. This
+  applies to the automatic trigger, `Compact`, `CompactStrict`, the
+  compaction of context-overflow recovery and background precompression
+  under the default `reserve_tail` strategy, without
+  `WithContentBlockCompaction`, whose splitter is unchanged. As for a call
+  still in flight, the kept messages can exceed the reserve, and with a
   large call message the trigger or the window; context-overflow recovery
   can then spend one more of its attempts and summary calls before it
   summarizes the call's message. The old result stands when the call is in
@@ -608,12 +649,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   answer, or approve, a later reply's call with the same ID. An empty `ReplyID`
   still matches, so hosts that leave it empty keep tool-call-ID matching, and
   with it this exposure; in this repository, the `app` confirm handler and the
-  legacy `service` confirm endpoint send none. A call that a reply resumed
-  from a plain checkpoint asks again also accepts the reply ID the checkpoint
-  held, so an answer to the request seen before the restart still reaches it;
-  entries of such a batch parked for other calls answer only calls that accept
-  the same reply ID. Hosts must set `ReplyID` to the request event's `ReplyID`
-  or leave it empty: an answer carrying any other value is now dropped.
+  legacy `service` confirm endpoint send none. `ResumeReplyStream` asks again
+  under the checkpoint's reply ID, so an answer to the request seen before the
+  restart still reaches the call. Hosts must set `ReplyID` to the request
+  event's `ReplyID` or leave it empty: an answer carrying any other value is
+  now dropped.
 - A waiter whose reply context ended before it reads no longer takes a queued
   answer. Before, a canceled reply could take one at random, running an
   approved tool after cancellation or, while its core outlived its stream,
@@ -622,12 +662,11 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 ### Fixed — loop hooks around resumed tool calls
 
 - The loop hooks' `BeforeToolExec` and `AfterToolExec` (`agent.WithLoopHooks`)
-  now also run around the awaiting calls a reply re-prompts after a restore:
-  asking or submitted calls restored with `WithState`, picked up by the next
-  reply or, for submitted calls, by `ResumeReplyStream`. As on the ordinary tool
-  path, they bracket the confirmation wait or external handshake and a denied
-  outcome, and receive `StateAct`; no transition to `StateAct` is reported for
-  these calls. `MetricsHook` and `TracingHook` now count and trace them.
+  now also run around the submitted calls that `ResumeReplyStream` requests
+  again after a restore. As on the ordinary tool path, they bracket the
+  confirmation wait or external handshake and a denied outcome, and receive
+  `StateAct`; no transition to `StateAct` is reported for these calls.
+  `MetricsHook` and `TracingHook` now count and trace them.
 
 ### Added — `OpenAIConfig.Formatter`
 

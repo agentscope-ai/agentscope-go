@@ -9,6 +9,7 @@ import (
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/event"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/message"
+	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/middleware"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/model"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/permission"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/tool"
@@ -103,16 +104,36 @@ func TestLoadCheckpoint_RejectsNewerSchema(t *testing.T) {
 	}
 }
 
+// resumableState marks a restored state as an active reply checkpoint, so
+// ResumeReplyStream continues its awaiting calls. A reply with new input
+// interrupts them instead (TestNewInputInterruptsUnansweredCalls).
+func resumableState(st *AgentState) *AgentState {
+	st.ReplyID = "saved-reply"
+	st.ReplyRecovery = &ReplyRecoveryState{Version: 1, ReplyID: st.ReplyID, Active: true,
+		Budgets: middleware.ReplyBudgetSnapshot{Version: 1}}
+	return st
+}
+
+// replyOrResume starts a reply with input, or, when resumed, continues the
+// restored checkpoint (see resumableState).
+func replyOrResume(ctx context.Context, a *UnifiedAgent, resumed bool) (<-chan event.Event, error) {
+	if resumed {
+		return a.ResumeReplyStream(ctx)
+	}
+	return a.ReplyStream(ctx, "continue")
+}
+
 func TestResume_RepromptsAskingCall(t *testing.T) {
 	// Simulate a crash while parked on an ASKING call: restore state via
-	// WithState, start a new reply, expect the confirmation re-prompt.
+	// WithState, continue it with ResumeReplyStream, expect the confirmation
+	// re-prompt.
 	echoExecutions = 0
 	saver := newFakeStateSaver()
 	mock := &mockChatModel{responses: []model.ChatResponse{
 		{Content: []message.ContentBlock{message.TextBlock{Type: "text", Text: "resumed fine"}}, IsLast: true},
 	}}
 
-	restored := &AgentState{
+	restored := resumableState(&AgentState{
 		SchemaVersion: StateSchemaVersion,
 		SessionID:     "sess-resume",
 		Context: []*message.Msg{
@@ -121,7 +142,7 @@ func TestResume_RepromptsAskingCall(t *testing.T) {
 				message.ToolCallBlock{Type: "tool_call", ID: "tc_ask", Name: "echo_a", Input: `{}`, State: message.ToolCallAsking},
 			}),
 		},
-	}
+	})
 
 	a := NewUnifiedAgent("cp-agent", "helpful", mock,
 		WithToolkit(tool.NewToolkit(echoToolFixtureA())),
@@ -129,11 +150,12 @@ func TestResume_RepromptsAskingCall(t *testing.T) {
 		WithReactConfig(ReactConfig{MaxIters: 4}),
 		WithState(restored),
 		WithStateSaver(saver),
+		WithReplyRecovery(),
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	ch, err := a.ReplyStream(ctx, "continue")
+	ch, err := a.ResumeReplyStream(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +206,7 @@ func TestResume_BatchConfirmationNotLost(t *testing.T) {
 	mock := &mockChatModel{responses: []model.ChatResponse{
 		{Content: []message.ContentBlock{message.TextBlock{Type: "text", Text: "both done"}}, IsLast: true},
 	}}
-	restored := &AgentState{
+	restored := resumableState(&AgentState{
 		SchemaVersion: StateSchemaVersion,
 		SessionID:     "sess-batch",
 		Context: []*message.Msg{
@@ -194,17 +216,19 @@ func TestResume_BatchConfirmationNotLost(t *testing.T) {
 				message.ToolCallBlock{Type: "tool_call", ID: "tc_2", Name: "echo_a", Input: `{}`, State: message.ToolCallAsking},
 			}),
 		},
-	}
+	})
 	a := NewUnifiedAgent("cp-agent", "helpful", mock,
 		WithToolkit(tool.NewToolkit(echoToolFixtureA())),
 		WithPermissionContext(permission.NewContext(permission.ModeDefault)),
 		WithReactConfig(ReactConfig{MaxIters: 4}),
 		WithState(restored),
+		WithStateSaver(newFakeStateSaver()),
+		WithReplyRecovery(),
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	ch, err := a.ReplyStream(ctx, "continue")
+	ch, err := a.ResumeReplyStream(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +264,7 @@ func TestResume_BatchExternalResultsNotLost(t *testing.T) {
 	mock := &mockChatModel{responses: []model.ChatResponse{
 		{Content: []message.ContentBlock{message.TextBlock{Type: "text", Text: "external done"}}, IsLast: true},
 	}}
-	restored := &AgentState{
+	restored := resumableState(&AgentState{
 		SchemaVersion: StateSchemaVersion,
 		SessionID:     "sess-ext-batch",
 		Context: []*message.Msg{
@@ -250,7 +274,7 @@ func TestResume_BatchExternalResultsNotLost(t *testing.T) {
 				message.ToolCallBlock{Type: "tool_call", ID: "tc_e2", Name: "ext_tool", Input: `{}`, State: message.ToolCallSubmitted},
 			}),
 		},
-	}
+	})
 	// Restored calls resolve against the current toolkit and permissions.
 	permCtx := permission.NewContext(permission.ModeDefault)
 	permCtx.AllowRules["ext_tool"] = []permission.Rule{{ToolName: "ext_tool", Behavior: permission.BehaviorAllow}}
@@ -259,11 +283,13 @@ func TestResume_BatchExternalResultsNotLost(t *testing.T) {
 		WithPermissionContext(permCtx),
 		WithReactConfig(ReactConfig{MaxIters: 4}),
 		WithState(restored),
+		WithStateSaver(newFakeStateSaver()),
+		WithReplyRecovery(),
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	ch, err := a.ReplyStream(ctx, "continue")
+	ch, err := a.ResumeReplyStream(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +340,7 @@ func TestResume_CheckpointAfterRepromptExecution(t *testing.T) {
 	mock := &mockChatModel{responses: []model.ChatResponse{
 		{Content: []message.ContentBlock{message.TextBlock{Type: "text", Text: "resumed and done"}}, IsLast: true},
 	}}
-	restored := &AgentState{
+	restored := resumableState(&AgentState{
 		SchemaVersion: StateSchemaVersion,
 		SessionID:     "sess-resume-cp",
 		Context: []*message.Msg{
@@ -323,18 +349,19 @@ func TestResume_CheckpointAfterRepromptExecution(t *testing.T) {
 				message.ToolCallBlock{Type: "tool_call", ID: "tc_ask", Name: "echo_a", Input: `{}`, State: message.ToolCallAsking},
 			}),
 		},
-	}
+	})
 	a := NewUnifiedAgent("cp-agent", "helpful", mock,
 		WithToolkit(tool.NewToolkit(echoToolFixtureA())),
 		WithPermissionContext(permission.NewContext(permission.ModeDefault)),
 		WithReactConfig(ReactConfig{MaxIters: 4}),
 		WithState(restored),
 		WithStateSaver(saver),
+		WithReplyRecovery(),
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	ch, err := a.ReplyStream(ctx, "continue")
+	ch, err := a.ResumeReplyStream(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
