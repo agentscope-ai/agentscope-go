@@ -193,6 +193,14 @@ func (a *UnifiedAgent) awaitingCalls() (asking, submitted []message.ToolCallBloc
 			if !ok || finished[tc.ID] {
 				continue
 			}
+			if a.retentionOwned != nil {
+				v, err := a.retentionCopyLocked(context.Background(), tc)
+				if err != nil {
+					a.retentionOwned.invalid = true
+				} else {
+					tc = v.(message.ToolCallBlock)
+				}
+			}
 			switch tc.State {
 			case message.ToolCallAsking:
 				asking = append(asking, tc)
@@ -272,6 +280,14 @@ func (a *UnifiedAgent) replaceToolCallInContext(callID string, replacement *mess
 	a.mu.Lock()
 	a.invalidateRetentionLocked()
 	defer a.mu.Unlock()
+	if a.retentionOwned != nil {
+		v, err := a.retentionCopyLocked(context.Background(), replacement)
+		if err != nil {
+			a.retentionOwned.invalid = true
+		} else {
+			replacement = v.(*message.ToolCallBlock)
+		}
+	}
 	for i := len(a.state.Context) - 1; i >= 0; i-- {
 		msg := a.state.Context[i]
 		if msg == nil || msg.Role != message.RoleAssistant || msg.Name != a.name {

@@ -468,6 +468,10 @@ func (a *UnifiedAgent) ApplyThreadUpdate(ctx context.Context, u ThreadUpdate) er
 		a.mu.Unlock()
 		return err
 	}
+	if err := a.ownRetentionUpdateLocked(ctx, &u); err != nil {
+		a.mu.Unlock()
+		return err
+	}
 	a.applyThreadUpdateLocked(&u)
 	a.mu.Unlock()
 	return a.persistBetweenReplies(ctx)
@@ -498,6 +502,9 @@ func (a *UnifiedAgent) drainBoundaryInput(ctx context.Context, ch chan<- event.E
 	if u == nil {
 		return "", nil
 	}
+	// Keep the callback's struct separate before replacing its message slice.
+	ownedUpdate := *u
+	u = &ownedUpdate
 	if u.Reset {
 		return types.ReplyError, threadInputError(errors.New("reset is not allowed inside a reply"))
 	}
@@ -506,6 +513,10 @@ func (a *UnifiedAgent) drainBoundaryInput(ctx context.Context, ch chan<- event.E
 	}
 	a.mu.Lock()
 	if err := a.checkCursorLocked(u.Cursor); err != nil {
+		a.mu.Unlock()
+		return types.ReplyError, threadInputError(err)
+	}
+	if err := a.ownRetentionUpdateLocked(ctx, u); err != nil {
 		a.mu.Unlock()
 		return types.ReplyError, threadInputError(err)
 	}
