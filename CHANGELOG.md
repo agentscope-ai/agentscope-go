@@ -11,6 +11,19 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — thread participant confirmation answers
+
+- `participant.AgentParticipant.SubmitUserConfirm` refuses an answer that
+  belongs to no pending confirmation request of the running activation: it
+  must name the request's reply ID (or none, as the agent then matches by
+  tool-call ID) and answer only that request's tool calls. Before, any answer
+  counted as the answer to a pending request, and the agent dropped one that
+  named another reply, such as a late answer to an interrupted activation's
+  request: the request's own answer then failed with "no confirmation is
+  pending" and the activation waited until it was interrupted. An answer
+  naming the reply ID of a checkpoint whose call was asked again after a
+  restart is refused too; answer the re-asked request.
+
 ### Fixed — file-tool workspace jail confinement
 
 - `view_text_file`, `Glob`, and `LSP` now resolve paths through the workspace
