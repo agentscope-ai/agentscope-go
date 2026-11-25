@@ -1339,3 +1339,42 @@ func TestOllamaNative_ChatStream_ToolCallsInDoneFrame(t *testing.T) {
 		t.Errorf("final Content[0] = %+v", last.Content[0])
 	}
 }
+
+func TestOllamaNativeStructuredOutputNoThinkFallback(t *testing.T) {
+	requests := make(chan *bool, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/chat" {
+			http.NotFound(w, r)
+			return
+		}
+		var req struct{ Think *bool }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		requests <- req.Think
+		w.Header().Set("Content-Type", "application/json")
+		if req.Think != nil && !*req.Think {
+			fmt.Fprint(w, `{"message":{"role":"assistant","tool_calls":[{"function":{"name":"generate_structured_output","arguments":{"ok":true}}}]},"done":true}`)
+		} else {
+			fmt.Fprint(w, `{"message":{"role":"assistant","content":"no structured result"},"done":true}`)
+		}
+	}))
+	defer srv.Close()
+
+	m := newNativeModel(t, srv, 0)
+	got, err := GenerateStructuredOutput(context.Background(), m, testMessages(),
+		json.RawMessage(`{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]}`))
+	close(requests)
+	var flags []string
+	for flag := range requests {
+		if flag == nil {
+			flags = append(flags, "omitted")
+		} else {
+			flags = append(flags, fmt.Sprint(*flag))
+		}
+	}
+	if strings.Join(flags, ",") != "omitted,omitted,false" || err != nil || string(got) != `{"ok":true}` {
+		t.Fatalf("think=%v, result=%s, err=%v; want two default requests followed by think:false and a result", flags, got, err)
+	}
+}

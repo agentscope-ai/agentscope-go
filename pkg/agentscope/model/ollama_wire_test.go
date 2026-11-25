@@ -101,3 +101,33 @@ func TestOllamaSeedOnWire(t *testing.T) {
 		}
 	}
 }
+
+func TestOllamaDisableThinkingOnWire(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", streaming), func(t *testing.T) {
+			reply := openAIResponseJSON()
+			if streaming {
+				reply = openAIStreamResponseSSE()
+			}
+			body, _ := ollamaExchange(t, streaming, reply, nil)
+			if _, ok := body["reasoning_effort"]; ok {
+				t.Error("unset thinking should omit reasoning_effort")
+			}
+			model, err := NewOllamaChatModel(OllamaConfig{Model: "qwen3:14b"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			disabler, ok := any(model).(ThinkingDisabler)
+			opts := []CallOption{WithThinkingDisabled()}
+			if ok {
+				opts = disabler.DisableThinkingOptions()
+			} else {
+				t.Error("OllamaChatModel does not implement ThinkingDisabler")
+			}
+			body, _ = ollamaExchange(t, streaming, reply, nil, opts...)
+			if got := body["reasoning_effort"]; got != "none" {
+				t.Errorf("reasoning_effort = %v, want none", got)
+			}
+		})
+	}
+}

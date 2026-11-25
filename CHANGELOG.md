@@ -19,6 +19,71 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   directory (symlink-aware), so a traversing pattern or an inner symlink cannot
   list paths outside it.
 
+### Fixed — Gemini tool history
+
+- Buffered and streamed Gemini requests preserve the text, tool calls, and
+  tool-call thought signatures in agent replies that contain tool results (#208).
+
+### Added — Jev model selection
+
+- Jev supports an explicit model override for ordinary classification without
+  changing the client's configured model or managed dispatch target (#138, item 19).
+
+### Added — canonical replay of a local model's tool calls (experimental)
+
+- `model.WithCanonicalReplay()` makes a `ConnectivityAwareModel` send the
+  cloud the arguments of the local model's tool calls as compact JSON with
+  sorted keys; `FallbackChatModel.CanonicalReplay` does the same for the calls
+  of models later in the chain. The calls are marked in `ToolCallBlock.Extra`
+  (`agentscope_writer_rank`) as they pass through and rewritten only in the
+  copy of the history sent to a more preferred model: stored messages, the
+  local model's requests and each model's own calls are unchanged. Both are
+  off by default. In a replay of 11 recorded requests holding a local
+  model's `write_file` calls, `gpt-6-luna` ran into an 8,000-token cap on 21
+  to 27 of 330 replies per pass, all where the local model wrote `path`
+  first, and on none with the keys sorted; sent through this code, on 20 of
+  330 with the option off and none with it on. Only that tool and that pair
+  of models were measured, on buffered `Chat` calls. See
+  [canonical replay](docs/edge-deployment.md#replaying-the-local-models-tool-calls-experimental).
+
+### Fixed — Ollama structured output
+
+- Native Ollama now includes the thinking-disabled attempt in the structured
+  output fallback sequence.
+
+### Fixed — scheduler cancellation
+
+- `InMemoryScheduler` preserves the canceled status when a running callback
+  returns and skips callbacks for tasks canceled before they start.
+
+### Fixed — Gemini tool result IDs
+
+- Gemini adapter and formatter now carry nonempty tool-result IDs in
+  `functionResponse.id` (#138, item 22). Provider-issued `functionCall.id`
+  is preserved; calls and results echo the same ID, using the existing
+  generated ID when the provider omits one.
+
+### Fixed — explicit DeepSeek and Moonshot thinking
+
+- Honor `WithThinking(true, 0)` in DeepSeek and non-K3 Moonshot buffered and
+  streamed calls. Explicit enable now sends `thinking.type = "enabled"`
+  instead of omitting the option.
+
+### Fixed — Responses foreign tool-call IDs
+
+- The Responses adapter and public formatter now omit a function-call item's
+  optional `id` when the tool ID does not start with `fc`, preserving `call_id`
+  for result correlation. This avoids invalid item IDs when replaying tool
+  histories from other providers; existing `fc` item IDs remain unchanged.
+
+### Fixed — workspace session ID validation
+
+- `WorkspaceManager.GetOrCreate` now rejects session IDs that are empty, start
+  with a dot, or contain path separators, mirroring `Share`; the workspace
+  skill route maps an invalid ID to 400 instead of 500. This closes a path
+  traversal where a crafted `session_id` could create a workspace outside the
+  configured base directory.
+
 ### Fixed — DashScope TTS stream failures
 
 - DashScope realtime `SynthesizeStream` now emits a terminal `Response.Err`
@@ -253,6 +318,15 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   `ReadCacheEntry.Hash` is omitted when empty, and an older build ignores it
   when it loads a saved cache. See
   [stale writes](docs/tools.md#stale-writes-on-a-shared-workspace-experimental).
+
+### Changed — shared Responses message conversion
+
+- **BREAKING (behavior)** The Responses provider and public formatter now use
+  the same ordered conversion. Public formatter output retains full reasoning
+  items, native tool-result images and original call IDs; hints become user
+  segments in place. Single-text segments use string content, and empty/unsupported turns
+  follow the provider's existing fallback. Consumers inspecting formatter
+  maps must accept string or array content. Part of #125 (F1).
 
 ### Changed — checkpoint schema version 3
 

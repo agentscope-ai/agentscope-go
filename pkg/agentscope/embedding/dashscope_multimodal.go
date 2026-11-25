@@ -66,20 +66,22 @@ type DashScopeMultimodalConfig struct {
 	BaseURL      string
 	Model        string
 	HTTPClient   *http.Client
+	TextType     string // "query" (default) or "document"
 }
 
 // DashScopeMultimodalEmbeddingModel embeds text and DataBlock (images/video)
 // via the DashScope native multimodal embedding API.
 type DashScopeMultimodalEmbeddingModel struct {
-	apiKey  string
-	baseURL string
-	model   string
-	client  *http.Client
-	limits  multimodalLimits
+	apiKey   string
+	baseURL  string
+	model    string
+	client   *http.Client
+	limits   multimodalLimits
+	textType string
 }
 
 // NewDashScopeMultimodalEmbeddingModel creates a multimodal embedding model.
-func NewDashScopeMultimodalEmbeddingModel(cfg DashScopeMultimodalConfig) (*DashScopeMultimodalEmbeddingModel, error) {
+func NewDashScopeMultimodalEmbeddingModel(cfg DashScopeMultimodalConfig) (*DashScopeMultimodalEmbeddingModel, error) { //nolint:gocritic // Keep the existing public constructor signature.
 	apiKey := model.ResolveAPIKey(cfg.APIKey, cfg.SecretAPIKey)
 	if apiKey == "" {
 		return nil, fmt.Errorf("embedding: DashScope API key is required")
@@ -90,16 +92,23 @@ func NewDashScopeMultimodalEmbeddingModel(cfg DashScopeMultimodalConfig) (*DashS
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = "https://dashscope.aliyuncs.com/api/v1"
 	}
+	if cfg.TextType == "" {
+		cfg.TextType = "query"
+	}
+	if cfg.TextType != "query" && cfg.TextType != "document" {
+		return nil, fmt.Errorf("embedding: invalid DashScope text type %q", cfg.TextType)
+	}
 	client := cfg.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: 60 * time.Second}
 	}
 	return &DashScopeMultimodalEmbeddingModel{
-		apiKey:  apiKey,
-		baseURL: cfg.BaseURL,
-		model:   cfg.Model,
-		client:  client,
-		limits:  getLimits(cfg.Model),
+		apiKey:   apiKey,
+		baseURL:  cfg.BaseURL,
+		model:    cfg.Model,
+		client:   client,
+		limits:   getLimits(cfg.Model),
+		textType: cfg.TextType,
 	}, nil
 }
 
@@ -110,13 +119,25 @@ func (m *DashScopeMultimodalEmbeddingModel) ModelName() string { return m.model 
 // If the input exceeds the model's element limits, it is automatically
 // split into sub-batches, each processed separately, and the results merged.
 func (m *DashScopeMultimodalEmbeddingModel) EmbedMultimodal(ctx context.Context, inputs []MultimodalInput) (*EmbeddingResponse, error) {
+	return m.EmbedMultimodalWithTextType(ctx, inputs, "")
+}
+
+// EmbedMultimodalWithTextType embeds inputs using "query" or "document" for
+// this call. An empty textType uses the model's configured default.
+func (m *DashScopeMultimodalEmbeddingModel) EmbedMultimodalWithTextType(ctx context.Context, inputs []MultimodalInput, textType string) (*EmbeddingResponse, error) {
+	if textType == "" {
+		textType = m.textType
+	}
+	if textType != "query" && textType != "document" {
+		return nil, fmt.Errorf("embedding: invalid DashScope text type %q", textType)
+	}
 	if len(inputs) == 0 {
 		return &EmbeddingResponse{}, nil
 	}
 
 	limits := getLimits(m.model)
 	if len(inputs) <= limits.maxElements {
-		return m.embedMultimodalBatch(ctx, inputs)
+		return m.embedMultimodalBatch(ctx, inputs, textType)
 	}
 
 	// Split into sub-batches that respect maxElements.
@@ -130,7 +151,7 @@ func (m *DashScopeMultimodalEmbeddingModel) EmbedMultimodal(ctx context.Context,
 		}
 		batch := inputs[start:end]
 
-		resp, err := m.embedMultimodalBatch(ctx, batch)
+		resp, err := m.embedMultimodalBatch(ctx, batch, textType)
 		if err != nil {
 			return nil, fmt.Errorf("batch [%d:%d]: %w", start, end, err)
 		}
@@ -150,7 +171,7 @@ func (m *DashScopeMultimodalEmbeddingModel) EmbedMultimodal(ctx context.Context,
 }
 
 // embedMultimodalBatch sends a single batch of inputs to the API.
-func (m *DashScopeMultimodalEmbeddingModel) embedMultimodalBatch(ctx context.Context, inputs []MultimodalInput) (*EmbeddingResponse, error) {
+func (m *DashScopeMultimodalEmbeddingModel) embedMultimodalBatch(ctx context.Context, inputs []MultimodalInput, textType string) (*EmbeddingResponse, error) {
 	contents := make([]map[string]any, 0, len(inputs))
 	for _, inp := range inputs {
 		if inp.Text != "" {
@@ -171,7 +192,7 @@ func (m *DashScopeMultimodalEmbeddingModel) embedMultimodalBatch(ctx context.Con
 			"contents": []any{contents},
 		},
 		"parameters": map[string]any{
-			"text_type": "query",
+			"text_type": textType,
 		},
 	}
 
