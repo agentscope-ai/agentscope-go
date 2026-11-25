@@ -64,7 +64,10 @@ synchronous path owns retries and the truncation fallback. Each later round
 past the precompress ratio starts a new generation, so a model that keeps
 failing or returning blank fields costs one background call per round. The
 synchronous path does not reject a blank summary: such a model still ends
-with one at the trigger.
+with one at the trigger. A generation whose split keeps no message stops
+before the model call: applied, its result would replace the context with
+the messages appended since the snapshot, dropping whatever the reply added
+to the snapshot's last message, so the trigger compresses synchronously.
 Pre-compression is unavailable with `WithContentBlockCompaction`.
 
 ## Retention policy

@@ -414,7 +414,8 @@ func (a *UnifiedAgent) compressContextImpl(ctx context.Context, cfg *ContextConf
 	}
 
 	reserveTokens := a.reserveTokens(cfg, ctxSize)
-	if cfg.CompactStrategy == CompactStrategyFreshWindow {
+	freshWindow := cfg.CompactStrategy == CompactStrategyFreshWindow
+	if freshWindow {
 		// Fresh window: reserve as little as possible. A budget of 1 — NOT 0,
 		// which would take the emergency path — routes the split through the
 		// tool-pair repair machinery, so an in-flight call (e.g. the
@@ -424,17 +425,17 @@ func (a *UnifiedAgent) compressContextImpl(ctx context.Context, cfg *ContextConf
 		// flight the tail is empty and the window truly starts fresh.
 		reserveTokens = 1
 	}
-	msgsToCompress, msgsToReserve := a.splitContextForCompression(reserveTokens, toolSchemas)
+	msgsToCompress, msgsToReserve := a.splitContextForCompression(reserveTokens, freshWindow, toolSchemas)
 
 	if len(msgsToCompress) == 0 {
-		if cfg.CompactStrategy == CompactStrategyFreshWindow {
+		if freshWindow {
 			// Degenerate counter (messages cost ~0 tokens): nothing can be
 			// split off safely. A no-op beats the zero-reserve fallback,
 			// which would compress in-flight pairs.
 			return nil
 		}
 		logrus.WithField("agent", a.name).Warn("reserve ratio too large, falling back to reserve_ratio=0")
-		msgsToCompress, msgsToReserve = a.splitContextForCompression(0, toolSchemas)
+		msgsToCompress, msgsToReserve = a.splitContextForCompression(0, false, toolSchemas)
 	}
 
 	a.mu.Lock()
@@ -708,8 +709,9 @@ func (a *UnifiedAgent) retryCompressWithFewer(
 
 // splitContextForCompression splits state.Context into messages to compress and messages to reserve.
 // It walks backward from the end, accumulating messages until the reserved portion
-// reaches the token budget, keeping tool call/result pairs together.
-func (a *UnifiedAgent) splitContextForCompression(reserveTokenBudget int, tools []model.ToolSchema) ([]*message.Msg, []*message.Msg) {
+// reaches the token budget, keeping tool call/result pairs together. freshWindow
+// marks a CompactStrategyFreshWindow split (see splitMsgsForCompression).
+func (a *UnifiedAgent) splitContextForCompression(reserveTokenBudget int, freshWindow bool, tools []model.ToolSchema) ([]*message.Msg, []*message.Msg) {
 	a.mu.Lock()
 	ctxMsgs := make([]*message.Msg, len(a.state.Context))
 	copy(ctxMsgs, a.state.Context)
@@ -723,7 +725,7 @@ func (a *UnifiedAgent) splitContextForCompression(reserveTokenBudget int, tools 
 	if a.contentBlockCompaction {
 		return a.splitContentBlocksForCompression(ctxMsgs, baseMsgs, reserveTokenBudget, tools)
 	}
-	return a.splitMsgsForCompression(ctxMsgs, baseMsgs, reserveTokenBudget, tools)
+	return a.splitMsgsForCompression(ctxMsgs, baseMsgs, reserveTokenBudget, freshWindow, tools)
 }
 
 // compressionBaseMsgs builds the invariant head every compression accounting
@@ -750,7 +752,11 @@ func compressionBaseMsgs(agentName, systemPrompt, summary string, thread []*mess
 // budget and tool-pair integrity. The caller owns the snapshot; the agent's
 // live state is not consulted, so the split is safe to run off the reply
 // goroutine (background pre-compression).
-func (a *UnifiedAgent) splitMsgsForCompression(ctxMsgs, baseMsgs []*message.Msg, reserveTokenBudget int, tools []model.ToolSchema) ([]*message.Msg, []*message.Msg) {
+//
+// freshWindow marks a CompactStrategyFreshWindow split, which keeps as little
+// as it can: it never takes in a call's message to keep the last message (see
+// below).
+func (a *UnifiedAgent) splitMsgsForCompression(ctxMsgs, baseMsgs []*message.Msg, reserveTokenBudget int, freshWindow bool, tools []model.ToolSchema) ([]*message.Msg, []*message.Msg) {
 	if reserveTokenBudget <= 0 {
 		// Emergency path (reserve budget disabled, or the retry after a
 		// split that produced nothing): everything is compressed, including
@@ -775,10 +781,28 @@ func (a *UnifiedAgent) splitMsgsForCompression(ctxMsgs, baseMsgs []*message.Msg,
 		}
 	}
 
-	if splitIdx >= len(ctxMsgs) {
-		splitIdx = adjustSplitForToolPairs(ctxMsgs, len(ctxMsgs)-1)
-	} else {
-		splitIdx = adjustSplitForToolPairs(ctxMsgs, splitIdx)
+	// The last message is kept even when it alone reaches the reserve.
+	fit := min(splitIdx, len(ctxMsgs)-1)
+	splitIdx = adjustSplitForToolPairs(ctxMsgs, fit)
+	// When a message that fits holds a result whose call is in an earlier
+	// message, the forward repair moves the split past that result, dropping
+	// it and every message before it, up to every message when the result is
+	// in the last one; the backward repair below cannot undo that, since the
+	// result is then before the split. Keep the messages that fit instead and
+	// let the backward repair take in the call, as summaryTailStart does. The
+	// kept messages can then exceed the reserve (and, with a large call
+	// message, the trigger), as they can for a call still in flight. The
+	// forward result stands when the kept messages would hold a result that
+	// answers no call before it among them (its call is not in the context,
+	// or repeated call IDs mislead the repairs, which match by ID; the
+	// forward push is the repair for a missing call), when the call is in the
+	// first message (nothing would be left to compress), and for a fresh
+	// window, which keeps as little as it can.
+	if splitIdx > fit && !freshWindow {
+		start := pullSplitBackForToolPairs(ctxMsgs, fit)
+		if start > 0 && orphanToolResult(ctxMsgs[start:]) == "" {
+			return copyMsgs(ctxMsgs[:start]), copyMsgs(ctxMsgs[start:])
+		}
 	}
 	// Applied last, and it iterates: adjustSplitForToolPairs only pushes the
 	// split FORWARD, which can swallow a call that is still in flight and can
@@ -896,6 +920,31 @@ func pullSplitBackForToolPairs(msgs []*message.Msg, splitIdx int) int {
 		}
 		splitIdx = limit
 	}
+}
+
+// orphanToolResult returns the ID of a tool result in msgs that answers no
+// call before it in msgs, or "" when every result does. Results pair with
+// earlier unanswered calls of their ID, one call each, so neither a call that
+// reuses the ID after the result nor a call already answered pairs it.
+func orphanToolResult(msgs []*message.Msg) string {
+	unanswered := make(map[string]int)
+	for _, m := range msgs {
+		if m == nil {
+			continue
+		}
+		for _, b := range m.Content {
+			switch blk := b.(type) {
+			case message.ToolCallBlock:
+				unanswered[blk.ID]++
+			case message.ToolResultBlock:
+				if unanswered[blk.ID] == 0 {
+					return blk.ID
+				}
+				unanswered[blk.ID]--
+			}
+		}
+	}
+	return ""
 }
 
 // truncateSummary keeps the existing byte estimate and middle elision for summaries.
