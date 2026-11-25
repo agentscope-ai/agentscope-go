@@ -194,5 +194,44 @@ func (w *BubblewrapWorkspace) resolve(path string) (string, error) {
 	if cleaned != base && !strings.HasPrefix(cleaned, base+string(os.PathSeparator)) {
 		return "", fmt.Errorf("%w: %q", ErrPathEscape, path)
 	}
+	// Symlink containment: mirror LocalWorkspace.resolve. File ops run
+	// host-side (bind-mount design), so a link planted inside the root
+	// (e.g. by an agent shell) must not redirect them outside it. Resolve
+	// links - including the base itself - and re-check.
+	baseResolved := base
+	if r, err := filepath.EvalSymlinks(base); err == nil {
+		baseResolved = r
+	}
+	resolved := evalSymlinksLenient(cleaned)
+	if resolved != baseResolved && !strings.HasPrefix(resolved, baseResolved+string(os.PathSeparator)) {
+		return "", fmt.Errorf("%w via symlink: %q", ErrPathEscape, path)
+	}
+	// Peel a final-component symlink chain that evalSymlinksLenient cannot
+	// see when the ultimate target does not exist (dangling links). Iterate
+	// bounded like filepath.EvalSymlinks and fail closed on exhaustion; a
+	// host-side write would otherwise follow the chain outside the root.
+	target := cleaned
+	for i := 0; i < 255; i++ {
+		fi, err := os.Lstat(target)
+		if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+			break
+		}
+		link, err := os.Readlink(target)
+		if err != nil {
+			return "", fmt.Errorf("%w via symlink: %q", ErrPathEscape, path)
+		}
+		if filepath.IsAbs(link) {
+			target = link
+		} else {
+			target = filepath.Join(filepath.Dir(target), link)
+		}
+	}
+	if fi, err := os.Lstat(target); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("%w via symlink: %q", ErrPathEscape, path)
+	}
+	target = evalSymlinksLenient(target)
+	if target != baseResolved && !strings.HasPrefix(target, baseResolved+string(os.PathSeparator)) {
+		return "", fmt.Errorf("%w via symlink: %q", ErrPathEscape, path)
+	}
 	return cleaned, nil
 }
