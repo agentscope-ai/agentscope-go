@@ -44,16 +44,32 @@ type Config struct {
 // Client is safe for concurrent calls when its transport is. Construct with New.
 type Client struct {
 	key, model, endpoint        string
-	http                        http.Client
+	http                        *http.Client
+	modelOverride               *string
 	requestLimit, responseLimit int64
 }
 
 var _ c.Classifier = (*Client)(nil)
 
+// WithModel returns a view whose ordinary Classify requests model instead of the
+// configured model. It shares the HTTP client but does not change the receiver.
+// Target still reports the configured binding; ClassifyWithDispatch rejects a
+// different model before invoking the guard or sending a request.
+func (cl *Client) WithModel(model string) *Client {
+	if cl == nil {
+		return nil
+	}
+	view := *cl
+	view.modelOverride = &model
+	return &view
+}
+
+func validModel(s string) bool { return strings.TrimSpace(s) != "" && utf8.ValidString(s) }
+
 // New validates configuration without making a request. It never reads keys
 // from the environment. The default HTTP transport has no whole-call timeout.
 func New(cfg Config) (*Client, error) {
-	if strings.TrimSpace(cfg.APIKey) == "" || strings.TrimSpace(cfg.Model) == "" || !utf8.ValidString(cfg.Model) {
+	if strings.TrimSpace(cfg.APIKey) == "" || !validModel(cfg.Model) {
 		return nil, invalidRequest("API key and model are required")
 	}
 	for _, v := range []byte(cfg.APIKey) {
@@ -86,7 +102,7 @@ func New(cfg Config) (*Client, error) {
 	}
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	hc.Jar = nil
-	return &Client{key: cfg.APIKey, model: cfg.Model, endpoint: cfg.Endpoint, http: hc, requestLimit: cfg.MaxRequestBytes, responseLimit: cfg.MaxResponseBytes}, nil
+	return &Client{key: cfg.APIKey, model: cfg.Model, endpoint: cfg.Endpoint, http: &hc, requestLimit: cfg.MaxRequestBytes, responseLimit: cfg.MaxResponseBytes}, nil
 }
 
 // HTTPError exposes only the status, never the provider's raw error body.
@@ -113,7 +129,7 @@ func failed(s string) *ae.AgentError {
 // DNS/connection failures therefore retain an attempt with unknown usage.
 // No request/response bodies, credentials or raw transport errors are logged.
 func (cl *Client) Classify(ctx context.Context, r c.Request) (out *c.Response, err error) {
-	return cl.ClassifyWithDispatch(ctx, r, c.DispatchLimits{}, nil)
+	return cl.classify(ctx, r, c.DispatchLimits{}, nil, false)
 }
 
 // Target returns the actual endpoint and configured requested version.
@@ -122,6 +138,10 @@ func (cl *Client) Target() (endpoint, model string) { return cl.endpoint, cl.mod
 // ClassifyWithDispatch guards the HTTP dispatch after request construction.
 // A guard failure preserves its error identity and records no attempt.
 func (cl *Client) ClassifyWithDispatch(ctx context.Context, r c.Request, limits c.DispatchLimits, begin func(c.AttemptKind) error) (out *c.Response, err error) {
+	return cl.classify(ctx, r, limits, begin, true)
+}
+
+func (cl *Client) classify(ctx context.Context, r c.Request, limits c.DispatchLimits, begin func(c.AttemptKind) error, managed bool) (out *c.Response, err error) {
 	out = &c.Response{OperationID: r.OperationID}
 	if cl == nil || cl.endpoint == "" {
 		return out, invalidRequest("client must be constructed with New")
@@ -139,10 +159,19 @@ func (cl *Client) ClassifyWithDispatch(ctx context.Context, r c.Request, limits 
 	if limits.MaxResponseBytes > 0 && limits.MaxResponseBytes < copyClient.responseLimit {
 		copyClient.responseLimit = limits.MaxResponseBytes
 	}
-	cl = &copyClient
 	if e := ctx.Err(); e != nil {
 		return out, canceled(e, "before dispatch")
 	}
+	if model := cl.modelOverride; model != nil {
+		if !validModel(*model) {
+			return out, invalidRequest("override model must be nonblank UTF-8")
+		}
+		if managed && *model != cl.model {
+			return out, invalidRequest("override model differs from managed target")
+		}
+		copyClient.model = *model
+	}
+	cl = &copyClient
 	if e := c.ValidateRequest(r); e != nil {
 		return out, e
 	}

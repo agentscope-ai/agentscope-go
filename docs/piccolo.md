@@ -36,7 +36,7 @@ with Piccolo-4B Q8_0. It was exercised on an M4 with 24 GiB unified memory and
 macOS 15.3.1. Model files require approximately 4.48 GB of disk space; this file
 size is not a runtime memory requirement. Other machines still need their own
 capacity and compatibility check. For other platforms, see the upstream
-[runtime guide](https://github.com/agentscope-ai/QwenPaw/blob/main/docs/local-piccolo.md).
+[runtime guide](https://github.com/agentscope-ai/QwenPaw/blob/main/plugins/provider/local-llamacpp/PICCOLO.md).
 
 The W0 environment configuration landed in [PR #111](https://github.com/agentscope-ai/agentscope-go/pull/111).
 Use a source checkout containing that change and this example; the commands do
@@ -54,7 +54,7 @@ not establish availability in a particular published release.
 | GGUF | `Piccolo-4B-Q8_0.gguf`, 4,482,403,872 bytes |
 | GGUF SHA-256 | `1372d7521f1b570a0d9284115f7aca989b0ae15cc6dd62d7d125716fd860b69c` |
 
-Compare the [runtime release identity](https://github.com/agentscope-ai/QwenPaw/blob/main/src/qwenpaw/local_models/runtime-release.json),
+Compare the [runtime release identity](https://github.com/agentscope-ai/QwenPaw/blob/e98928429e72b38fd92a0dc51ffd66e1b303faea/src/qwenpaw/local_models/runtime-release.json),
 [published archive manifest](https://download.qwenpaw.agentscope.io/files/models/llama_cpp/piccolo-v1/runtime-release.json)
 and [model manifest](https://github.com/agentscope-ai/Piccolo/blob/main/models/manifest.json).
 A stock llama.cpp or Ollama chat endpoint does not implement this Piccolo

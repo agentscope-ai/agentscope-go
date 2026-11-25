@@ -104,6 +104,68 @@ fmt.Println(cam.ActiveModel()) // "cloud" or "local"
 | Open | All calls go to local (no cloud attempts) |
 | Half-Open | Single probe to cloud; if success, close circuit |
 
+### Replaying the local model's tool calls (experimental)
+
+The two models share one history, so the cloud receives the tool calls the
+local model wrote while the cloud was away. Their arguments are in the local
+model's own form, which can differ from the cloud's: a local model may write
+`{"path": …, "content": …}` where the cloud writes `content` first. In the
+measurement below, such calls sometimes made the cloud model run away on its
+next whole-file write. `WithCanonicalReplay` sends the cloud those arguments
+as compact JSON with sorted keys:
+
+```go
+cam := model.NewConnectivityAwareModel(local, cloud, model.WithCanonicalReplay())
+```
+
+The local model's calls are marked in `ToolCallBlock.Extra`
+(`agentscope_writer_rank`) as they pass through, including in the final
+response of a stream. The mark is kept with the agent's messages and
+checkpoints; no formatter sends it. Only the copy of the history sent to the
+cloud is rewritten. The stored messages, the local model's own requests and
+the cloud's calls are unchanged, and the rewrite is deterministic, so cached
+prefixes stay stable. Calls written before the option was enabled are sent
+as written, and so are arguments the rewrite could alter: anything that is
+not exactly one valid JSON value, invalid UTF-8, and any surrogate escape
+(`\uD800` to `\uDFFF`), paired or not.
+`FallbackChatModel.CanonicalReplay` does the same for the calls of models
+later in its chain. Do not turn the option on in two wrappers nested in each
+other: they share the one mark.
+
+The rewrite changes what is sent wherever the adapter keeps the model's key
+order. The adapters built on the OpenAI-compatible formatter (OpenAI Chat
+Completions, DashScope, Volcengine, DeepSeek, Moonshot, xAI and the
+OpenAI-compatible Ollama adapter) and the Responses adapter send the
+arguments as the model wrote them; Ollama's native adapter removes the spaces
+but keeps the order. The Anthropic and Gemini adapters already send the
+arguments as a parsed object, which Go encodes with sorted keys, so the
+option changes nothing there.
+
+The Responses adapter writes a call's ID as the `function_call` item `id`
+only when it begins with `fc`, and keeps its `call_id`, so the
+local model's calls (a vLLM server's `chatcmpl-tool-…`, for example) reach a
+Responses cloud and the option applies there.
+
+**The measurement.** It comes from the benchmark of a Main Thread prototype,
+with `gpt-6-luna` on the OpenAI Responses API as the cloud and Qwen3.5-4B as
+the local model. 11 recorded requests holding the local model's calls (one
+chosen because it had run away in a live run) were sent 30 times each, with
+output capped at 8,000 tokens. Re-sent as recorded (the benchmark's
+transport had already removed the local calls' item ids), 21 to 27 of 330
+replies ran into the cap per pass, and 0 of 330 with the keys sorted;
+removing only the spaces made no measurable difference
+([Amendment 8](https://github.com/thomeal/agentscope-go/blob/5c334a054e66147cd7f2f4edbf0cfa353b76ebcf/experiments/stage0/prereg.md#amendment-8)).
+Sent through `ConnectivityAwareModel` and the Responses adapter, with a
+transport that removed non-`fc` item ids as the adapter now does itself, 20
+of 330 ran into the cap with the option off and 0 of 330 with it on
+([Amendment 22](https://github.com/thomeal/agentscope-go/blob/f7da54b2195f681d0b9adaeb74fd0ce8d909dc18/experiments/stage0/prereg.md#amendment-22-the-librarys-canonical-replay-on-amendment-8s-prompts)).
+They all came on requests where the local model wrote `path` first. In live
+runs, without a cap, such replies went on to the model's 128K output limit.
+This is one cloud model, one local model and one tool, on buffered `Chat`
+calls; the rewrite applies to every marked call, and its effect in live
+sessions, on streamed calls, on other tools and on other models is not
+established.
+
 ## Context Window and Timeouts for Local Models
 
 Two settings that cloud deployments never touch matter on the edge. Neither is

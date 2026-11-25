@@ -52,8 +52,9 @@ pkg/agentscope/
 ├── model/                 # LLM provider interface
 │   ├── model.go           # ChatModel interface, CallOptions, ToolSchema
 │   ├── openai.go          # OpenAI Chat Completions adapter
+│   ├── openai_compat.go   # Shared OpenAI-compatible Chat Completions wire layer
 │   ├── anthropic.go       # Anthropic Messages adapter
-│   ├── dashscope.go       # DashScope (Qwen) adapter + shared OpenAI-compat types
+│   ├── dashscope.go       # DashScope (Qwen) adapter
 │   ├── deepseek.go        # DeepSeek adapter
 │   ├── gemini.go          # Google Gemini adapter
 │   ├── ollama.go          # Ollama (local) adapter

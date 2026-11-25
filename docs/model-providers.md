@@ -73,6 +73,27 @@ cm, _ := model.NewOpenAIResponseModel(&model.OpenAIResponseConfig{
 
 Uses the Responses API (`/v1/responses`) instead of Chat Completions. Default timeout is 5 minutes for long reasoning tasks.
 
+The provider now uses `formatter.OpenAIResponseFormatter` for input conversion.
+`Format` and `FormatMultiAgent` emit the same ordered input items as model
+requests: complete `responses_item` reasoning metadata (including encrypted
+content, with null map fields omitted), native tool-result images, hints as
+user segments in place, and original call-ID mapping across messages. The
+formatter's existing media filter and sender policy remain available; it still
+skips system messages, while the provider separately extracts instructions.
+Legacy `reasoning_item_id` references remain supported, including when that
+history is sent through the provider.
+
+For callers inspecting formatter maps, a single-text segment now has string
+`content`; multimodal/multiple-part segments use arrays. Text is flushed at
+tool/reasoning/hint boundaries instead of collected at the start of a turn.
+Empty messages produce empty string content, and otherwise unsupported turns
+use the provider's existing content-omitted placeholder. Tool results inherit
+the preceding call's original ID unless valid explicit result metadata
+supplies one. Missing, empty or non-string call-ID metadata falls back to the
+block ID. Consumers should read the ordered items and support both content
+shapes. Public interfaces are unchanged. These are conversion fixtures, not
+new live-provider acceptance claims.
+
 Both `Chat` and `ChatStream` preserve direct `DataBlock` images as
 `input_image` parts, using the original URL or a base64 data URL. A
 `HintBlock` becomes user input at its position in the history, including
@@ -99,6 +120,12 @@ stored tool results. The adapter preserves a nonempty string `call_id` in
 `ToolCallBlock.Extra["call_id"]` in both call paths. Streaming argument
 fragments still correlate through `item_id`; a completed function-call
 item can supply the call ID if the initial item omitted it.
+
+When replaying foreign tool calls, the adapter and public formatter omit the
+optional function-call item `id` unless it starts with `fc`. The tool ID remains
+available as `call_id` (or its explicit metadata override); stored history is
+unchanged. This keeps other providers' tool IDs out of the Responses item-ID
+field without renaming the call/result correlation IDs.
 
 When replaying history, the adapter uses that original call ID for the
 function call and its later results. A result's explicit nonempty string
@@ -210,6 +237,14 @@ cm, _ := model.NewDeepSeekChatModel(model.DeepSeekConfig{
 
 Models: `deepseek-chat`, `deepseek-reasoner`, `deepseek-v4-flash`, `deepseek-v4-pro`
 
+#### DeepSeek thinking (unreleased)
+
+In both `Chat` and `ChatStream`, `model.WithThinking(true, 0)` sends
+`thinking.type = "enabled"`. `model.WithThinking(false, 0)` or
+`model.WithThinkingDisabled()` sends `"disabled"`. Leaving the option unset
+omits `thinking` and uses the provider default. The adapter ignores the budget
+argument, including positive values; use zero for the toggle.
+
 ### Google Gemini
 
 ```go
@@ -220,6 +255,15 @@ cm, _ := model.NewGeminiChatModel(model.GeminiConfig{
 ```
 
 Models: `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-flash-preview`, `gemini-3.1-pro-preview`
+
+Gemini preserves provider-issued tool-call IDs and replays the same ID on
+`functionCall` and `functionResponse`. When the provider omits the ID, the adapter
+generates one. For a stored reply with text, calls, and results, the adapter sends
+model text and calls in order, then sends consecutive results as user content.
+Later model text starts a new model entry. Any call's thought signature stays on
+its original call part. This projection leaves the stored reply intact.
+The adapter targets the Gemini Developer API. Custom `BaseURL` endpoints must
+accept these ID fields; Vertex-style endpoint compatibility is not guaranteed.
 
 #### Gemini thinking (unreleased)
 
@@ -310,6 +354,12 @@ native `tools` field; `model.WithToolChoice` has no native counterpart, so its
 tool whitelist filters the sent tools while a non-default mode is ignored with
 a warning.
 
+If neither of the first two [structured output](#structured-output) attempts
+yields usable JSON and the failure permits a retry, `model.GenerateStructuredOutput`
+sends `think: false` on its next native `/api/chat` request. The option applies
+only to that request. The selected Ollama model determines whether thinking
+can be disabled.
+
 ### Moonshot (Kimi)
 
 ```go
@@ -322,6 +372,11 @@ cm, _ := model.NewMoonshotChatModel(model.MoonshotConfig{
 Models: `kimi-k2.5`, `kimi-k2.6`, `kimi-k3`, `moonshot-v1-8k`, `moonshot-v1-32k`, `moonshot-v1-128k`
 
 **Kimi K3** — Latest Kimi model with 256K context, 64K output. Supports text, vision (JPEG/PNG/GIF/WebP), video (MP4), and extended thinking.
+
+Moonshot uses the same [thinking options](#deepseek-thinking-unreleased) as
+DeepSeek. The Kimi K3 IDs `kimi-k3`, `kimi-k3.1-pro` and
+`kimi-k3.1-pro-highspeed` always omit the switch because thinking is always
+enabled.
 
 ### xAI (Grok)
 
@@ -575,6 +630,10 @@ resp, _ := cm.Chat(ctx, msgs,
 )
 ```
 
+Thinking budgets are provider-specific. DeepSeek and Moonshot use only the
+enable/disable flag; see [thinking options](#deepseek-thinking-unreleased) for
+the request mapping and [Moonshot](#moonshot-kimi) for Kimi K3 exceptions.
+
 For `OpenAIChatModel.Chat` and `AnthropicChatModel.Chat`, `model.WithRetries`
 configures additional attempts and the delay between them. Their retry waits
 honor the caller's context: cancellation and deadlines return errors matching
@@ -587,6 +646,12 @@ Automatic failover from a primary to a backup provider:
 ```go
 cm := model.NewFallbackChatModel(primaryModel, fallbackModel)
 ```
+
+With a cloud primary and a local fallback, the cloud later receives the tool
+calls the local model wrote. Set `cm.CanonicalReplay = true` (experimental) to
+send each model the arguments of calls written by models later in the chain
+as compact JSON with sorted keys; see
+[replaying the local model's tool calls](edge-deployment.md#replaying-the-local-models-tool-calls-experimental).
 
 ## Structured Output
 

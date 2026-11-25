@@ -92,6 +92,10 @@ func (m *OllamaChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts ..
 		p := float32(*callOpts.TopP)
 		reqBody.TopP = &p
 	}
+	if callOpts.ThinkingEnable != nil && !*callOpts.ThinkingEnable {
+		none := "none"
+		reqBody.ReasoningEffort = &none
+	}
 	if callOpts.Seed != nil {
 		reqBody.Seed = callOpts.Seed
 	}
@@ -153,6 +157,10 @@ func (m *OllamaChatModel) ChatStream(ctx context.Context, msgs []*message.Msg, o
 		p := float32(*callOpts.TopP)
 		reqBody.TopP = &p
 	}
+	if callOpts.ThinkingEnable != nil && !*callOpts.ThinkingEnable {
+		none := "none"
+		reqBody.ReasoningEffort = &none
+	}
 	if callOpts.Seed != nil {
 		reqBody.Seed = callOpts.Seed
 	}
@@ -191,4 +199,10 @@ func (m *OllamaChatModel) CountTokens(msgs []*message.Msg, tools []ToolSchema) i
 // means unknown.
 func (m *OllamaChatModel) ContextSize() int {
 	return m.contextSize
+}
+
+// DisableThinkingOptions supplies the structured-output fallback toggle.
+// Ollama's OpenAI-compatible endpoint represents it as reasoning_effort "none".
+func (m *OllamaChatModel) DisableThinkingOptions() []CallOption {
+	return []CallOption{WithThinkingDisabled()}
 }
