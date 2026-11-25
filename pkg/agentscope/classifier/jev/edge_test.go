@@ -60,7 +60,7 @@ func TestConfigAndPreDispatch(t *testing.T) {
 	if !errors.Is(err, c.ErrInvalidRequest) || len(out.Attempts) != 0 {
 		t.Fatal(err)
 	}
-	for _, cl := range []*jev.Client{nil, {}} {
+	for _, cl := range []*jev.Client{nil, {}, (*jev.Client)(nil).WithModel("alternate")} {
 		out, err = cl.Classify(context.Background(), request())
 		if !errors.Is(err, c.ErrInvalidRequest) || len(out.Attempts) != 0 {
 			t.Fatal(err)

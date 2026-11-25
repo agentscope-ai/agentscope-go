@@ -118,6 +118,7 @@ func (r *replyRecoveryRun) snapshot() *ReplyRecoveryState {
 }
 func (a *UnifiedAgent) beginRecovery(ctx context.Context, resume bool) (context.Context, *replyRecoveryRun, error) {
 	a.mu.Lock()
+	a.invalidateRetentionLocked()
 	defer a.mu.Unlock()
 	if a.stateSaver == nil {
 		return nil, nil, fmt.Errorf("agent: reply recovery requires a StateSaver")

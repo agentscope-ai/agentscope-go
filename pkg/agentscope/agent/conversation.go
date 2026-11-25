@@ -148,6 +148,7 @@ func (a *UnifiedAgent) NewConversation(ctx context.Context) (*Conversation, erro
 		ctx = context.Background()
 	}
 	a.mu.Lock()
+	a.invalidateRetentionLocked()
 	defer a.mu.Unlock()
 	if a.activeConv != nil {
 		return nil, fmt.Errorf("agent %s: conversation already active", a.name)
@@ -243,6 +244,7 @@ func (c *Conversation) Close() error {
 	close(c.events)
 	c.agent.mu.Lock()
 	if c.agent.activeConv == c {
+		c.agent.invalidateRetentionLocked()
 		c.agent.activeConv = nil
 	}
 	c.agent.mu.Unlock()
@@ -464,6 +466,7 @@ func (c *Conversation) runIdleCompact(ack chan<- error) {
 // appendInterruptMarker records the model-visible interruption marker.
 func (a *UnifiedAgent) appendInterruptMarker() {
 	a.mu.Lock()
+	a.invalidateRetentionLocked()
 	defer a.mu.Unlock()
 	a.state.Context = append(a.state.Context, message.UserMsg(a.name, interruptedTurnMarkerText))
 }
@@ -491,6 +494,7 @@ func (a *UnifiedAgent) drainConversationOps(ctx context.Context, ch chan<- event
 	}
 	if len(inputs) > 0 {
 		a.mu.Lock()
+		a.invalidateRetentionLocked()
 		for _, in := range inputs {
 			a.state.Context = append(a.state.Context, message.UserMsg(a.name, in))
 		}

@@ -53,8 +53,8 @@ func TestFactory_ListSchemas(t *testing.T) {
 	f := NewFactory()
 	schemas := f.ListSchemas()
 
-	if len(schemas) != 9 {
-		t.Fatalf("expected 9 schemas, got %d", len(schemas))
+	if len(schemas) != 10 {
+		t.Fatalf("expected 10 schemas, got %d", len(schemas))
 	}
 
 	// Should be sorted by provider name
@@ -139,4 +139,34 @@ func TestFactory_Register_Errors(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for nil constructor")
 	}
+}
+
+func TestFactoryTypeSafe(t *testing.T) {
+	f := NewFactory()
+	fields := map[string]string{"provider": "typesafe", "api_key": "test-key"}
+	for _, tc := range []struct{ override, want string }{
+		{"", "https://api.typesafe.ai/v1/systemone"},
+		{"https://example.test/evaluate", "https://example.test/evaluate"},
+	} {
+		fields["base_url"] = tc.override
+		cred, err := f.FromMap(fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cred.Provider() != "typesafe" || cred.APIKey() != "test-key" || cred.BaseURL() != tc.want {
+			t.Errorf("unexpected TypeSafe credential for URL override %q", tc.override)
+		}
+	}
+	for _, schema := range f.ListSchemas() {
+		if schema.Provider != "typesafe" {
+			continue
+		}
+		for _, field := range schema.Fields {
+			if field.Name == "api_key" && field.Required && field.Secret {
+				return
+			}
+		}
+		t.Fatal("TypeSafe schema must mark api_key as required and secret")
+	}
+	t.Fatal("TypeSafe schema missing from factory")
 }

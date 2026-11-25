@@ -46,6 +46,15 @@ report even on failure; constructor failure is separate. The existing
 `go run ./examples/classifier` demonstrates typed questions, fake results,
 cancellation and accounting without credentials or network access.
 
+To select another model for one ordinary call, use
+`client.WithModel(version).Classify(ctx, request)`. The next
+`client.Classify(ctx, request)` still uses the configured model. Saving the
+returned client view explicitly reuses its override; it shares the original
+HTTP client. A blank or invalid UTF-8 override returns
+`classifier.ErrInvalidRequest` (via `errors.Is`) without sending a request.
+`Attempt.RequestedModel` records the model sent; `Response.Model` records the
+model reported by the service.
+
 `Config.Model` and `APIKey` are required. The client does not select an alias or
 read environment variables implicitly. `Endpoint` is the complete POST URL;
 its default is `https://api.typesafe.ai/v1/systemone`. Custom HTTP(S) endpoints
@@ -189,6 +198,9 @@ bodies, so it is not used on this single-attempt path. No new dependency is need
 ## Managed routing
 
 `Client.Target()` returns the configured endpoint/model binding.
+This binding is unchanged on a `WithModel` view. If the override differs,
+`ClassifyWithDispatch` rejects the call before invoking the guard or sending
+HTTP, even with a nil guard. An override equal to the binding is allowed.
 `ClassifyWithDispatch(ctx, request, limits, begin)` supports the optional
 [managed router](managed-routing.md): positive `DispatchLimits` narrow adapter
 byte caps; zero retains them, negative values are rejected. The guard runs after
