@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -131,8 +130,7 @@ func (t *viewTextFileTool) Execute(ctx context.Context, args map[string]any) (*T
 		return NewErrorResponse(fmt.Errorf("path or file_path is required")), nil
 	}
 
-	clean := filepath.Clean(path)
-	abs, err := filepath.Abs(clean)
+	abs, err := resolvePath(ctx, path)
 	if err != nil {
 		return NewErrorResponse(fmt.Errorf("invalid path: %w", err)), nil
 	}

@@ -11,6 +11,14 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — file-tool workspace jail confinement
+
+- `view_text_file`, `Glob`, and `LSP` now resolve paths through the workspace
+  jail (`resolvePath`), so they honor `WithWorkspaceRoot` like the other file
+  tools instead of bypassing it. `Glob` also filters matches to the base
+  directory (symlink-aware), so a traversing pattern or an inner symlink cannot
+  list paths outside it.
+
 ### Fixed — container workspace shell quoting
 
 - Docker and Apple container file operations now single-quote paths with
