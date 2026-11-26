@@ -86,3 +86,29 @@ func TestForkSession_Errors(t *testing.T) {
 		t.Error("expected error for empty session id")
 	}
 }
+
+func TestForkSession_RejectsSourceSessionID(t *testing.T) {
+	const sourceID = "sess-original"
+	const replyID = "reply-saved"
+	ctx := context.Background()
+	saver := newFakeStateSaver()
+	a := NewUnifiedAgent("fork-agent", "helpful", &mockChatModel{},
+		WithState(&AgentState{SessionID: sourceID, ReplyID: replyID}),
+		WithStateSaver(saver),
+	)
+	if err := a.SaveCheckpoint(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.ForkSession(ctx, sourceID); err == nil {
+		t.Error("forking onto the source session should return an error")
+	}
+
+	saved, err := LoadCheckpoint(ctx, saver, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.ReplyID != replyID {
+		t.Errorf("source checkpoint reply ID = %q, want %q", saved.ReplyID, replyID)
+	}
+}
