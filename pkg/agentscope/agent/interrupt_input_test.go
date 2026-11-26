@@ -87,7 +87,7 @@ func TestNewInputInterruptsUnansweredCalls(t *testing.T) {
 		text  string
 	}{
 		{message.ToolCallAsking, interruptedApprovalResult},
-		{message.ToolCallSubmitted, interruptedUnknownResult},
+		{message.ToolCallSubmitted, interruptedExternalResult},
 		{message.ToolCallPending, interruptedUnknownResult},
 		{message.ToolCallAllowed, interruptedUnknownResult},
 	} {

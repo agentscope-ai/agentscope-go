@@ -144,11 +144,15 @@ with `WithState`) instead closes the agent's calls that an earlier reply left
 without a result, with no result in any message and not marked finished:
 nothing runs and nothing is asked again. Each such call gets a result with
 state `interrupted` in its call's message, before the new input. The result
-tells the model that a call awaiting approval did not run and was not refused,
-and that any other call (a submitted external call, or one cut off mid-step)
-may or may not have taken effect. When it closes any call, the answers still
-queued for earlier requests are dropped, so they cannot answer a later call
-that reuses an ID. Before its first model call the reply emits one
+tells the model that a call awaiting approval did not run and was not refused;
+that a submitted external call may have run on the host, or may still be
+running, and that a result the host returns now is not recorded; and that a
+call cut off mid-step may or may not have taken effect. When it closes any
+call, the answers still queued for earlier requests are dropped, so they
+cannot answer a later call that reuses an ID. A result or confirmation the
+host submits later for a closed call is dropped when it names the earlier
+reply's ID; with an empty `ReplyID` it matches by call ID, so it can answer a
+later call that reuses the ID, as any late answer can. Before its first model call the reply emits one
 `agent.ToolCallsInterruptedEvent` custom event listing the closed calls, and
 no tool events for them: they belong to the earlier reply, whose messages hold
 their results. While another reply core of the agent is still running (a

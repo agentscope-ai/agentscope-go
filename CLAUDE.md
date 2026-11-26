@@ -197,8 +197,9 @@ agent's calls that an earlier reply left without a result
 (`interruptUnansweredCallsLocked`; results in any message answer calls, and
 finished calls are left): nothing runs or is asked again, an interrupted
 result goes into the call's message, before the input, saying the call did
-not run (it awaited approval) or that its outcome is unknown, queued answers
-are dropped, and one `ToolCallsInterruptedEvent` replaces tool events. It
+not run (it awaited approval) or that its outcome is unknown (a submitted
+external call's later result is not recorded), queued answers are dropped,
+and one `ToolCallsInterruptedEvent` replaces tool events. It
 skips this while another reply core of the agent is running; a call that
 core awaits approval for then ends the new reply with the waiting message.
 

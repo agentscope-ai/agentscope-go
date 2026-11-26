@@ -218,6 +218,9 @@ func (a *UnifiedAgent) awaitingCalls() (asking, submitted []message.ToolCallBloc
 const (
 	interruptedApprovalResult = "Tool call did not run: new input arrived while it waited for the user's approval, " +
 		"so the request was closed unanswered. Nobody refused it; call it again if it is still needed."
+	interruptedExternalResult = "Tool call interrupted: new input arrived before the host returned its result, " +
+		"so its outcome is unknown, and a result the host returns now is not recorded. " +
+		"If it could have changed something, check whether it did before calling it again."
 	interruptedUnknownResult = "Tool call interrupted: new input arrived before its result was recorded, " +
 		"so its outcome is unknown. If it could have changed something, check whether it did before calling it again."
 )
@@ -244,9 +247,10 @@ type interruptedCall struct {
 // for an approval or an external result, or before a step's results were
 // recorded; a reply canceled in process records a result for each call. A
 // call that was waiting for the user's approval did not run. Any other may
-// have: a host may have run a submitted external call, and a pending or
-// allowed call was cut off mid-step, so its outcome is unknown. A call whose
-// state is already finished is left as it is.
+// have: a host may have run a submitted external call, or may still be
+// running it, and its result can no longer be recorded; a pending or
+// allowed call was cut off mid-step. Both have an unknown outcome. A call
+// whose state is already finished is left as it is.
 // Each result is recorded in its call's message, so the input follows the
 // pair: providers reject a message between a call and its result (Anthropic
 // documents it), and a result after the input also misled the compression
@@ -306,8 +310,11 @@ func (a *UnifiedAgent) interruptUnansweredCallsLocked() []interruptedCall {
 		}
 		prior := tc.State
 		text := interruptedUnknownResult
-		if prior == message.ToolCallAsking {
+		switch prior {
+		case message.ToolCallAsking:
 			text = interruptedApprovalResult
+		case message.ToolCallSubmitted:
+			text = interruptedExternalResult
 		}
 		tc.State = message.ToolCallFinished
 		content[pos.idx] = tc

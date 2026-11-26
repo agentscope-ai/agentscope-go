@@ -506,8 +506,9 @@ func (a *UnifiedAgent) Reply(ctx context.Context, input string) (*message.Msg, e
 // an earlier reply left without a result, as a restored checkpoint can hold
 // them: nothing runs and nothing is asked again. Each gets an interrupted
 // result in its call's message, saying that a call awaiting approval did not
-// run or that another call's outcome is unknown, and answers still queued for
-// earlier requests are dropped. The reply reports them with a
+// run or that another call's outcome is unknown (for a submitted external
+// call, also that a result the host returns now is not recorded), and
+// answers still queued for earlier requests are dropped. The reply reports them with a
 // ToolCallsInterruptedEvent. ResumeReplyStream continues such calls instead.
 // While another reply core of this agent is still running (a canceled reply
 // whose tool ignores cancellation), nothing is closed or dropped: that core

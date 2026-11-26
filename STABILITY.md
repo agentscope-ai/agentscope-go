@@ -317,9 +317,11 @@ limits. Shared governance across ordinary Agent/helper paths remains proposed.
 - **Behavior change (#207):** a reply with new input no longer asks again
   about calls a restored checkpoint left awaiting approval or an external
   result, as a plain restore (`WithState`, then `Reply` or `ReplyStream`) did
-  in v2.0.11. It closes the agent's calls that have no result and are not
-  marked finished, with an `interrupted` result before the input: a call
-  awaiting approval did not run, and any other call's outcome is unknown.
+  in v2.0.12 and earlier. It closes the agent's calls that have no result and
+  are not marked finished, with an `interrupted` result before the input: a
+  call awaiting approval did not run, and any other call's outcome is unknown
+  (a result the host returns now for a submitted external call is not
+  recorded).
   Answers queued between replies are then dropped. Nothing is closed while
   another reply core of the agent is still running. To continue such calls, use
   `WithReplyRecovery` and `ResumeReplyStream` before sending new input;

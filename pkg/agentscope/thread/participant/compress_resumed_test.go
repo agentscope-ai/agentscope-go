@@ -2,14 +2,17 @@ package participant
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/agent"
+	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/event"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/message"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/model"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/permission"
+	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/thread"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/tool"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/types"
 )
@@ -60,5 +63,46 @@ func TestActivationInterruptsRestoredConfirmation(t *testing.T) {
 	input := strings.Index(sent, "Q2-INPUT")
 	if call < 0 || result < call || input < result {
 		t.Fatalf("want the call, its result and then the input:\n%s", sent)
+	}
+}
+
+// TestRestoredConfirmationAnswerIsRefused: after a restart, the request the
+// host showed before it is void. An answer the host still submits for it is
+// refused while the activation waits for its own request, and the activation
+// goes on with that request's answer. The restored call does not run.
+func TestRestoredConfirmationAnswerIsRefused(t *testing.T) {
+	var ran atomic.Int32
+	old := message.ToolCallBlock{Type: "tool_call", ID: "c0", Name: "web_fetch", Input: `{"url":"u"}`, State: message.ToolCallAsking}
+	restored := &agent.AgentState{SessionID: "cloud-session", ReplyID: "reply-before-restart", Context: []*message.Msg{
+		message.UserMsg("user", "q1"),
+		message.AssistantMsg(cloudDesc.Name, []message.ContentBlock{old}),
+	}}
+	f := newFixture(t, fixtureOptions{
+		mode:   permission.ModeDefault,
+		noPrep: true,
+		tools:  []tool.Tool{countingFetch(&ran)},
+		agent:  []agent.AgentOption{agent.WithState(restored)},
+		respond: steps(
+			resp("", call("c1", "web_fetch", map[string]any{"url": "b"})),
+			textResp("done"),
+		),
+	})
+
+	var stale []error
+	_, end := activate(t, f.p, foreground(1, "Q2-INPUT"), func(it thread.ActivationEvent) {
+		req, ok := it.Event.(event.RequireUserConfirmEvent)
+		if !ok {
+			return
+		}
+		stale = append(stale, f.p.SubmitUserConfirm(it.Path, confirmed("reply-before-restart", old)))
+		if err := f.p.SubmitUserConfirm(it.Path, confirmed(req.ReplyID, req.ToolCalls[0])); err != nil {
+			t.Errorf("the request's own answer: %v", err)
+		}
+	})
+	if len(stale) != 1 || !errors.Is(stale[0], errConfirmMatchesNone) {
+		t.Fatalf("the void request's answer: %v, want one errConfirmMatchesNone", stale)
+	}
+	if end.Reason != types.ReplyCompleted || ran.Load() != 1 {
+		t.Fatalf("end %+v after %d runs, want a completed reply that ran only the new call", end, ran.Load())
 	}
 }

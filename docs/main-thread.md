@@ -525,6 +525,9 @@ interrupted when that input arrives, before it: nothing runs or is asked
 again, each result says whether its call ran, and the activation does not
 count them as its tool calls. A confirmation request shown before the restart
 is void; if the owner still needs the call, it asks again in a new request.
+`SubmitUserConfirm` refuses an answer the host still submits for the void
+request, because it names the reply before the restart, and the new
+request's own answer still gets through.
 A request a Transfer handed to the owner is resumed there like any other, and
 the input quotes it. If the owner is gone, the
 turn's routing never finished: its request is routed again behind a
