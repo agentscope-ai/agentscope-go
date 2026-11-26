@@ -1,9 +1,11 @@
 package mcp
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/model"
@@ -59,9 +61,13 @@ func NewMCPToolkit(ctx context.Context, client Client, opts ...MCPToolkitOption)
 	if err != nil {
 		return nil, err
 	}
+	sorted := slices.Clone(schemas)
+	slices.SortStableFunc(sorted, func(a, b model.ToolSchema) int {
+		return cmp.Compare(a.Function.Name, b.Function.Name)
+	})
 
 	var tools []tool.Tool
-	for _, s := range schemas {
+	for _, s := range sorted {
 		if !cfg.isAllowed(s.Function.Name) {
 			continue
 		}

@@ -245,6 +245,11 @@ mcpToolkit, _ := mcp.NewMCPToolkit(ctx, client)
 merged := mcp.MergeToolkits(mcpToolkit, localToolkit)
 ```
 
+All three built-in clients and `mcp.NewMCPToolkit` sort discovered tools by tool
+name so tool schemas remain deterministic across server restarts;
+`mcp.MergeToolkits` preserves the order of the passed toolkits and each
+toolkit's tools.
+
 ### Choosing an MCP client
 
 | Client | Use for |
