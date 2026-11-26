@@ -224,7 +224,7 @@ response parsing in both call paths.
 `model/gemini.go` validates thinking options in the shared request builder before
 buffered or streamed dispatch. Exact last-segment Argon/Carbon IDs use levels;
 other models use token budgets. Unset thinking retains provider defaults. See
-[Gemini thinking](docs/model-providers.md#gemini-thinking-unreleased).
+[Gemini thinking](docs/model-providers.md#gemini-thinking-v2012).
 
 `model/volcengine.go` provides direct Ark Chat Completions construction with a
 complete versioned API prefix, tri-state thinking and reasoning effort. Its
