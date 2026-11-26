@@ -157,7 +157,7 @@ calls as the restored state records them. A reply blocked in process on an
 approval saves nothing while it waits, so a call is restored as awaiting
 approval only from a state saved during that wait, by the host or by an
 overlapping reply. If the user approved it and the tool started before the
-process stopped, the restored call is told it did not run. A save after
+process stopped, the call's result tells the model it did not run. A save after
 delivering the answer narrows that window, but cannot be ordered before the
 tool starts: the answer is queued before the waiting reply reads it, and no
 event marks the call as approved. A host that keeps its
