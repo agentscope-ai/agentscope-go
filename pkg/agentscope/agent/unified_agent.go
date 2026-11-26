@@ -761,8 +761,8 @@ func (a *UnifiedAgent) SubmitExternalResult(result *event.ExternalExecutionResul
 // read by the next reply, whose waiters match it as SubmitUserConfirm
 // describes; a next reply with new input that closes unanswered calls drops
 // it instead (see ReplyStream). A value a running reply may still read is
-// never dropped. It
-// returns ctx.Err() at once when ctx has already ended, and an error when
+// never dropped. It returns ctx.Err() at once when ctx has already ended, and
+// an error when
 // result or ctx is nil or the agent has no permission context
 // (WithPermissionContext), which is what creates the channel.
 func (a *UnifiedAgent) SubmitUserConfirmContext(ctx context.Context, result *event.UserConfirmResultEvent) error {
@@ -1052,10 +1052,12 @@ reactLoop:
 
 		switch nextState {
 		case protocol.StateWait:
-			// Crash-recovery re-prompt (HARNESS_DESIGN F1): after a resume
-			// via WithState, asking/submitted calls have no blocked waiter —
-			// re-drive their handshakes. When nothing is awaiting (e.g. an
-			// external system parked us), fall through to the wait exit.
+			// Crash-recovery re-prompt (HARNESS_DESIGN F1): under
+			// ResumeReplyStream, submitted calls have no blocked waiter, so
+			// their execution is requested again (a reply with new input has
+			// closed them instead). Calls another running core still awaits
+			// are left to it. When nothing is awaiting (e.g. an external
+			// system parked us), fall through to the wait exit.
 			if err := a.checkpointBoundary(ctx); err != nil {
 				return types.ReplyError, madeProgress, checkpointError(err)
 			}
@@ -1621,7 +1623,7 @@ func (a *UnifiedAgent) stashConfirm(reply string, cr *event.ConfirmResult) {
 
 // takeStashedConfirm retrieves and removes a parked confirmation for
 // toolCallID whose reply ID ids accepts. An entry naming another reply stays
-// parked for a waiter that accepts it.
+// parked; the stash is cleared when the next reply starts.
 func (a *UnifiedAgent) takeStashedConfirm(ids answerIDs, toolCallID string) (bool, message.ToolCallBlock, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

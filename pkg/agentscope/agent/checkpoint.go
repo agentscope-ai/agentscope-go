@@ -15,20 +15,26 @@ import (
 
 // Checkpointing and crash-recovery (HARNESS_DESIGN F1).
 //
-// Checkpoints are written through the configured StateSaver at safe points:
-// after each executed tool batch and when the reply parks awaiting user
-// confirmation or external execution results. The persisted AgentState
+// Checkpoints are written through the configured StateSaver at safe points,
+// among them after each executed tool batch and before a reply ends waiting
+// (StateWait). A reply blocked in process on a user confirmation or an
+// external result saves nothing while it waits; a host that saves the state
+// then records its calls as asking or submitted. The persisted AgentState
 // carries the full resumable surface: context, summary, reply ID, iteration
 // counter, permission context, activated tool groups, task state,
 // middleware state and the read cache.
 //
 // Crash semantics (documented contract):
-//   - A crash MID-BATCH resumes by re-executing the whole batch. Tool side
+//   - A crash MID-BATCH: ResumeReplyStream re-executes the whole batch; a
+//     reply with new input closes its calls as interrupted instead. Tool side
 //     effects are therefore NOT exactly-once across crashes; prefer
 //     read-only/idempotent tools in crash-sensitive deployments.
-//   - Crashes while parked are lossless: on resume the agent RE-EMITS the
-//     RequireUserConfirmEvent / RequireExternalExecutionEvent for the
-//     pending calls and waits again (see repromptAwaitingCalls).
+//   - A crash while parked: ResumeReplyStream (WithReplyRecovery) continues
+//     the parked calls under the checkpoint's reply ID. A call awaiting
+//     approval goes through the current permission check again
+//     (resetRecoveryApprovals), and a submitted call is requested again
+//     (repromptAwaitingCalls). A reply with new input closes them instead
+//     (interruptUnansweredCallsLocked).
 
 // Checkpoint persists the current agent state via the configured StateSaver.
 // It is safe to call without a saver (no-op). Errors are logged, never
@@ -169,12 +175,13 @@ func LoadCheckpoint(ctx context.Context, saver StateSaver, sessionID string) (*A
 	return st, nil
 }
 
-// awaitingCalls scans backwards for the most recent assistant message that
-// still has unfinished tool calls and splits them into asking (needs user
-// confirmation) and submitted (needs external results) buckets. The
-// backwards scan skips messages of others; a reply with new input has
-// already interrupted such calls (interruptUnansweredCallsLocked).
-func (a *UnifiedAgent) awaitingCalls() (asking, submitted []message.ToolCallBlock) {
+// submittedCalls scans backwards for the most recent assistant message of
+// this agent and returns its submitted calls without a result (they need
+// external results). The backwards scan skips messages of others; a reply
+// with new input has already interrupted such calls
+// (interruptUnansweredCallsLocked).
+func (a *UnifiedAgent) submittedCalls() []message.ToolCallBlock {
+	var submitted []message.ToolCallBlock
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for i := len(a.state.Context) - 1; i >= 0; i-- {
@@ -201,16 +208,13 @@ func (a *UnifiedAgent) awaitingCalls() (asking, submitted []message.ToolCallBloc
 					tc = v.(message.ToolCallBlock)
 				}
 			}
-			switch tc.State {
-			case message.ToolCallAsking:
-				asking = append(asking, tc)
-			case message.ToolCallSubmitted:
+			if tc.State == message.ToolCallSubmitted {
 				submitted = append(submitted, tc)
 			}
 		}
-		return asking, submitted // only the most recent assistant message matters
+		return submitted // only the most recent assistant message matters
 	}
-	return nil, nil
+	return nil
 }
 
 // Results for the calls a reply with new input closes
@@ -391,7 +395,7 @@ func emitInterruptedCalls(ctx context.Context, ch chan<- event.Event, replyID st
 func (a *UnifiedAgent) repromptAwaitingCalls(ctx context.Context, ch chan<- event.Event, replyID string,
 	actingHandler middleware.ActingHandler, hooks *loop.HookRunner, iter int) bool {
 	const state = protocol.StateAct
-	_, submitted := a.awaitingCalls()
+	submitted := a.submittedCalls()
 	handled := false
 	for i := range submitted {
 		tc := submitted[i]

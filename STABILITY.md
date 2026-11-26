@@ -321,7 +321,9 @@ limits. Shared governance across ordinary Agent/helper paths remains proposed.
   are not marked finished, with an `interrupted` result before the input: a
   call awaiting approval did not run, and any other call's outcome is unknown
   (a result the host returns now for a submitted external call is not
-  recorded).
+  recorded). The texts follow the restored state: a call restored as awaiting
+  approval from a state the host saved during the wait may have been approved
+  and run before the process stopped.
   Answers queued between replies are then dropped. Nothing is closed while
   another reply core of the agent is still running. To continue such calls, use
   `WithReplyRecovery` and `ResumeReplyStream` before sending new input;

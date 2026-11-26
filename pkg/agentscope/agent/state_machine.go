@@ -127,9 +127,9 @@ func (a *UnifiedAgent) updateToolCallState(callID string, newState message.ToolC
 	a.mu.Lock()
 	a.invalidateRetentionLocked()
 	defer a.mu.Unlock()
-	// Scan backwards: after a resume the call may live in an assistant
-	// message that is no longer the last context message (a fresh user
-	// input follows it). Call IDs are unique per reply.
+	// Scan backwards: the call may live in an assistant message that is no
+	// longer the last context message (a later reply's input follows it
+	// while this reply's core still runs). Call IDs are unique per reply.
 	for i := len(a.state.Context) - 1; i >= 0; i-- {
 		msg := a.state.Context[i]
 		if msg == nil {

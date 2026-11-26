@@ -152,7 +152,14 @@ call, the answers still queued for earlier requests are dropped, so they
 cannot answer a later call that reuses an ID. A result or confirmation the
 host submits later for a closed call is dropped when it names the earlier
 reply's ID; with an empty `ReplyID` it matches by call ID, so it can answer a
-later call that reuses the ID, as any late answer can. Before its first model call the reply emits one
+later call that reuses the ID, as any late answer can. The texts describe the
+calls as the restored state records them. A reply blocked in process on an
+approval saves nothing while it waits, so a call is restored as awaiting
+approval only from a state the host saved during that wait: a host that does
+so should save again once it delivers the answer, or a restore after the
+approved tool started tells the model it did not run. A host that keeps its
+own transcript from events applies the `ToolCallsInterruptedEvent` itself:
+`Msg.AppendEvent` ignores custom events. Before its first model call the reply emits one
 `agent.ToolCallsInterruptedEvent` custom event listing the closed calls, and
 no tool events for them: they belong to the earlier reply, whose messages hold
 their results. While another reply core of the agent is still running (a

@@ -452,8 +452,8 @@ func TestNewInputLeavesCallsOfARunningCore(t *testing.T) {
 		}
 		// The second reply's model call: its input is recorded. Let the
 		// first reply's tool return, and wait for that core to end before
-		// this reply goes on (overlapping cores share the turn statistics
-		// without synchronization).
+		// this reply goes on (overlapping cores share the turn statistics,
+		// so their counts would mix).
 		close(release)
 		deadline := time.Now().Add(5 * time.Second)
 		for {
