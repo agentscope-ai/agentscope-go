@@ -11,6 +11,8 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+## [v2.0.12] - 2026-11-26
+
 ### Fixed — turn statistics data race
 
 - The `turn_stats` event copies the reply's statistics under the agent's lock
@@ -217,7 +219,7 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 - Gemini `Chat` and `ChatStream` now serialize tri-state thinking options instead
   of silently dropping them. Argon/Carbon use the new `WithThinkingLevel` option
   (`LOW`, `MEDIUM`, `HIGH`); incompatible budgets/levels fail before dispatch.
-  Unset options retain provider defaults. See [Gemini thinking](docs/model-providers.md#gemini-thinking-unreleased).
+  Unset options retain provider defaults. See [Gemini thinking](docs/model-providers.md#gemini-thinking-v2012).
 
 ### Added — Main Thread example and design notes (experimental)
 
