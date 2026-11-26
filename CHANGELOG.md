@@ -59,9 +59,10 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
     result.
 - The texts follow the restored state. A reply blocked on an approval saves
   nothing while it waits, so a call is restored as awaiting approval only
-  from a state the host saved during the wait; a host that does so should
-  save again once it delivers the answer, or a restore after the approved
-  tool started tells the model it did not run.
+  from a state saved during the wait, by the host or by an overlapping reply.
+  If the user approved it and the tool started before the process stopped,
+  the restored call is told it did not run; a save after delivering the
+  answer narrows that window, but cannot be ordered before the tool starts.
 - Before its first model call the reply emits one custom event,
   `agent.ToolCallsInterruptedEvent` (`tool_calls_interrupted`), listing each
   closed call's ID, name, input, previous state and result text. It emits no

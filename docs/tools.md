@@ -155,9 +155,12 @@ reply's ID; with an empty `ReplyID` it matches by call ID, so it can answer a
 later call that reuses the ID, as any late answer can. The texts describe the
 calls as the restored state records them. A reply blocked in process on an
 approval saves nothing while it waits, so a call is restored as awaiting
-approval only from a state the host saved during that wait: a host that does
-so should save again once it delivers the answer, or a restore after the
-approved tool started tells the model it did not run. A host that keeps its
+approval only from a state saved during that wait, by the host or by an
+overlapping reply. If the user approved it and the tool started before the
+process stopped, the restored call is told it did not run. A save after
+delivering the answer narrows that window, but cannot be ordered before the
+tool starts: the answer is queued before the waiting reply reads it, and no
+event marks the call as approved. A host that keeps its
 own transcript from events applies the `ToolCallsInterruptedEvent` itself:
 `Msg.AppendEvent` ignores custom events. Before its first model call the reply emits one
 `agent.ToolCallsInterruptedEvent` custom event listing the closed calls, and

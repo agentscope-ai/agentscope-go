@@ -762,8 +762,7 @@ func (a *UnifiedAgent) SubmitExternalResult(result *event.ExternalExecutionResul
 // describes; a next reply with new input that closes unanswered calls drops
 // it instead (see ReplyStream). A value a running reply may still read is
 // never dropped. It returns ctx.Err() at once when ctx has already ended, and
-// an error when
-// result or ctx is nil or the agent has no permission context
+// an error when result or ctx is nil or the agent has no permission context
 // (WithPermissionContext), which is what creates the channel.
 func (a *UnifiedAgent) SubmitUserConfirmContext(ctx context.Context, result *event.UserConfirmResultEvent) error {
 	if result == nil {
