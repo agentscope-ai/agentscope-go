@@ -71,6 +71,13 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   does not yet exist) could previously redirect host-side reads and writes
   outside it; such paths now return `ErrPathEscape`.
 
+### Fixed — MCP
+
+- `StdioClient.ListTools`, `HttpClient.ListTools`, `streamablehttp.Client.ListTools`
+  and `NewMCPToolkit` sort tool schemas by tool name so MCP tool lists remain
+  deterministic across calls while `MergeToolkits` preserves toolkit order
+  (#138, item 25; Python [#4090](https://github.com/agentscope-ai/agentscope/pull/4090)).
+
 ### Fixed — Gemini tool history
 
 - Buffered and streamed Gemini requests preserve the text, tool calls, and
