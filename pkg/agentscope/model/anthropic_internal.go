@@ -105,6 +105,17 @@ func parseAnthropicResponse(parsed *anthropicResponse) (*ChatResponse, error) {
 		}
 	}
 
+	return &ChatResponse{
+		Content:   content,
+		IsLast:    true,
+		ID:        parsed.ID,
+		CreatedAt: time.Now().Format(message.TimestampFormat),
+		Usage:     anthropicUsage(parsed),
+		ModelName: parsed.Model,
+	}, nil
+}
+
+func anthropicUsage(parsed *anthropicResponse) *ChatUsage {
 	var usage *ChatUsage
 	if parsed.Usage != nil {
 		usage = &ChatUsage{
@@ -120,12 +131,5 @@ func parseAnthropicResponse(parsed *anthropicResponse) (*ChatResponse, error) {
 		}
 	}
 
-	return &ChatResponse{
-		Content:   content,
-		IsLast:    true,
-		ID:        parsed.ID,
-		CreatedAt: time.Now().Format(message.TimestampFormat),
-		Usage:     usage,
-		ModelName: parsed.Model,
-	}, nil
+	return usage
 }

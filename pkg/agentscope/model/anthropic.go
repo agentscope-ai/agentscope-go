@@ -21,27 +21,30 @@ const (
 
 // AnthropicChatModel wraps Anthropic's Messages API.
 type AnthropicChatModel struct {
-	apiKey         string
-	baseURL        string
-	model          string
-	version        string
-	maxOutputTok   int
-	defaultHeaders map[string]string
-	promptCaching  bool // if true, mark system + last tool with cache_control:{type:ephemeral}
+	raiseOnContentPolicy bool
+	apiKey               string
+	baseURL              string
+	model                string
+	version              string
+	maxOutputTok         int
+	defaultHeaders       map[string]string
+	promptCaching        bool // if true, mark system + last tool with cache_control:{type:ephemeral}
 
 	httpClient *http.Client
 }
 
 // AnthropicConfig configures AnthropicChatModel.
 type AnthropicConfig struct {
-	APIKey          string
-	SecretAPIKey    SecretStr // Preferred over APIKey. Use model.NewSecretStr(key).
-	BaseURL         string
-	Model           string
-	Version         string
-	MaxOutputTokens int
-	HTTPClient      *http.Client
-	ClientOptions   *ClientOptions
+	// RaiseOnContentPolicy annotates explicit output policy signals in response Error.
+	RaiseOnContentPolicy bool
+	APIKey               string
+	SecretAPIKey         SecretStr // Preferred over APIKey. Use model.NewSecretStr(key).
+	BaseURL              string
+	Model                string
+	Version              string
+	MaxOutputTokens      int
+	HTTPClient           *http.Client
+	ClientOptions        *ClientOptions
 	// PromptCaching enables Anthropic prompt caching: the system prompt and the
 	// last tool definition are marked with cache_control:{type:"ephemeral"} so
 	// Anthropic reuses the input-token prefix across turns. Default false to
@@ -75,14 +78,15 @@ func NewAnthropicChatModel(cfg *AnthropicConfig) (*AnthropicChatModel, error) {
 		defHeaders = cfg.ClientOptions.DefaultHeaders
 	}
 	return &AnthropicChatModel{
-		apiKey:         apiKey,
-		baseURL:        base,
-		model:          cfg.Model,
-		version:        ver,
-		maxOutputTok:   maxTok,
-		defaultHeaders: defHeaders,
-		promptCaching:  cfg.PromptCaching,
-		httpClient:     defaultHTTPClient(cfg.HTTPClient, cfg.ClientOptions),
+		raiseOnContentPolicy: cfg.RaiseOnContentPolicy,
+		apiKey:               apiKey,
+		baseURL:              base,
+		model:                cfg.Model,
+		version:              ver,
+		maxOutputTok:         maxTok,
+		defaultHeaders:       defHeaders,
+		promptCaching:        cfg.PromptCaching,
+		httpClient:           defaultHTTPClient(cfg.HTTPClient, cfg.ClientOptions),
 	}, nil
 }
 
@@ -254,14 +258,27 @@ func (m *AnthropicChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts
 
 	response, err := parseAnthropicResponse(&parsed)
 	if err != nil {
+		if m.raiseOnContentPolicy {
+			if policy := classifyContentPolicy("anthropic", parsed.StopReason, "", false, err); policy != nil {
+				return &ChatResponse{IsLast: true, ID: parsed.ID, ModelName: parsed.Model, StopReason: normalizeStopReason(parsed.StopReason), Error: policy, Usage: anthropicUsage(&parsed)}, nil
+			}
+		}
 		return nil, err
 	}
 	response.StopReason = normalizeStopReason(parsed.StopReason)
+	if m.raiseOnContentPolicy {
+		if e := classifyContentPolicy("anthropic", parsed.StopReason, "", false, response.Error); e != nil {
+			response.Error = e
+		}
+	}
 	return response, nil
 }
 
 // ChatStream implements streaming chat via Anthropic's SSE event format.
 func (m *AnthropicChatModel) ChatStream(ctx context.Context, msgs []*message.Msg, opts ...CallOption) (<-chan ChatResponse, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("anthropic: httpx: new request: net/http: nil Context")
+	}
 	if len(msgs) == 0 {
 		return nil, fmt.Errorf("anthropic: msgs must not be empty")
 	}
@@ -277,8 +294,9 @@ func (m *AnthropicChatModel) ChatStream(ctx context.Context, msgs []*message.Msg
 	}
 	reqBody.Stream = true
 
+	streamCtx, cancel := context.WithCancel(ctx)
 	sseCh, err := httpx.DoSSERequest(
-		ctx,
+		streamCtx,
 		m.httpClient,
 		"POST",
 		m.baseURL+"/v1/messages",
@@ -290,11 +308,17 @@ func (m *AnthropicChatModel) ChatStream(ctx context.Context, msgs []*message.Msg
 		}, m.defaultHeaders),
 	)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("anthropic: %w", err)
 	}
 
 	outCh := make(chan ChatResponse, 16)
-	go processAnthropicStream(ctx, sseCh, outCh)
+	if m.raiseOnContentPolicy {
+		reason := make(chan string, 1)
+		go processAnthropicStream(streamCtx, sseCh, outCh, func(value string) { reason <- value })
+		return observeContentPolicy(streamCtx, cancel, outCh, reason, "anthropic"), nil
+	}
+	go func() { defer cancel(); processAnthropicStream(streamCtx, sseCh, outCh) }()
 	return outCh, nil
 }
 
@@ -352,11 +376,16 @@ type anthropicMessageDelta struct {
 	} `json:"usage,omitempty"`
 }
 
-func processAnthropicStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh chan<- ChatResponse) {
-	processAnthropicStreamWithPolicy(ctx, sseCh, outCh, anthropicStreamPolicy{})
+func processAnthropicStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh chan<- ChatResponse, reason ...func(string)) {
+	policy := anthropicStreamPolicy{}
+	if len(reason) > 0 {
+		policy.reason = reason[0]
+	}
+	processAnthropicStreamWithPolicy(ctx, sseCh, outCh, policy)
 }
 
 type anthropicStreamPolicy struct {
+	reason                func(string)
 	stopAtMessageStop     bool
 	preserveReportedUsage bool
 }
@@ -379,6 +408,10 @@ func processAnthropicStreamWithPolicy(ctx context.Context, sseCh <-chan httpx.SS
 		streamErr error
 		sawUsage  bool
 	)
+
+	if policy.reason != nil {
+		defer func() { policy.reason(finishReason) }()
+	}
 
 	for evt := range sseCh {
 		select {

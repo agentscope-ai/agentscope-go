@@ -15,10 +15,11 @@ const defaultOpenAIBaseURL = "https://api.openai.com"
 
 // OpenAIChatModel wraps the OpenAI Chat Completions API.
 type OpenAIChatModel struct {
-	apiKey         string
-	baseURL        string
-	model          string
-	defaultHeaders map[string]string
+	raiseOnContentPolicy bool
+	apiKey               string
+	baseURL              string
+	model                string
+	defaultHeaders       map[string]string
 
 	httpClient *http.Client
 
@@ -30,10 +31,12 @@ type OpenAIChatModel struct {
 
 // OpenAIConfig configures OpenAIChatModel.
 type OpenAIConfig struct {
-	APIKey       string
-	SecretAPIKey SecretStr // Preferred over APIKey. Use model.NewSecretStr(key).
-	BaseURL      string
-	Model        string
+	// RaiseOnContentPolicy annotates explicit output policy signals in response Error.
+	RaiseOnContentPolicy bool
+	APIKey               string
+	SecretAPIKey         SecretStr // Preferred over APIKey. Use model.NewSecretStr(key).
+	BaseURL              string
+	Model                string
 
 	HTTPClient    *http.Client
 	ClientOptions *ClientOptions
@@ -73,12 +76,13 @@ func NewOpenAIChatModel(cfg OpenAIConfig) (*OpenAIChatModel, error) { //nolint:g
 		f = formatter.NewOpenAIFormatter()
 	}
 	return &OpenAIChatModel{
-		apiKey:         apiKey,
-		baseURL:        base,
-		model:          cfg.Model,
-		defaultHeaders: defHeaders,
-		httpClient:     defaultHTTPClient(cfg.HTTPClient, cfg.ClientOptions),
-		formatter:      f,
+		raiseOnContentPolicy: cfg.RaiseOnContentPolicy,
+		apiKey:               apiKey,
+		baseURL:              base,
+		model:                cfg.Model,
+		defaultHeaders:       defHeaders,
+		httpClient:           defaultHTTPClient(cfg.HTTPClient, cfg.ClientOptions),
+		formatter:            f,
 	}, nil
 }
 
@@ -171,11 +175,20 @@ func (m *OpenAIChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts ..
 		return nil, fmt.Errorf("openai: %w", lastErr)
 	}
 
-	return parseOpenAIResponse(&parsed, msgs)
+	resp, err := parseOpenAIResponse(&parsed, msgs)
+	if err == nil && m.raiseOnContentPolicy {
+		if e := classifyContentPolicy("openai", parsed.Choices[0].FinishReason, "", false, resp.Error); e != nil {
+			resp.Error = e
+		}
+	}
+	return resp, err
 }
 
 // ChatStream implements streaming chat via SSE (OpenAI format).
 func (m *OpenAIChatModel) ChatStream(ctx context.Context, msgs []*message.Msg, opts ...CallOption) (<-chan ChatResponse, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("openai: httpx: new request: net/http: nil Context")
+	}
 	if len(msgs) == 0 {
 		return nil, fmt.Errorf("openai: msgs must not be empty")
 	}
@@ -221,8 +234,9 @@ func (m *OpenAIChatModel) ChatStream(ctx context.Context, msgs []*message.Msg, o
 		reqBody.Modalities = []string{"text", "audio"}
 	}
 
+	streamCtx, cancel := context.WithCancel(ctx)
 	sseCh, err := httpx.DoSSERequest(
-		ctx,
+		streamCtx,
 		m.httpClient,
 		"POST",
 		m.baseURL+"/v1/chat/completions",
@@ -233,11 +247,17 @@ func (m *OpenAIChatModel) ChatStream(ctx context.Context, msgs []*message.Msg, o
 		}, m.defaultHeaders),
 	)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("openai: %w", err)
 	}
 
 	outCh := make(chan ChatResponse, 16)
-	go processOpenAIStream(ctx, sseCh, outCh)
+	if m.raiseOnContentPolicy {
+		reason := make(chan string, 1)
+		go processOpenAIStream(streamCtx, sseCh, outCh, func(value string) { reason <- value })
+		return observeContentPolicy(streamCtx, cancel, outCh, reason, "openai"), nil
+	}
+	go func() { defer cancel(); processOpenAIStream(streamCtx, sseCh, outCh) }()
 	return outCh, nil
 }
 

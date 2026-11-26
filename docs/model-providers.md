@@ -701,3 +701,24 @@ models = model.ListModels("openai")   // filter by provider
 106 chat + 6 embedding = the 112 bundled cards under `pkg/agentscope/model/models/`.
 The 9 TTS cards are a separate embed under `pkg/agentscope/tts/models/`. Verify
 with `find pkg/agentscope/model/models -name '*.yaml' | wc -l`.
+
+## Content policy signals (unreleased)
+
+`OpenAIConfig`, `AnthropicConfig`, and `GeminiConfig` accept
+`RaiseOnContentPolicy`. It defaults to false. When enabled, an explicit output
+filter finish reason is exposed as `*model.ContentPolicyError` in
+`ChatResponse.Error` for both buffered and streamed responses. Check the error
+on every stream chunk. The response and usage remain available, and `Chat` does
+not turn a successful HTTP response into a returned Go error. Anthropic
+`refusal` remains a distinct stop reason.
+
+The error records the provider, original finish reason, and whether an earlier
+stream chunk was delivered. It does not infer a review requirement. This first
+stage does not map input-side policy codes or implement automatic retry and
+failover decisions; callers must inspect the response error themselves. In
+particular, enabling this option alone does not change the buffered agent's
+handling of a filtered response.
+
+Python AgentScope's [OpenAI adapter](https://github.com/agentscope-ai/agentscope/blob/main/src/agentscope/model/_openai_chat/_model.py)
+raises its opt-in content-block exception directly. Go retains the response and
+puts the typed error on it to preserve the existing `Chat` response contract.

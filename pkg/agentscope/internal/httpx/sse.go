@@ -71,7 +71,7 @@ func DoSSERequest(
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, fmt.Errorf("httpx: unexpected status %d: %s", resp.StatusCode, string(body))
+		return nil, &StatusError{StatusCode: resp.StatusCode, Body: body, RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
 	}
 
 	ch := make(chan SSEEvent, 16)

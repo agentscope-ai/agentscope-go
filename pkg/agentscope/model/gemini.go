@@ -17,21 +17,24 @@ const defaultGeminiBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 
 // GeminiChatModel wraps the Google Gemini generateContent API.
 type GeminiChatModel struct {
-	apiKey         string
-	baseURL        string
-	model          string
-	defaultHeaders map[string]string
-	httpClient     *http.Client
+	raiseOnContentPolicy bool
+	apiKey               string
+	baseURL              string
+	model                string
+	defaultHeaders       map[string]string
+	httpClient           *http.Client
 }
 
 // GeminiConfig configures GeminiChatModel.
 type GeminiConfig struct {
-	APIKey        string
-	SecretAPIKey  SecretStr // Preferred over APIKey. Use model.NewSecretStr(key).
-	BaseURL       string
-	Model         string
-	HTTPClient    *http.Client
-	ClientOptions *ClientOptions
+	// RaiseOnContentPolicy annotates explicit output policy signals in response Error.
+	RaiseOnContentPolicy bool
+	APIKey               string
+	SecretAPIKey         SecretStr // Preferred over APIKey. Use model.NewSecretStr(key).
+	BaseURL              string
+	Model                string
+	HTTPClient           *http.Client
+	ClientOptions        *ClientOptions
 }
 
 // NewGeminiChatModel creates a ChatModel backed by Google Gemini.
@@ -52,11 +55,12 @@ func NewGeminiChatModel(cfg GeminiConfig) (*GeminiChatModel, error) { //nolint:g
 		defHeaders = cfg.ClientOptions.DefaultHeaders
 	}
 	return &GeminiChatModel{
-		apiKey:         apiKey,
-		baseURL:        base,
-		model:          cfg.Model,
-		defaultHeaders: defHeaders,
-		httpClient:     defaultHTTPClient(cfg.HTTPClient, cfg.ClientOptions),
+		raiseOnContentPolicy: cfg.RaiseOnContentPolicy,
+		apiKey:               apiKey,
+		baseURL:              base,
+		model:                cfg.Model,
+		defaultHeaders:       defHeaders,
+		httpClient:           defaultHTTPClient(cfg.HTTPClient, cfg.ClientOptions),
 	}, nil
 }
 
@@ -96,11 +100,20 @@ func (m *GeminiChatModel) Chat(ctx context.Context, msgs []*message.Msg, opts ..
 		return nil, fmt.Errorf("gemini: %w", err)
 	}
 
-	return parseGeminiResponse(parsed)
+	resp, err := parseGeminiResponse(parsed)
+	if err == nil && m.raiseOnContentPolicy {
+		if e := classifyContentPolicy("gemini", parsed.Candidates[0].FinishReason, "", false, resp.Error); e != nil {
+			resp.Error = e
+		}
+	}
+	return resp, err
 }
 
 // ChatStream implements streaming via Gemini streamGenerateContent.
 func (m *GeminiChatModel) ChatStream(ctx context.Context, msgs []*message.Msg, opts ...CallOption) (<-chan ChatResponse, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("gemini: httpx: new request: net/http: nil Context")
+	}
 	if len(msgs) == 0 {
 		return nil, fmt.Errorf("gemini: msgs must not be empty")
 	}
@@ -117,8 +130,9 @@ func (m *GeminiChatModel) ChatStream(ctx context.Context, msgs []*message.Msg, o
 
 	url := fmt.Sprintf("%s/models/%s:streamGenerateContent?alt=sse", m.baseURL, m.model)
 
+	streamCtx, cancel := context.WithCancel(ctx)
 	sseCh, err := httpx.DoSSERequest(
-		ctx,
+		streamCtx,
 		m.httpClient,
 		"POST",
 		url,
@@ -129,11 +143,17 @@ func (m *GeminiChatModel) ChatStream(ctx context.Context, msgs []*message.Msg, o
 		}, m.defaultHeaders),
 	)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("gemini: %w", err)
 	}
 
 	outCh := make(chan ChatResponse, 16)
-	go processGeminiStream(ctx, sseCh, outCh)
+	if m.raiseOnContentPolicy {
+		reason := make(chan string, 1)
+		go processGeminiStream(streamCtx, sseCh, outCh, func(value string) { reason <- value })
+		return observeContentPolicy(streamCtx, cancel, outCh, reason, "gemini"), nil
+	}
+	go func() { defer cancel(); processGeminiStream(streamCtx, sseCh, outCh) }()
 	return outCh, nil
 }
 
@@ -469,7 +489,7 @@ func parseGeminiResponse(parsed geminiResponse) (*ChatResponse, error) {
 	}, nil
 }
 
-func processGeminiStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh chan<- ChatResponse) {
+func processGeminiStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh chan<- ChatResponse, reason ...func(string)) {
 	defer close(outCh)
 
 	var (
@@ -482,6 +502,10 @@ func processGeminiStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh
 		modelName    string
 		usage        *ChatUsage
 	)
+
+	if len(reason) > 0 {
+		defer func() { reason[0](finishReason) }()
+	}
 
 	for evt := range sseCh {
 		select {

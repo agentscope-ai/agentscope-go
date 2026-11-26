@@ -391,6 +391,10 @@ func IsRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
+	var policy *ContentPolicyError
+	if errors.As(err, &policy) {
+		return false
+	}
 	if aserr.IsRetryable(err) {
 		return true
 	}
