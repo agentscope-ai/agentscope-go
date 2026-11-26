@@ -2,11 +2,13 @@ package mcp
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
+	"slices"
 	"sync"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/message"
@@ -382,6 +384,9 @@ func convertToolSchemas(tools []mcpTool) []model.ToolSchema {
 			},
 		}
 	}
+	slices.SortStableFunc(schemas, func(a, b model.ToolSchema) int {
+		return cmp.Compare(a.Function.Name, b.Function.Name)
+	})
 	return schemas
 }
 

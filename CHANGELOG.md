@@ -24,6 +24,34 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   naming the reply ID of a checkpoint whose call was asked again after a
   restart is refused too; answer the re-asked request.
 
+### Fixed — compression keeping no message
+
+- When the messages that fit the reserve hold a tool result whose call is in
+  an earlier message, compression keeps them and the messages from the
+  call's message on. It used to summarize that result and every message
+  before it, and kept no message at all when the result was in the last one
+  (#207). A reply produces this layout when a checkpoint saved while it
+  waited for an approval or an external result is restored with `WithState`
+  and continued with new input (`Reply`, `ReplyStream`, or a thread
+  participant's next activation): it asks for the call again and records the
+  result after the input, and its later rounds join the result's message, so
+  that message stays last until the next input. A host-built history can
+  hold it too. This applies to the automatic trigger, `Compact`,
+  `CompactStrict`, the compaction of context-overflow recovery and
+  background precompression under the default `reserve_tail` strategy,
+  without `WithContentBlockCompaction`, whose splitter is unchanged. As for a
+  call still in flight, the kept messages can exceed the reserve, and with a
+  large call message the trigger or the window; context-overflow recovery
+  can then spend one more of its attempts and summary calls before it
+  summarizes the call's message. The old result stands when the call is in
+  the first message, when a kept result would answer no call before it
+  among the kept messages (its call is gone, or call IDs repeat), and under
+  `fresh_window`.
+- Background precompression makes no result from a split that keeps no
+  message. Applied at the trigger, such a result dropped, without summarizing
+  them, the rounds a reply had added to the snapshot's last message; the
+  trigger now compresses synchronously instead.
+
 ### Fixed — file-tool workspace jail confinement
 
 - `view_text_file`, `Glob`, and `LSP` now resolve paths through the workspace
@@ -55,6 +83,13 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   a symlink planted inside the root (including a dangling link whose target
   does not yet exist) could previously redirect host-side reads and writes
   outside it; such paths now return `ErrPathEscape`.
+
+### Fixed — MCP
+
+- `StdioClient.ListTools`, `HttpClient.ListTools`, `streamablehttp.Client.ListTools`
+  and `NewMCPToolkit` sort tool schemas by tool name so MCP tool lists remain
+  deterministic across calls while `MergeToolkits` preserves toolkit order
+  (#138, item 25; Python [#4090](https://github.com/agentscope-ai/agentscope/pull/4090)).
 
 ### Fixed — Gemini tool history
 

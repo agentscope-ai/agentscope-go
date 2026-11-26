@@ -419,7 +419,10 @@ not a zero ratio, which `withDefaults` would normalize away. It is contracted
 for use between replies; see [manual compaction](docs/tools.md#manual-compaction).
 
 `ContextConfig.CompactStrategy` selects the post-compression layout:
-`reserve_tail` (default) keeps the recent messages fitting `ReserveRatio`;
+`reserve_tail` (default) keeps the recent messages fitting `ReserveRatio`
+(when those messages hold a result whose call is earlier and not first,
+the kept messages include the call's message unless a kept result would
+answer no call before it among them, so they can exceed it);
 `fresh_window` folds the history into the summary, keeping at most the
 trailing open tool pair (codex /compact parity). `SummaryMaxTokens` bounds the generated summary (default: window/32
 clamped to [1024, 8192]); over-budget summaries are middle-elided so the
@@ -440,7 +443,9 @@ thread entries can slide a later message of the same reply onto the boundary.
 A summary offered with `OfferSummary` takes the same path and may come from a
 checkpoint, so validity also requires bounds that fit the context, a
 nonblank summary and a digest. The reserved suffix keeps the LIVE message
-versions so in-place truncation from overflow recovery stays in effect.
+versions so in-place truncation from overflow recovery stays in effect. A
+background split that keeps no message makes no result: applied, it would
+drop what the reply adds to the snapshot's last message.
 Precompression and offers are off under `WithContentBlockCompaction` (the
 block-level splitter's granularity differs); precompression never retries or
 truncates on failure — the synchronous path owns that.
