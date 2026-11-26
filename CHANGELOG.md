@@ -436,6 +436,13 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
   family so a shared cache cannot return a different endpoint's vectors. Entries
   written with old keys are repopulated on demand.
 
+### Fixed — embedding
+
+- `OpenAICompatEmbeddingModel` rejects responses whose embedding count differs
+  from the batch input count without caching them, and refetches cached entries
+  whose vector count does not match the input count (#138, item 24; Python
+  [#4234](https://github.com/agentscope-ai/agentscope/pull/4234)).
+
 ### Fixed — multi-agent message names for Chat Completions
 
 - Agent names now keep legal dashes and dots, and each run of the characters
