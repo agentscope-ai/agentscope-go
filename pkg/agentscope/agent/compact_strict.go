@@ -134,15 +134,16 @@ func (a *UnifiedAgent) compactStrictImpl(ctx context.Context, cfg *ContextConfig
 
 	toolSchemas := a.toolkit.GetToolSchemas()
 	reserveTokens := a.reserveTokens(cfg, ctxSize)
-	if cfg.CompactStrategy == CompactStrategyFreshWindow {
+	freshWindow := cfg.CompactStrategy == CompactStrategyFreshWindow
+	if freshWindow {
 		reserveTokens = 1 // see compressContextImpl
 	}
-	msgsToCompress, msgsToReserve := a.splitContextForCompression(reserveTokens, toolSchemas)
+	msgsToCompress, msgsToReserve := a.splitContextForCompression(reserveTokens, freshWindow, toolSchemas)
 	if len(msgsToCompress) == 0 {
-		if cfg.CompactStrategy == CompactStrategyFreshWindow {
+		if freshWindow {
 			return nil
 		}
-		msgsToCompress, msgsToReserve = a.splitContextForCompression(0, toolSchemas)
+		msgsToCompress, msgsToReserve = a.splitContextForCompression(0, false, toolSchemas)
 		// The reserve-zero split compresses everything; strict mode refuses
 		// to fold a call that still awaits its result into the summary.
 		if id := openToolCall(msgsToCompress); id != "" {

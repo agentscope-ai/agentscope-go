@@ -146,14 +146,25 @@ func (a *UnifiedAgent) runPrecompress(ctx context.Context, cfg *ContextConfig, c
 	}
 	tools := a.toolkit.GetToolSchemas()
 	reserveTokens := a.reserveTokens(cfg, ctxSize)
-	if cfg.CompactStrategy == CompactStrategyFreshWindow {
+	freshWindow := cfg.CompactStrategy == CompactStrategyFreshWindow
+	if freshWindow {
 		// See compressContextImpl: budget 1 routes through tool-pair repair
 		// without reserving anything when nothing is in flight.
 		reserveTokens = 1
 	}
 	baseMsgs := compressionBaseMsgs(a.name, systemPrompt, prevSummary, thread, plan)
-	msgsToCompress, msgsToReserve := a.splitMsgsForCompression(snapshot, baseMsgs, reserveTokens, tools)
+	msgsToCompress, msgsToReserve := a.splitMsgsForCompression(snapshot, baseMsgs, reserveTokens, freshWindow, tools)
 	if len(msgsToCompress) == 0 {
+		return
+	}
+	// A result that keeps no message is applied as the messages after the
+	// snapshot, so whatever the reply adds to the snapshot's last message
+	// before the trigger would be dropped without being summarized. Such a
+	// split is left to the synchronous path, which summarizes the live
+	// context; offers keeping no message are refused the same way
+	// (validLocked).
+	if len(msgsToReserve) == 0 {
+		logrus.WithField("agent", a.name).Debug("background pre-compression skipped: the split keeps no message")
 		return
 	}
 
