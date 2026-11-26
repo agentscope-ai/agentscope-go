@@ -1054,9 +1054,10 @@ reactLoop:
 			// Crash-recovery re-prompt (HARNESS_DESIGN F1): under
 			// ResumeReplyStream, submitted calls have no blocked waiter, so
 			// their execution is requested again (a reply with new input has
-			// closed them instead). Calls another running core still awaits
-			// are left to it. When nothing is awaiting (e.g. an external
-			// system parked us), fall through to the wait exit.
+			// closed them instead). Of the calls another running core still
+			// awaits, a submitted one is requested again and one awaiting
+			// approval is left to it. When nothing is awaiting (e.g. an
+			// external system parked us), fall through to the wait exit.
 			if err := a.checkpointBoundary(ctx); err != nil {
 				return types.ReplyError, madeProgress, checkpointError(err)
 			}

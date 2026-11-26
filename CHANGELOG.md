@@ -33,8 +33,10 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
     call; the model asks again if it still needs it.
   - A v2.0.12 recovery checkpoint saved at the start of a reply that a plain
     restore continued holds the call before the input. `ResumeReplyStream`
-    sends that call to the model without a result, as v2.0.12 did. A history
-    that already holds a result after an input keeps that layout.
+    continues it as v2.0.12 did: a call that awaited approval reaches the
+    model without a result, and a submitted call is requested again, with its
+    result recorded after the input. A history that already holds a result
+    after an input keeps that layout.
 - What changed (#207): in v2.0.12 and earlier, the first reply with new input
   after a plain restore (`WithState`, then `Reply`, `ReplyStream` or a
   `Conversation` turn) asked again about calls awaiting approval or an
