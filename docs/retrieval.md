@@ -89,7 +89,9 @@ the adapter family, configured endpoint, model, request dimensions and input.
 Entries written by older versions of these adapters miss and are populated again
 on demand. An endpoint with URL userinfo, a query or a fragment bypasses the cache.
 Use separate caches if credentials on the same endpoint can select different
-embeddings.
+embeddings. The OpenAI-compatible adapter rejects batch responses whose vector
+count differs from the input count before caching, and treats a cached entry
+whose vector count does not match the input count as a cache miss.
 
 ## Cache write semantics
 

@@ -85,13 +85,17 @@ func (a *UnifiedAgent) emitTurnStats(ctx context.Context, ch chan<- event.Event,
 			cu.InputTokens, cu.OutputTokens,
 			cu.CacheCreationInputTokens, cu.CacheInputTokens))
 	}
+	// Copy the accumulator under the lock: a reply core still running beside
+	// this one (a canceled reply whose tool ignores cancellation) records
+	// into it under the lock while this event is built.
 	a.mu.Lock()
-	stats := a.stats
-	lastInput := a.lastModelInputTokens
-	a.mu.Unlock()
-	if stats == nil {
+	if a.stats == nil {
+		a.mu.Unlock()
 		return
 	}
+	stats := *a.stats
+	lastInput := a.lastModelInputTokens
+	a.mu.Unlock()
 	emit(ctx, ch, event.NewCustomEvent(replyID, "turn_stats", map[string]any{
 		"model_calls":                 stats.modelCalls,
 		"tool_calls":                  stats.toolCalls,

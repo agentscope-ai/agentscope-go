@@ -43,7 +43,7 @@ remove the unsupported input before retrying; the adapters do not rewrite
 stored history on a formatting failure.
 
 Buffered Chat Completions responses now retain the normalized `StopReason`
-(unreleased O1 fix), matching the existing streaming path. For example,
+(v2.0.12 O1 fix), matching the existing streaming path. For example,
 `finish_reason: "length"` becomes `model.StopReasonLength`; stop, tool calls,
 and content filtering are distinguished as well. Missing/null/empty reasons
 stay empty, while unknown nonempty reasons are preserved by the existing
@@ -160,7 +160,7 @@ Extended thinking: `model.WithThinking(true, 10000)` enables thinking with a 10K
 For models supporting manual extended thinking, the automatic budget is half
 of the effective output limit, rounded down, with a minimum of 1024 tokens.
 With default configuration, `WithThinking(true, 0)` therefore sends
-`max_tokens: 2048` and `budget_tokens: 1024` (unreleased A4 fix).
+`max_tokens: 2048` and `budget_tokens: 1024` (v2.0.12 A4 fix).
 An explicit positive thinking budget below 1024 is rejected before HTTP dispatch.
 
 A configured/default output limit may grow when it cannot fit the thinking
@@ -189,7 +189,7 @@ Anthropic responses retain `redacted_thinking` blocks (including their opaque
 `data`) and thinking signatures in both buffered and streamed calls. Empty
 thinking text with a nonempty signature is retained when formatting history;
 empty unsigned thinking and empty text remain filtered. Return these blocks
-unchanged when continuing tool use. This change is unreleased,
+unchanged when continuing tool use. This change is in v2.0.12,
 with local wire-fixture coverage; no live API validation is claimed.
 
 The preservation follows the
@@ -200,7 +200,7 @@ thinking behavior is unchanged; no new signature validation is introduced.
 
 When tools are provided, `WithToolChoice(&model.ToolChoice{Mode: "none"})`
 explicitly sends `tool_choice: {"type":"none"}` for Anthropic and the shared
-MiniMax Messages request builder. This unreleased fix keeps the tool definitions
+MiniMax Messages request builder. This fix (v2.0.12) keeps the tool definitions
 in the request while disabling model-side tool selection for that call. Unset
 choice still leaves the provider default; without tools, the existing builder
 continues to omit tool choice. Tool execution permissions remain separate.
@@ -237,7 +237,7 @@ cm, _ := model.NewDeepSeekChatModel(model.DeepSeekConfig{
 
 Models: `deepseek-chat`, `deepseek-reasoner`, `deepseek-v4-flash`, `deepseek-v4-pro`
 
-#### DeepSeek thinking (unreleased)
+#### DeepSeek thinking (v2.0.12)
 
 In both `Chat` and `ChatStream`, `model.WithThinking(true, 0)` sends
 `thinking.type = "enabled"`. `model.WithThinking(false, 0)` or
@@ -265,7 +265,7 @@ its original call part. This projection leaves the stored reply intact.
 The adapter targets the Gemini Developer API. Custom `BaseURL` endpoints must
 accept these ID fields; Vertex-style endpoint compatibility is not guaranteed.
 
-#### Gemini thinking (unreleased)
+#### Gemini thinking (v2.0.12)
 
 Both `Chat` and `ChatStream` send explicit thinking options. Leaving thinking
 unset omits `thinkingConfig` and retains the provider default. For budget-era
@@ -373,7 +373,7 @@ Models: `kimi-k2.5`, `kimi-k2.6`, `kimi-k3`, `moonshot-v1-8k`, `moonshot-v1-32k`
 
 **Kimi K3** — Latest Kimi model with 256K context, 64K output. Supports text, vision (JPEG/PNG/GIF/WebP), video (MP4), and extended thinking.
 
-Moonshot uses the same [thinking options](#deepseek-thinking-unreleased) as
+Moonshot uses the same [thinking options](#deepseek-thinking-v2012) as
 DeepSeek. The Kimi K3 IDs `kimi-k3`, `kimi-k3.1-pro` and
 `kimi-k3.1-pro-highspeed` always omit the switch because thinking is always
 enabled.
@@ -391,7 +391,7 @@ Models: `grok-3`, `grok-3-fast`, `grok-3-mini`, `grok-4.3`
 
 ### Volcengine Ark
 
-Available on main (Unreleased), through direct Go construction:
+Available since v2.0.12, through direct Go construction:
 
 ```go
 cm, err := model.NewVolcengineChatModel(&model.VolcengineConfig{
@@ -520,7 +520,7 @@ compatibility has not been validated.
 
 ## Tool-call history in Anthropic Messages
 
-On main (unreleased), the Anthropic formatter expands merged assistant history
+Since v2.0.12, the Anthropic formatter expands merged assistant history
 into ordered assistant and user messages. Consecutive tool results share a user
 message, keeping all calls from the round before their results; subsequent
 assistant content starts another segment. Stored messages are not mutated.
@@ -539,7 +539,7 @@ Validation uses local HTTP fixtures, not a live Anthropic request.
 
 ## Tool-call history in OpenAI-compatible chat
 
-**Unreleased fix for [#7](https://github.com/agentscope-ai/agentscope-go/issues/7):**
+**v2.0.12 fix for [#7](https://github.com/agentscope-ai/agentscope-go/issues/7):**
 the formatter now expands a merged agent reply into an assistant message with
 `tool_calls`, one `role: "tool"` message per result, and any subsequent assistant
 messages. Versions v2.0.10 and v2.0.11 could keep only the last tool result from
@@ -631,7 +631,7 @@ resp, _ := cm.Chat(ctx, msgs,
 ```
 
 Thinking budgets are provider-specific. DeepSeek and Moonshot use only the
-enable/disable flag; see [thinking options](#deepseek-thinking-unreleased) for
+enable/disable flag; see [thinking options](#deepseek-thinking-v2012) for
 the request mapping and [Moonshot](#moonshot-kimi) for Kimi K3 exceptions.
 
 For `OpenAIChatModel.Chat` and `AnthropicChatModel.Chat`, `model.WithRetries`

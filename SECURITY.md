@@ -21,8 +21,8 @@ We will acknowledge receipt within 48 hours and aim to provide a fix or mitigati
 | Version | Supported |
 |---------|-----------|
 | `main` | Yes. Receives fixes first |
-| `v2.0.11` (latest tag) | Best effort, critical fixes only |
-| `v2.0.10` and earlier | No. Upgrade using the [module migration notes](CHANGELOG.md#changed--repository-and-module-path-move) |
+| `v2.0.12` (latest tag) | Best effort, critical fixes only |
+| `v2.0.11` and earlier | No. Upgrade using the [module migration notes](CHANGELOG.md#changed--repository-and-module-path-move) |
 
 ## Security Considerations
 

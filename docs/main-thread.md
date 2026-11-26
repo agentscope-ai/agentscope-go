@@ -461,7 +461,11 @@ the interrupt reaches the participant's context as a note before its next
 activation, so the agent and the log agree. Its late answer is never taken
 for a later call: the agent matches external results and confirmations by
 reply ID as well as tool-call ID, because some providers (Gemini) repeat
-tool-call IDs across replies. If an interrupt reaches the new owner of a Transfer while the
+tool-call IDs across replies. `SubmitUserConfirm` refuses an answer that
+belongs to no pending request of the running activation (another reply ID,
+or a tool call the request does not ask about), such as a late answer to an
+interrupted activation's request, and the activation's own request stays
+pending for its answer. If an interrupt reaches the new owner of a Transfer while the
 old owner's pre-transfer events still wait to be shown, the rest of them are
 dropped from the event stream (the Transfer's reply entry still carries the
 whole text), so nothing of an old owner follows a later owner's events.

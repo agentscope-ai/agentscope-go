@@ -66,7 +66,7 @@ without an `origin` key; non-empty future values round-trip but remain ineligibl
 The eligible fallback now adds `"origin":"default_ask"`
 to serialized decisions. Older JSON without this field still decodes. Consumers
 that compare whole decisions or enforce an exact JSON schema should account for
-this addition. This is an unreleased addition.
+this addition. This addition is in v2.0.12.
 
 The host projector accepts only the exact synthetic user intent, `read_fixture`
 and the single argument `target: "fixture.csv"`. It constructs a static operation

@@ -6,7 +6,7 @@ production-hardening status of the library.
 ## Versioning
 
 The module path is `github.com/agentscope-ai/agentscope-go/v2`. The latest release
-tag is `v2.0.11`, the first tag declaring the community module path. Earlier tags
+tag is `v2.0.12`. `v2.0.11` was the first tag declaring the community module path. Earlier tags
 use `github.com/alanfokco/agentscope-go/v2`; upgrading requires the
 [import-prefix migration](CHANGELOG.md#changed--repository-and-module-path-move).
 Consumers import as:
@@ -86,7 +86,7 @@ the returned entry no longer affects the cache.
 The [upstream comparison](docs/design/upstream-sync-v2.0.11.md) records the selected
 ports and deferred work, including realtime/TUI, SOP and model-context wiring.
 
-## Unreleased execution and retrieval behavior
+## v2.0.12 execution and retrieval behavior
 
 - `permission.Decision.Origin` adds typed provenance for the Default fallback Ask.
   It does not change permission behavior. That branch adds `origin: default_ask`
@@ -284,7 +284,7 @@ See [retrieval](docs/retrieval.md), [quality/load testing](docs/benchmarks.md) a
 [the delivery contracts](docs/design/managed-inference.md) for API and lifecycle
 limits. Shared governance across ordinary Agent/helper paths remains proposed.
 
-## Unreleased bounded tool dispatch behavior
+## v2.0.12 bounded tool dispatch behavior
 
 - Experimental `agent.WithToolConcurrencyLimit(n)` opts UnifiedAgent replies into
   a positive execution width; invalid configured widths panic during construction.
@@ -296,7 +296,7 @@ limits. Shared governance across ordinary Agent/helper paths remains proposed.
   not a cross-agent or deployment-wide quota. The loop bridge remains sequential.
   See [bounded dispatch](docs/tools.md#bounded-tool-dispatch-experimental).
 
-## Unreleased reply recovery behavior
+## v2.0.12 reply recovery behavior
 
 - `WithReplyRecovery` opts UnifiedAgent into typed built-in reply budgets,
   explicit `ResumeReplyStream`, fail-stop persistence and exclusive reply state

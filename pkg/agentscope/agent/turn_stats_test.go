@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/event"
@@ -11,6 +12,36 @@ import (
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/tool"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/types"
 )
+
+// emitTurnStats reads the accumulator while another reply core records
+// into it: a reply that started while a canceled reply's tool still ran
+// shares it with that core. Run with -race.
+func TestTurnStats_EmitWhileAnotherCoreRecords(t *testing.T) {
+	a := NewUnifiedAgent("stats-agent", "helpful", &mockChatModel{})
+	a.beginTurnStats()
+	const n = 200
+	ch := make(chan event.Event, n)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < n; i++ {
+			a.recordIteration(i)
+			a.recordToolCalls(1)
+			a.recordModelCallUsage(&model.ChatUsage{InputTokens: 1, OutputTokens: 1})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < n; i++ {
+			a.emitTurnStats(context.Background(), ch, "r")
+		}
+	}()
+	wg.Wait()
+	if len(ch) != n {
+		t.Fatalf("turn_stats events = %d, want %d", len(ch), n)
+	}
+}
 
 // A completed reply emits exactly one turn_stats event, aggregating every
 // model call and tool execution of the turn (codex token-count parity).
