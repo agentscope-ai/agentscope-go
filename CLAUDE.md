@@ -367,7 +367,9 @@ master) through the opt-in agent seams in `agent/thread_state.go`, `fork.go`,
 `compact_strict.go` and `handoff.go`; its writing tools are external tools
 answered in event order, and agents match external results and
 confirmations by reply ID too, since tool-call IDs can repeat across
-replies. A participant calls its Host only after `NewCoordinator` returns.
+replies; a participant refuses a confirmation answer that belongs to none of
+its pending requests. A participant calls its Host only after
+`NewCoordinator` returns.
 A participant fails `Activate` when its Sync was not applied; no
 Sync moves the cursor back (an edge clear is one Reset Sync with the
 activation). A failed owner's request fails over to the other side, queued

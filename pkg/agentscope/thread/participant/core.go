@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/agent"
+	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/event"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/loop"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/message"
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/protocol"
@@ -26,6 +27,9 @@ var (
 	// the provider reported its last model round as partial. The text shown
 	// so far is still in ActivationEnd.Text.
 	ErrPartialRound = errors.New("participant: the final model round is incomplete")
+
+	errNoConfirmPending   = errors.New("no confirmation is pending")
+	errConfirmMatchesNone = errors.New("the answer belongs to no pending confirmation request (another reply ID or tool calls)")
 )
 
 // Participant states.
@@ -230,7 +234,36 @@ type activation struct {
 	hookStarted   bool
 	boundaryCalls int
 	cursor        uint64
-	confirms      int // confirmation requests not answered yet
+	// confirms are the confirmation requests not answered yet, in the
+	// order they were recorded (a request whose answer was not delivered is
+	// recorded again at the end).
+	confirms []*pendingConfirm
+}
+
+// pendingConfirm is a confirmation request the activation emitted and the
+// host has not answered yet: the reply that asked and the calls it asks
+// about.
+type pendingConfirm struct {
+	replyID string
+	calls   map[string]bool
+}
+
+// answeredBy reports whether result answers the request: it names the
+// request's reply, or no reply (the agent then matches by tool-call ID
+// alone), and answers at least one call, each of them the request's.
+func (p *pendingConfirm) answeredBy(result *event.UserConfirmResultEvent) bool {
+	if result.ReplyID != "" && p.replyID != "" && result.ReplyID != p.replyID {
+		return false
+	}
+	if len(result.ConfirmResults) == 0 {
+		return false
+	}
+	for i := range result.ConfirmResults {
+		if !p.calls[result.ConfirmResults[i].ToolCall.ID] {
+			return false
+		}
+	}
+	return true
 }
 
 func newActivation(act *thread.Activation) *activation {
@@ -251,20 +284,39 @@ func (a *activation) start(view agent.ThreadView) { //nolint:gocritic // ThreadV
 	a.cursor = max(view.Cursor, a.triggerSeq)
 }
 
-func (a *activation) addConfirm() {
+func (a *activation) addConfirm(req *event.RequireUserConfirmEvent) {
+	p := &pendingConfirm{replyID: req.ReplyID, calls: make(map[string]bool, len(req.ToolCalls))}
+	for i := range req.ToolCalls {
+		p.calls[req.ToolCalls[i].ID] = true
+	}
+	a.restoreConfirm(p)
+}
+
+// restoreConfirm makes p pending (again, when its answer was not delivered).
+func (a *activation) restoreConfirm(p *pendingConfirm) {
 	a.mu.Lock()
-	a.confirms++
+	a.confirms = append(a.confirms, p)
 	a.mu.Unlock()
 }
 
-func (a *activation) takeConfirm() bool {
+// takeConfirm removes and returns the oldest pending request that result
+// answers. An answer to another request, such as a late answer to a request
+// of an interrupted activation or of a run before a restart, answers none
+// and leaves every request pending: the agent would drop it and keep
+// waiting, and the request's own answer must still get through.
+func (a *activation) takeConfirm(result *event.UserConfirmResultEvent) (*pendingConfirm, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.confirms == 0 {
-		return false
+	if len(a.confirms) == 0 {
+		return nil, errNoConfirmPending
 	}
-	a.confirms--
-	return true
+	for i, p := range a.confirms {
+		if p.answeredBy(result) {
+			a.confirms = slices.Delete(a.confirms, i, i+1)
+			return p, nil
+		}
+	}
+	return nil, errConfirmMatchesNone
 }
 
 // boundary is the agent's boundary input (agent.WithBoundaryInput). It runs
