@@ -296,7 +296,7 @@ func TestCompressionAccountingCountsThreadMessages(t *testing.T) {
 			a.state.Context = append(a.state.Context, message.UserMsg("u", strings.Repeat("x", 100)))
 		}
 		a.state.PeerSummary = peer
-		_, reserved := a.splitContextForCompression(450, nil)
+		_, reserved := a.splitContextForCompression(450, false, nil)
 		return len(reserved)
 	}
 	without := split(nil)
