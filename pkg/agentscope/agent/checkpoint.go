@@ -114,7 +114,8 @@ func (a *UnifiedAgent) SaveCheckpoint(ctx context.Context) error {
 // Contract: call between replies. Forking mid-reply snapshots whatever
 // partial context the loop has produced so far, which is well-defined but
 // rarely what a caller wants. Returns an error when no StateSaver is
-// configured or newSessionID is empty.
+// configured, newSessionID is empty, or newSessionID matches the source
+// session ID.
 func (a *UnifiedAgent) ForkSession(ctx context.Context, newSessionID string) error {
 	if newSessionID == "" {
 		return fmt.Errorf("agent: fork session: empty session id")
@@ -126,6 +127,10 @@ func (a *UnifiedAgent) ForkSession(ctx context.Context, newSessionID string) err
 	}
 	a.mu.Lock()
 	st := *a.state
+	if newSessionID == st.SessionID {
+		a.mu.Unlock()
+		return fmt.Errorf("agent: fork session: destination session id matches source")
+	}
 	if a.engine != nil {
 		st.PermissionCtx = a.engine.SnapshotContext()
 	}
