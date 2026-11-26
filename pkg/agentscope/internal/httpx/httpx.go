@@ -23,6 +23,17 @@ const (
 	maxBackoff         = 30 * time.Second
 )
 
+// StatusError preserves a non-successful HTTP response.
+type StatusError struct {
+	StatusCode int
+	Body       []byte
+	RetryAfter time.Duration
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("httpx: unexpected status %d: %s", e.StatusCode, e.Body)
+}
+
 // DoJSONRequest sends a JSON request and decodes a JSON response with basic retries.
 // It is intended for outbound calls to LLM providers and other HTTP JSON APIs.
 func DoJSONRequest(
@@ -110,10 +121,10 @@ func DoJSONRequest(
 					"attempt":    attempt + 1,
 					"retryAfter": retryAfter,
 				}).Warn("httpx: retryable status, will retry")
-				lastErr = fmt.Errorf("httpx: unexpected status %d: %s", resp.StatusCode, string(body))
+				lastErr = &StatusError{StatusCode: resp.StatusCode, Body: body, RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
 				continue
 			}
-			return fmt.Errorf("httpx: unexpected status %d: %s", resp.StatusCode, string(body))
+			return &StatusError{StatusCode: resp.StatusCode, Body: body, RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
 		}
 
 		if respBody != nil {

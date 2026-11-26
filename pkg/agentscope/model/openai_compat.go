@@ -67,8 +67,8 @@ func assembleStreamContent(thinking, text string, accToolCalls map[int]*openAITo
 
 // processOpenAIStream consumes OpenAI-compatible SSE chunks and emits ChatResponse values.
 // Shared by the OpenAI-compatible Chat Completions adapters.
-func processOpenAIStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh chan<- ChatResponse) {
-	processOpenAIStreamCfg(ctx, sseCh, outCh, false)
+func processOpenAIStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh chan<- ChatResponse, reason ...func(string)) {
+	processOpenAIStreamCfg(ctx, sseCh, outCh, false, reason...)
 }
 
 // processOpenAIStreamCfg is processOpenAIStream with an xAI-specific usage
@@ -76,7 +76,7 @@ func processOpenAIStream(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh
 // reasoning_tokens into OutputTokens (upstream #2461). Only xAI needs this:
 // its completion_tokens EXCLUDE reasoning tokens, while OpenAI/DashScope/
 // Moonshot/DeepSeek already include them — adding it there would double-bill.
-func processOpenAIStreamCfg(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh chan<- ChatResponse, includeReasoningInOutput bool) {
+func processOpenAIStreamCfg(ctx context.Context, sseCh <-chan httpx.SSEEvent, outCh chan<- ChatResponse, includeReasoningInOutput bool, reason ...func(string)) {
 	defer close(outCh)
 
 	var (
@@ -94,6 +94,10 @@ func processOpenAIStreamCfg(ctx context.Context, sseCh <-chan httpx.SSEEvent, ou
 		completed       bool
 		streamErr       error
 	)
+
+	if len(reason) > 0 {
+		defer func() { reason[0](finishReason) }()
+	}
 
 	for evt := range sseCh {
 		select {

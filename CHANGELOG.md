@@ -11,6 +11,10 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+- Add opt-in output content-policy classification for OpenAI Chat, Anthropic and
+  Gemini. Check `ChatResponse.Error` for `*model.ContentPolicyError`; the agent
+  retry/failover policy and input-side provider mapping remain future work.
+
 ## [v2.0.12] - 2026-11-26
 
 ### Fixed — turn statistics data race
