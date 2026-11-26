@@ -300,11 +300,14 @@ func TestSubmitUserConfirmAfterCancelIsNotDelivered(t *testing.T) {
 		cancel()
 		<-saver.entered
 		start := time.Now()
-		submitErr = f.p.SubmitUserConfirm("", &event.UserConfirmResultEvent{ReplyID: req.ReplyID,
-			ConfirmResults: []event.ConfirmResult{{Confirmed: true, ToolCall: req.ToolCalls[0]}}})
+		answer := &event.UserConfirmResultEvent{ReplyID: req.ReplyID,
+			ConfirmResults: []event.ConfirmResult{{Confirmed: true, ToolCall: req.ToolCalls[0]}}}
+		submitErr = f.p.SubmitUserConfirm("", answer)
 		took = time.Since(start)
-		if act := f.p.c.current(); act == nil || !act.takeConfirm() {
-			t.Error("a confirmation that was not delivered must stay pending")
+		if act := f.p.c.current(); act == nil {
+			t.Error("the activation ended before the answer")
+		} else if _, err := act.takeConfirm(answer); err != nil {
+			t.Errorf("a confirmation that was not delivered must stay pending: %v", err)
 		}
 		saver.release()
 	})

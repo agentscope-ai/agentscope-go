@@ -54,16 +54,119 @@ func TestConvertToolSchemas(t *testing.T) {
 		t.Fatalf("expected 2 schemas, got %d", len(schemas))
 	}
 
-	if schemas[0].Function.Name != "search" {
-		t.Errorf("name = %s, want search", schemas[0].Function.Name)
+	if schemas[0].Function.Name != "calc" || schemas[1].Function.Name != "search" {
+		t.Fatalf("names = [%s, %s], want [calc, search]", schemas[0].Function.Name, schemas[1].Function.Name)
 	}
-	if schemas[0].Type != "function" {
-		t.Errorf("type = %s, want function", schemas[0].Type)
+	if schemas[1].Type != "function" {
+		t.Errorf("type = %s, want function", schemas[1].Type)
+	}
+	if schemas[0].Function.Parameters == nil {
+		t.Error("parameters should not be nil for calc")
+	}
+}
+
+func toolSchemaNames(schemas []model.ToolSchema) []string {
+	names := make([]string, len(schemas))
+	for i, s := range schemas {
+		names[i] = s.Function.Name
+	}
+	return names
+}
+
+func TestHttpClient_ListToolsSortedAcrossShuffledResponses(t *testing.T) {
+	listings := [][]mcpTool{
+		{
+			{Name: "gamma", Description: "Third"},
+			{Name: "alpha", Description: "First"},
+			{Name: "beta", Description: "Second"},
+		},
+		{
+			{Name: "beta", Description: "Second"},
+			{Name: "gamma", Description: "Third"},
+			{Name: "alpha", Description: "First"},
+		},
+	}
+	callIdx := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonrpcRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		var result any
+		switch req.Method {
+		case "initialize":
+			result = map[string]any{
+				"protocolVersion": "2024-11-05",
+				"capabilities":    map[string]any{},
+				"serverInfo":      map[string]any{"name": "test-server", "version": "1.0"},
+			}
+		case "tools/list":
+			tools := listings[callIdx%len(listings)]
+			callIdx++
+			result = toolListResult{Tools: tools}
+		}
+		resp := jsonrpcResponse{JSONRPC: "2.0", ID: req.ID}
+		resp.Result, _ = json.Marshal(result)
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client, err := NewHttpClient(context.Background(), &HttpConfig{URL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	first, err := client.ListTools(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := client.ListTools(context.Background())
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	// Second tool should get default schema
-	if schemas[1].Function.Parameters == nil {
-		t.Error("parameters should not be nil for calc")
+	want := []string{"alpha", "beta", "gamma"}
+	if got := toolSchemaNames(first); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("first ListTools = %v, want %v", got, want)
+	}
+	if got := toolSchemaNames(second); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("second ListTools = %v, want %v", got, want)
+	}
+}
+
+func TestNewMCPToolkit_SortsToolsAndPreservesClientAndLocalOrder(t *testing.T) {
+	backing := []model.ToolSchema{
+		{Type: "function", Function: model.ToolFunction{Name: "zeta", Description: "Z"}},
+		{Type: "function", Function: model.ToolFunction{Name: "eta", Description: "E"}},
+	}
+	clientB := &mockMCPClient{tools: backing}
+	clientA := &mockMCPClient{
+		tools: []model.ToolSchema{
+			{Type: "function", Function: model.ToolFunction{Name: "delta", Description: "D"}},
+			{Type: "function", Function: model.ToolFunction{Name: "beta", Description: "B"}},
+		},
+	}
+
+	localTk := tool.NewToolkit(
+		tool.NewFunctionTool("tool_2", "Local 2", nil, func(context.Context, map[string]any) (any, error) { return "2", nil }),
+		tool.NewFunctionTool("tool_1", "Local 1", nil, func(context.Context, map[string]any) (any, error) { return "1", nil }),
+	)
+	tkB, err := NewMCPToolkit(context.Background(), clientB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backing[0].Function.Name != "zeta" {
+		t.Fatal("NewMCPToolkit mutated the slice returned by Client.ListTools")
+	}
+	tkA, err := NewMCPToolkit(context.Background(), clientA, WithEnableTools("delta", "beta", "ignored"), WithDisableTools("ignored"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	merged := MergeToolkits(localTk, tkB, tkA)
+	got := toolSchemaNames(merged.GetToolSchemas())
+	want := []string{"tool_2", "tool_1", "eta", "zeta", "beta", "delta"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("merged schema names = %v, want %v", got, want)
 	}
 }
 

@@ -253,7 +253,7 @@ func (p *AgentParticipant) Activate(ctx context.Context, act thread.Activation) 
 		defer done()
 		_ = p.agent.SubmitExternalResultContext(sctx, &event.ExternalExecutionResultEvent{ReplyID: e.ReplyID, ExecutionResults: results})
 	}
-	t.onConfirm = func(string, *event.RequireUserConfirmEvent) { a.addConfirm() }
+	t.onConfirm = func(_ string, e *event.RequireUserConfirmEvent) { a.addConfirm(e) }
 	go func() {
 		for ev := range stream {
 			if forward, path := t.handle(ev); forward {
@@ -289,7 +289,11 @@ func (p *AgentParticipant) settle(ctx context.Context, t *tracker, end *thread.A
 }
 
 // SubmitUserConfirm answers a confirmation request of the running
-// activation. The main agent's path is "".
+// activation. The main agent's path is "". The answer must belong to a
+// request the activation emitted and has not had answered: it names that
+// request's reply ID (or none) and answers only that request's tool calls.
+// Any other answer, such as one to a request of an interrupted activation
+// or of a run before a restart, fails and leaves the requests pending.
 func (p *AgentParticipant) SubmitUserConfirm(path string, result *event.UserConfirmResultEvent) error {
 	if path != "" {
 		return fmt.Errorf("participant %s: unknown agent path %q", p.c.desc.Name, path)
@@ -301,8 +305,9 @@ func (p *AgentParticipant) SubmitUserConfirm(path string, result *event.UserConf
 	if act == nil {
 		return fmt.Errorf("participant %s: no activation is running", p.c.desc.Name)
 	}
-	if !act.takeConfirm() {
-		return fmt.Errorf("participant %s: no confirmation is pending", p.c.desc.Name)
+	pending, err := act.takeConfirm(result)
+	if err != nil {
+		return fmt.Errorf("participant %s: %w", p.c.desc.Name, err)
 	}
 	// The agent takes the answer at once while it waits for it. The bound
 	// keeps a stale answer in its channel from blocking the caller; the
@@ -310,7 +315,7 @@ func (p *AgentParticipant) SubmitUserConfirm(path string, result *event.UserConf
 	ctx, cancel := context.WithTimeout(act.ctx, submitTimeout)
 	defer cancel()
 	if err := p.agent.SubmitUserConfirmContext(ctx, result); err != nil {
-		act.addConfirm()
+		act.restoreConfirm(pending)
 		return fmt.Errorf("participant %s: submit the confirmation: %w", p.c.desc.Name, err)
 	}
 	return nil

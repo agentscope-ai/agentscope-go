@@ -22,6 +22,7 @@ func TestHelperFakeMCPServer(t *testing.T) {
 	// Records whether the client's initialize declared the elicitation
 	// capability, reported by the capcheck tool.
 	sawElicitationCapability := false
+	listCalls := 0
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
@@ -51,13 +52,31 @@ func TestHelperFakeMCPServer(t *testing.T) {
 				"serverInfo":      map[string]any{"name": "fake", "version": "0"},
 			}
 		case "tools/list":
-			result = map[string]any{"tools": []any{
-				map[string]any{
-					"name":        "echo",
-					"description": "returns the server pid",
-					"inputSchema": map[string]any{"type": "object"},
-				},
-			}}
+			if os.Getenv("GO_WANT_SHUFFLED_MCP_TOOLS") == "1" {
+				orders := [][]string{
+					{"gamma", "echo", "alpha"},
+					{"echo", "alpha", "gamma"},
+				}
+				names := orders[listCalls%len(orders)]
+				listCalls++
+				tools := make([]any, len(names))
+				for i, n := range names {
+					tools[i] = map[string]any{
+						"name":        n,
+						"description": "tool " + n,
+						"inputSchema": map[string]any{"type": "object"},
+					}
+				}
+				result = map[string]any{"tools": tools}
+			} else {
+				result = map[string]any{"tools": []any{
+					map[string]any{
+						"name":        "echo",
+						"description": "returns the server pid",
+						"inputSchema": map[string]any{"type": "object"},
+					},
+				}}
+			}
 		case "tools/call":
 			var p struct {
 				Name string `json:"name"`
@@ -297,5 +316,30 @@ func TestStdioClient_ServerDeathThenReconnect(t *testing.T) {
 	second := callEcho(t, c)
 	if first == second {
 		t.Errorf("reconnect reused the same server process (%s)", first)
+	}
+}
+
+func TestStdioClient_ListToolsSorted(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	cfg := fakeMCPServerConfig()
+	cfg.Env = append(cfg.Env, "GO_WANT_SHUFFLED_MCP_TOOLS=1")
+	c, err := NewStdioClient(ctx, cfg)
+	if err != nil {
+		t.Fatalf("NewStdioClient: %v", err)
+	}
+	defer c.Close()
+
+	want := []string{"alpha", "echo", "gamma"}
+	for round := range 2 {
+		schemas, err := c.ListTools(ctx)
+		if err != nil {
+			t.Fatalf("round %d ListTools: %v", round, err)
+		}
+		got := toolSchemaNames(schemas)
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("round %d ListTools = %v, want %v", round, got, want)
+		}
 	}
 }

@@ -202,7 +202,7 @@ func TestContentBlockCompactionCrossMessagePrelude(t *testing.T) {
 				t.Fatal(err)
 			}
 			a := NewUnifiedAgent("bot", "system", &blockCountModel{}, WithContentBlockCompaction(), WithState(&AgentState{Context: msgs}))
-			_, kept := a.splitContextForCompression(budget, nil)
+			_, kept := a.splitContextForCompression(budget, false, nil)
 			if budget == 6 {
 				if len(kept) != 0 {
 					t.Fatal("retained an exchange without its indivisible reasoning/text/media prelude")
@@ -228,7 +228,7 @@ func TestContentBlockCompactionCrossMessagePendingPrelude(t *testing.T) {
 			msgs := crossMessageCompactionHistory(thinking)[:3]
 			msgs = append(msgs, nil, compactionMsg(), compactionMsg(redacted), compactionMsg(compactionCall("pending", state)))
 			a := NewUnifiedAgent("bot", "system", &blockCountModel{}, WithContentBlockCompaction(), WithState(&AgentState{Context: msgs}))
-			prefix, kept := a.splitContextForCompression(2, nil)
+			prefix, kept := a.splitContextForCompression(2, false, nil)
 			if !reflect.DeepEqual(blockResultIDs(prefix), []string{"old"}) || !reflect.DeepEqual(kept, msgs[2:]) {
 				t.Fatal("unfinished call did not pin its complete cross-message prelude above the reserve target")
 			}
@@ -243,7 +243,7 @@ func TestContentBlockCompactionCrossMessagePreludeSeparators(t *testing.T) {
 			msgs := crossMessageCompactionHistory(thinking)
 			msgs = append(msgs[:3], append([]*message.Msg{separator}, msgs[3:]...)...)
 			a := NewUnifiedAgent("bot", "system", &blockCountModel{}, WithContentBlockCompaction(), WithState(&AgentState{Context: msgs}))
-			_, kept := a.splitContextForCompression(3, nil)
+			_, kept := a.splitContextForCompression(3, false, nil)
 			if !reflect.DeepEqual(kept, msgs[4:]) {
 				t.Fatal("retained a prior turn's prelude across a role or agent-name separator")
 			}
@@ -256,7 +256,7 @@ func TestContentBlockCompactionCrossMessageParallelPrelude(t *testing.T) {
 	msgs := crossMessageCompactionHistory(thinking)[:3]
 	msgs = append(msgs, compactionMsg(compactionCall("a", message.ToolCallFinished)), compactionMsg(compactionCall("b", message.ToolCallSubmitted)), compactionMsg(compactionResult("a", message.ToolResultSuccess)))
 	a := NewUnifiedAgent("bot", "system", &blockCountModel{}, WithContentBlockCompaction(), WithState(&AgentState{Context: msgs}))
-	prefix, kept := a.splitContextForCompression(2, nil)
+	prefix, kept := a.splitContextForCompression(2, false, nil)
 	if !reflect.DeepEqual(blockResultIDs(prefix), []string{"old"}) || !reflect.DeepEqual(kept, msgs[2:]) {
 		t.Fatal("one terminal result released an overlapping unfinished group's prelude")
 	}
@@ -303,7 +303,7 @@ func TestContentBlockCompactionBoundaries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			compressed, kept := a.splitContextForCompression(tt.budget, nil)
+			compressed, kept := a.splitContextForCompression(tt.budget, false, nil)
 			if got := blockResultIDs(kept); !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("retained IDs=%v, want %v", got, tt.want)
 			}
@@ -355,7 +355,7 @@ func TestContentBlockCompactionOwnsFragments(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := NewUnifiedAgent("bot", "system", &blockCountModel{}, WithContentBlockCompaction(), WithState(&AgentState{ReplyID: original.ID, Context: []*message.Msg{original}}))
-	compressed, kept := a.splitContextForCompression(5, nil)
+	compressed, kept := a.splitContextForCompression(5, false, nil)
 	if len(compressed) != 1 || len(kept) != 1 || len(kept[0].Content) != 4 {
 		t.Fatalf("unexpected fragments: compressed=%v kept=%v", compressed, kept)
 	}
@@ -402,7 +402,7 @@ func TestContentBlockCompactionNonMonotonicEstimate(t *testing.T) {
 	blocks := append(compactionExchange("a"), compactionExchange("b")...)
 	blocks = append(blocks, compactionExchange("c")...)
 	a := NewUnifiedAgent("bot", "system", &nonMonotonicCompactionModel{}, WithContentBlockCompaction(), WithState(&AgentState{Context: []*message.Msg{compactionMsg(blocks...)}}))
-	compressed, kept := a.splitContextForCompression(4, nil)
+	compressed, kept := a.splitContextForCompression(4, false, nil)
 	if !reflect.DeepEqual(blockResultIDs(compressed), []string{"a"}) || !reflect.DeepEqual(blockResultIDs(kept), []string{"b", "c"}) {
 		t.Fatalf("missed fitting group: compressed=%v kept=%v", blockResultIDs(compressed), blockResultIDs(kept))
 	}

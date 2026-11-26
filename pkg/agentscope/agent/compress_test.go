@@ -237,7 +237,7 @@ func TestSplitContextForCompression_AllReserved(t *testing.T) {
 		message.AssistantMsg("bot", "hi"),
 	}
 
-	compress, reserve := agent.splitContextForCompression(10000, nil)
+	compress, reserve := agent.splitContextForCompression(10000, false, nil)
 	if len(compress) != 0 {
 		t.Errorf("expected 0 messages to compress, got %d", len(compress))
 	}
@@ -255,7 +255,7 @@ func TestSplitContextForCompression_ZeroBudget(t *testing.T) {
 		message.UserMsg("user", "bye"),
 	}
 
-	compress, reserve := agent.splitContextForCompression(0, nil)
+	compress, reserve := agent.splitContextForCompression(0, false, nil)
 	if len(compress) != 3 {
 		t.Errorf("expected 3 messages to compress, got %d", len(compress))
 	}
