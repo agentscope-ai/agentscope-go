@@ -390,7 +390,9 @@ type fakeForker struct {
 	offered     []string
 	offerErr    error
 	beforeOffer func()
+	beforeSnap  func() // runs in Snapshot, on the fork planning path
 	gate        chan struct{}
+	ownGate     chan struct{} // gates the own forks only
 	forked      chan ForkSpec
 }
 
@@ -404,6 +406,11 @@ func newFakeForker(name string) *fakeForker {
 
 func (f *fakeForker) Snapshot() (Snapshot, error) {
 	f.fmu.Lock()
+	if hook := f.beforeSnap; hook != nil {
+		f.fmu.Unlock()
+		hook()
+		f.fmu.Lock()
+	}
 	if len(f.snapErrs) > 0 {
 		err := f.snapErrs[0]
 		f.snapErrs = f.snapErrs[1:]
@@ -424,6 +431,9 @@ func (f *fakeForker) Fork(ctx context.Context, _ Snapshot, spec ForkSpec) (ForkO
 	out := f.peerOut
 	if spec.Prompt == DefaultOwnPrompt || spec.Prompt == DefaultOwnUpdatePrompt {
 		out = f.ownOut
+		if f.ownGate != nil {
+			g = f.ownGate
+		}
 	}
 	err := f.forkErr
 	f.fmu.Unlock()

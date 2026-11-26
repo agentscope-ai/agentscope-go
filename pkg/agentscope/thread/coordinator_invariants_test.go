@@ -686,8 +686,10 @@ func TestCoordinatorUnrecordedOwnerChangeParksInput(t *testing.T) {
 }
 
 // A clear the edge cannot apply leaves the Coordinator's view as it was: the
-// edge holds no new coverage and is cleared again at the next takeover, with
-// the whole import in that one Sync.
+// edge holds no new coverage and is cleared again at the next takeover. The
+// import outgrows the reset budget (no refreshed summary came), so the reset
+// goes first with what fits and the rest follows in chunks with compactions:
+// the local fallback.
 func TestCoordinatorFailedClearKeepsTheView(t *testing.T) {
 	store := NewMemoryStore(WithClock(fixedClock()))
 	mustAppend(t, store, nil, userInput("plan"))
@@ -729,11 +731,13 @@ func TestCoordinatorFailedClearKeepsTheView(t *testing.T) {
 	env.submit(Query{Text: "continue again", Explicit: "edge"})
 	env.idle()
 	again := edge.appliedSyncs()
-	if len(again) != 1 || !again[0].Reset {
-		t.Fatalf("the next takeover must clear again in one Sync: %+v", again)
+	if len(again) < 2 || !again[0].Reset || again[0].PeerSummary == nil || !containsText(syncTexts(&again[0]), "CHUNK-1") {
+		t.Fatalf("the next takeover must reset first, with the first chunk: %+v", again)
 	}
-	texts := syncTexts(&again[0])
-	if !containsText(texts, "CHUNK-1") || !containsText(texts, "CHUNK-8") {
+	if n := edge.compactCount(); n == 0 {
+		t.Fatal("the chunks must be compacted between")
+	}
+	if texts := allImported(edge); !containsText(texts, "CHUNK-8") {
 		t.Fatalf("the clear must bring the whole import: %q", texts)
 	}
 	env.c.mu.Lock()

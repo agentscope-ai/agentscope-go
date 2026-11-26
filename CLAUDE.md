@@ -372,7 +372,8 @@ its pending requests. A participant calls its Host only after
 `NewCoordinator` returns.
 A participant fails `Activate` when its Sync was not applied; no
 Sync moves the cursor back (an edge clear is one Reset Sync with the
-activation). A failed owner's request fails over to the other side, queued
+activation, or a Reset Sync then chunks when it outgrows the edge's share).
+A failed owner's request fails over to the other side, queued
 behind any task running there (no takeover); a crash resumes the newest
 unanswered request on its owner. A task never re-runs: the report that ends it
 carries `Task.End`, and recovery reports one left without a report as

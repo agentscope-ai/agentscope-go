@@ -1,11 +1,13 @@
 package thread
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope"
@@ -35,30 +37,111 @@ type forkJob struct {
 }
 
 // afterEnd decides whether the participant's sealed activation calls for a
-// peer summary or own notes and starts the job. It runs without the mutex.
+// peer summary or own notes and starts the job. Unless the job it started
+// writes a peer summary, or a job already running may still write one, no
+// summary for the edge is pending anymore. It runs without the mutex.
 func (c *Coordinator) afterEnd(a *activation, reason types.ReplyFinishedReason, started bool) {
 	ps := a.part
 	if ps.forker == nil {
 		return
 	}
-	if c.cfg.Summaries.Disabled || !started || reason == types.ReplyError {
+	job := c.startForks(a, reason, started)
+	if job != nil && job.peer {
 		return
+	}
+	c.mu.Lock()
+	if job != nil || !ps.forking {
+		ps.resolvePeerPendingLocked()
+	}
+	c.mu.Unlock()
+}
+
+// startForks starts the job the activation calls for and returns it, or nil
+// when it starts none.
+func (c *Coordinator) startForks(a *activation, reason types.ReplyFinishedReason, started bool) *forkJob {
+	ps := a.part
+	if c.cfg.Summaries.Disabled || !started || reason == types.ReplyError {
+		return nil
 	}
 	job := c.planForks(a)
 	if job == nil {
-		return
+		return nil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed || ps.forking {
-		return
+		return nil
 	}
 	ps.forking = true
+	if job.peer {
+		// A job that ended after this activation's stream may have resolved
+		// the mark it set: the summary this job writes is on its way.
+		c.markPeerPendingLocked(ps)
+	}
 	c.nextJob++
 	job.id = fmt.Sprintf("%s-f%d", c.runID, c.nextJob)
 	c.addWorkLocked()
 	c.wg.Add(1)
 	go c.runForkJob(job)
+	return job
+}
+
+// markPeerPendingLocked opens ps's pending peer summary when ps writes peer
+// summaries for the edge: its activation's stream just ended, and afterEnd
+// may start a peer fork. Caller holds c.mu.
+func (c *Coordinator) markPeerPendingLocked(ps *partState) {
+	if ps.forker == nil || c.cfg.Summaries.Disabled || c.closed || ps.peerPending != nil {
+		return
+	}
+	if t := c.parts[c.edge]; t == nil || t == ps {
+		return
+	}
+	ps.peerPending = make(chan struct{})
+}
+
+// resolvePeerPendingLocked closes ps's pending peer summary, if any: no
+// summary for the edge is on its way from ps. Caller holds c.mu.
+func (ps *partState) resolvePeerPendingLocked() {
+	if ps.peerPending != nil {
+		close(ps.peerPending)
+		ps.peerPending = nil
+	}
+}
+
+// awaitPeerSummary waits, before the import of an edge handover, until no
+// writer may still append a peer summary for ps, so that the handover resets
+// to the newest one: the decision that follows a writer's activation and the
+// peer fork it starts. After Import.SummaryWait it goes on without the
+// summary. It runs without the mutex.
+func (c *Coordinator) awaitPeerSummary(ctx context.Context, ps *partState) error {
+	wait := c.cfg.Import.SummaryWait
+	c.mu.Lock()
+	var pending []chan struct{}
+	if ps.name == c.edge && wait > 0 {
+		for _, w := range c.parts {
+			if w != ps && w.peerPending != nil {
+				pending = append(pending, w.peerPending)
+			}
+		}
+	}
+	c.mu.Unlock()
+	if len(pending) == 0 {
+		return nil
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	for _, ch := range pending {
+		select {
+		case <-ch:
+		case <-timer.C:
+			agentscope.Log().WithField("participant", ps.name).WithField("wait", wait).
+				Warn("thread: the peer summary being written did not arrive in time; the handover uses the newest one written")
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 // planForks updates the growth counter and returns the job the activation
@@ -293,24 +376,33 @@ func peerValidator(budget int) func(string) (string, bool) {
 func (c *Coordinator) runForkJob(job *forkJob) {
 	defer c.wg.Done()
 	ps := job.ps
-	var peerOut, ownOut ForkOutput
-	var peerErr, ownErr error
+	var ownOut ForkOutput
+	var ownErr error
 	var wg sync.WaitGroup
 	if job.peer {
-		wg.Go(func() { peerOut, peerErr = ps.forker.Fork(c.ctx, job.snap, job.peerSpec) })
+		wg.Go(func() {
+			out, err := ps.forker.Fork(c.ctx, job.snap, job.peerSpec)
+			c.finishPeer(job, &out, err)
+			// The summary is in the log (or failed): a handover waiting for
+			// it goes on while the own notes are still being written.
+			c.mu.Lock()
+			ps.resolvePeerPendingLocked()
+			c.mu.Unlock()
+		})
 	}
 	if job.own {
 		wg.Go(func() { ownOut, ownErr = ps.forker.Fork(c.ctx, job.snap, job.ownSpec) })
 	}
+	// The own notes are offered after the peer summary settled.
 	wg.Wait()
-	if job.peer {
-		c.finishPeer(job, &peerOut, peerErr)
-	}
 	if job.own {
 		c.finishOwn(job, &ownOut, ownErr)
 	}
 	c.mu.Lock()
 	ps.forking = false
+	// An activation that ended while this job ran started no job of its own,
+	// so nothing more is on its way.
+	ps.resolvePeerPendingLocked()
 	c.doneWorkLocked()
 	c.mu.Unlock()
 }

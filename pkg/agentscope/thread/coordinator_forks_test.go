@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/agentscope-ai/agentscope-go/v2/pkg/agentscope/model"
@@ -397,6 +399,83 @@ func TestCoordinatorPeerForkOnHandoff(t *testing.T) {
 		if len(sums) != 1 || sums[0].Coverage.Through != oc {
 			t.Fatalf("handoff summary = %+v, transfer #%d", sums, oc)
 		}
+	}
+}
+
+// handOffScript transfers the foreground to the edge and records the owner
+// change's seq.
+func handOffScript(t *testing.T, oc *atomic.Uint64) fakeScript {
+	return func(r *fakeRun) *ActivationEnd {
+		r.say("over to you")
+		seq, err := r.transfer("edge")
+		if err != nil {
+			t.Errorf("transfer: %v", err)
+		}
+		oc.Store(seq)
+		return &ActivationEnd{Reason: types.ReplyHandedOff}
+	}
+}
+
+// A handover waits for the peer summary the cloud is still writing, so the
+// edge resets to it: the transfer's fork starts only after the cloud's reply
+// ends, while the transfer has already queued the edge.
+func TestCoordinatorHandoverWaitsForThePeerSummary(t *testing.T) {
+	env, edge, cloud := forkEnv(t, nil, func(cfg *Config) { cfg.Summaries.PeerEvery = 1 << 30 })
+	gate := make(chan struct{})
+	cloud.fmu.Lock()
+	cloud.gate, cloud.forked = gate, make(chan ForkSpec, 4)
+	cloud.fmu.Unlock()
+	edge.started = make(chan Activation, 4)
+	var oc atomic.Uint64
+	cloud.push(handOffScript(t, &oc))
+	edge.push(replyWith("hello"))
+	env.say("go")
+	select {
+	case <-cloud.forked:
+	case <-time.After(testTimeout):
+		t.Fatal("the handoff started no peer fork")
+	}
+	select {
+	case a := <-edge.started:
+		t.Fatalf("the edge started before the summary it waits for: %+v", a.Sync)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(gate)
+	a := waitStarted(t, edge)
+	if a.Sync == nil || !a.Sync.Reset || a.Sync.PeerSummary == nil || a.Sync.PeerSummary.Coverage.Through != oc.Load() {
+		t.Fatalf("the edge must reset to the summary covering the transfer #%d: %+v", oc.Load(), a.Sync)
+	}
+	env.idle()
+}
+
+// The wait is bounded: past Import.SummaryWait, or at once with a negative
+// value, the handover goes on with the newest summary written, here none.
+func TestCoordinatorHandoverWaitIsBounded(t *testing.T) {
+	for _, wait := range []time.Duration{20 * time.Millisecond, -1} {
+		t.Run(wait.String(), func(t *testing.T) {
+			env, edge, cloud := forkEnv(t, nil, func(cfg *Config) {
+				cfg.Summaries.PeerEvery = 1 << 30
+				cfg.Import.SummaryWait = wait
+			})
+			gate := make(chan struct{})
+			cloud.fmu.Lock()
+			cloud.gate = gate
+			cloud.fmu.Unlock()
+			edge.started = make(chan Activation, 4)
+			var oc atomic.Uint64
+			cloud.push(handOffScript(t, &oc))
+			edge.push(replyWith("hello"))
+			env.say("go")
+			a := waitStarted(t, edge)
+			if a.Sync != nil && a.Sync.Reset {
+				t.Fatalf("with no summary written yet the handover cannot reset: %+v", a.Sync)
+			}
+			close(gate)
+			env.idle()
+			if sums := findEntries(env.log(), KindSummary, ""); len(sums) != 1 {
+				t.Fatalf("the late summary must still be written: %+v", sums)
+			}
+		})
 	}
 }
 

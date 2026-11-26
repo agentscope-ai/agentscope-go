@@ -11,6 +11,28 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Changed — Main Thread: every edge handover resets to the peer summary
+
+- An edge handover (the edge running after another participant held the
+  foreground) now resets the edge to the newest peer summary written for it
+  whenever one exists, and imports every entry the summary does not cover,
+  the edge's own included. Before, it reset only when that summary covered
+  entries past the edge's last activity and was not the one its last clear
+  applied, and otherwise imported incrementally on top of the edge's old
+  context. That happened after every cloud segment too short to refresh the
+  summary.
+- The handover first waits for a peer summary still being written for the
+  edge: the one a `Transfer` to the edge calls for, or one a cloud reply that
+  just ended started. It waits at most `ImportPolicy.SummaryWait` (new;
+  default 2 minutes, negative for no wait; a failover does not wait), so a
+  Transfer's edge no longer starts from an older summary. A summary that
+  lands after the handover's trigger is used when it covers nothing past it.
+- A reset that outgrows `SummaryPolicy.PeerRatio` of the edge's window (no
+  refreshed summary came) is applied with what fits, and the rest follows as
+  the chunked import with compactions. Before, a reset had no budget and was
+  left to the agent's own compression. With no summary written yet, a
+  handover still imports incrementally.
+
 ## [v2.0.12] - 2026-11-26
 
 ### Fixed — turn statistics data race

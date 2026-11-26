@@ -388,9 +388,9 @@ func (s *session) masterTurn(ctx context.Context, r *request) *model.ChatRespons
 	case strings.Contains(r.input, "Plan a weekend"):
 		return r.call("", pipeline.TeamAssignToolName, map[string]any{"member": "researcher", "prompt": "Find the best-rated hotel in notes/hotels.md."})
 	case strings.Contains(r.input, "living room lamp"):
-		// The summary fork the transfer starts waits for the edge's answer,
-		// so its entry lands after it.
-		s.master.setGate(s.afterEdgeReply())
+		// The edge's handover waits for the summary fork the transfer starts,
+		// so the summary lands before the edge's answer and the edge starts
+		// from it.
 		return r.call("The device controls the lamp; handing over.", participant.ToolTransfer, map[string]any{
 			"to": "edge", "goal": "Turn on the living room lamp",
 			"done": []string{"Planned the Lisbon weekend"}, "remaining": []string{"switch the living room lamp on"},

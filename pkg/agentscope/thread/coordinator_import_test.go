@@ -89,19 +89,79 @@ func TestCoordinatorImportClearRule(t *testing.T) {
 	}
 }
 
-func TestCoordinatorImportIncremental(t *testing.T) {
+// A handover resets the edge to the newest summary even when the edge wrote
+// after it: what it wrote comes back with the entries the summary does not
+// cover.
+func TestCoordinatorImportResetAfterOwnActivity(t *testing.T) {
 	store := clearRuleStore(t, true)
 	edge, cloud := edgeCloud()
 	env := newCoEnv(t, store, nil, edge, cloud)
 	env.submit(Query{Text: "continue", Explicit: "edge"})
 	env.idle()
 	s := edge.activations()[0].Sync
-	if s == nil || s.Reset || s.PeerSummary != nil || s.Cursor != 8 {
+	if s == nil || !s.Reset || s.PeerSummary == nil || s.PeerSummary.Seq != 7 || s.Cursor != 8 {
 		t.Fatalf("sync = %+v", s)
 	}
-	texts := syncTexts(s)
-	if len(texts) != 6 || !containsText(texts, "passport X123") || containsText(texts, "SUMMARY") || containsText(texts, "photo") {
+	want := []string{
+		"[#4 artifact from coordinator] file:///passport\npassport X123",
+		"[#5 report from coordinator] a shared note",
+		"[#8 artifact from edge] file:///photo",
+	}
+	if got := syncTexts(s); !reflect.DeepEqual(got, want) {
+		t.Fatalf("messages = %q, want %q", got, want)
+	}
+}
+
+// Without any summary written for the edge, a handover is the local fallback:
+// an incremental import on top of the context the edge holds.
+func TestCoordinatorImportIncrementalWithoutSummary(t *testing.T) {
+	store := NewMemoryStore(WithClock(fixedClock()))
+	mustAppend(t, store, nil, userInput("plan the trip"))
+	mustAppend(t, store, &Guard{}, ownerChange("", "cloud"))
+	rep := replyFrom("cloud", "here is the plan")
+	rep.Origin.Path = ""
+	rep.BasedOn = 1
+	mustAppend(t, store, &Guard{Owner: "cloud", Epoch: 1}, rep)
+	edge, cloud := edgeCloud()
+	env := newCoEnv(t, store, nil, edge, cloud)
+	env.submit(Query{Text: "continue", Explicit: "edge"})
+	env.idle()
+	s := edge.activations()[0].Sync
+	if s == nil || s.Reset || s.PeerSummary != nil || s.Cursor != 3 {
+		t.Fatalf("sync = %+v", s)
+	}
+	if texts := syncTexts(s); !containsText(texts, "here is the plan") {
 		t.Fatalf("incremental messages = %q", texts)
+	}
+}
+
+// A handover whose reset alone outgrows the reset budget (one huge entry after
+// the summary) is still one Sync: the entry is cut to the budget, and nothing
+// is left for chunks.
+func TestCoordinatorResetCutsOneHugeEntry(t *testing.T) {
+	store := NewMemoryStore(WithClock(fixedClock()))
+	mustAppend(t, store, nil, userInput("plan"))
+	mustAppend(t, store, &Guard{}, ownerChange("", "cloud"))
+	rep := replyFrom("cloud", "the plan")
+	rep.Origin.Path = ""
+	rep.BasedOn = 1
+	mustAppend(t, store, &Guard{Owner: "cloud", Epoch: 1}, rep)
+	mustAppend(t, store, nil, Entry{
+		Kind: KindSummary, Origin: Origin{Participant: "cloud"},
+		Summary: &SummaryMeta{Target: "edge"}, Coverage: &Coverage{Through: 3}, Content: textBlocks("SUMMARY"),
+	})
+	mustAppend(t, store, nil, Entry{Kind: KindArtifact, Content: textBlocks("HUGE " + strings.Repeat("c", 4000))})
+	edge := smallEdge()
+	_, cloud := edgeCloud()
+	env := newCoEnv(t, store, nil, edge, cloud)
+	env.submit(Query{Text: "continue", Explicit: "edge"})
+	env.idle()
+	syncs := edge.appliedSyncs()
+	if len(syncs) != 1 || !syncs[0].Reset || syncs[0].Cursor != 5 || edge.compactCount() != 0 {
+		t.Fatalf("syncs = %+v, %d compactions", syncs, edge.compactCount())
+	}
+	if n := countTokens(syncs[0].Messages); n > int(0.8*float64(edge.desc.Window)) {
+		t.Fatalf("the cut entry has %d tokens", n)
 	}
 }
 

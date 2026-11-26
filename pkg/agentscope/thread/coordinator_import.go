@@ -44,15 +44,15 @@ type importer struct {
 // A trigger at or behind the participant's cursor (a wake for a report a
 // background activation already imported) imports nothing.
 //
-// An edge participant is cleared when it returns after another participant
-// held the foreground (the clear rule is for a takeover) and the newest
-// summary written for it covers entries past its own last activity: one
-// Sync resets its context to that summary and the projection of the entries
-// it does not cover. Otherwise the entries between its cursor and the trigger are
-// projected. Only an edge import has a budget; one that does not fit is
-// the local fallback: it is applied in chunks with a compaction after each,
-// and when compaction stops helping the rest is skipped with a message
-// naming the range for thread_read.
+// An edge handover, the edge running after another participant held the
+// foreground since it last acted, resets the edge to the newest peer summary
+// written for it whenever one exists: the summary and every entry it does not
+// cover (see reset). It first waits for a summary still being written
+// (awaitPeerSummary), except at a failover. Otherwise the entries between the
+// participant's cursor and the trigger are projected. Only an edge import has
+// a budget; one that does not fit is the local fallback: it is applied in
+// chunks with a compaction after each, and when compaction stops helping the
+// rest is skipped with a message naming the range for thread_read.
 func (c *Coordinator) prepareImport(ctx context.Context, a *activation, st ParticipantState) (importResult, error) {
 	ps := a.part
 	t := a.trigger.Seq
@@ -60,22 +60,57 @@ func (c *Coordinator) prepareImport(ctx context.Context, a *activation, st Parti
 		im := &importer{c: c, ps: ps}
 		return importResult{budget: im.budgetFor(st)}, nil
 	}
-	entries, err := c.store.Read(ctx, 0, Filter{}, int(t-1))
+	entries, err := c.readImport(ctx, ps, t)
 	if err != nil {
-		return importResult{}, fmt.Errorf("thread: read entries for %s: %w", ps.name, err)
+		return importResult{}, err
 	}
 	c.mu.Lock()
-	lastAct, held, resetFrom, restored := ps.lastActivity, cloneCoverage(ps.heldCoverage), ps.resetFrom, ps.restored
+	lastAct, held, restored := ps.lastActivity, cloneCoverage(ps.heldCoverage), ps.restored
 	c.mu.Unlock()
 
 	im := &importer{c: c, ps: ps, ctx: ctx, entries: entries, trigger: t, restored: restored}
-	if ps.desc.Zone == ZoneEdge {
-		if s := newestSummaryFor(entries, ps.name); s != nil && s.Coverage.Through > lastAct &&
-			s.Seq != resetFrom && foregroundLeft(entries, ps.name, lastAct) {
-			return im.clear(s), nil
+	if ps.desc.Zone == ZoneEdge && foregroundLeft(entries, ps.name, lastAct) {
+		if a.kind != actFailover {
+			if err := c.awaitPeerSummary(ctx, ps); err != nil {
+				return importResult{}, err
+			}
+		}
+		s, err := c.handoverSummary(ctx, ps, entries, t)
+		if err != nil {
+			return importResult{}, err
+		}
+		if s != nil {
+			return im.reset(st, s)
 		}
 	}
 	return im.incremental(st, held)
+}
+
+// readImport reads the entries before trigger t.
+func (c *Coordinator) readImport(ctx context.Context, ps *partState, t uint64) ([]Entry, error) {
+	entries, err := c.store.Read(ctx, 0, Filter{}, int(t-1))
+	if err != nil {
+		return nil, fmt.Errorf("thread: read entries for %s: %w", ps.name, err)
+	}
+	return entries, nil
+}
+
+// handoverSummary is the newest peer summary for ps that a handover with
+// trigger t resets to: one appended after t that covers no entry past it (a
+// summary that finished after the trigger was written, such as the one a
+// Transfer calls for, or one the handover waited for), else the newest among
+// the entries before t.
+func (c *Coordinator) handoverSummary(ctx context.Context, ps *partState, entries []Entry, t uint64) (*Entry, error) {
+	later, err := c.store.Read(ctx, t, Filter{Kinds: []Kind{KindSummary}}, 0)
+	if err != nil {
+		return nil, fmt.Errorf("thread: read summaries for %s: %w", ps.name, err)
+	}
+	for i := len(later) - 1; i >= 0; i-- {
+		if e := &later[i]; e.Summary != nil && e.Summary.Target == ps.name && e.Coverage != nil && e.Coverage.Through <= t {
+			return e, nil
+		}
+	}
+	return newestSummaryFor(entries, ps.name), nil
 }
 
 // foregroundLeft reports whether a participant other than name held the
@@ -101,32 +136,74 @@ func foregroundLeft(entries []Entry, name string, seq uint64) bool {
 	return owner != "" && owner != name
 }
 
-// clear builds the reset import from summary s as one Sync: the context is
+// reset builds the import of an edge handover from summary s: the context is
 // emptied, s becomes the peer summary, and every entry s does not cover is
-// projected. The participant's own entries are projected too when s does
-// not cover them, because the reset drops them from its context. The
-// activation has no budget, neither for this Sync nor for what Pending
-// delivers during it: a context that outgrows the window is the agent's own
-// compression's job, as in any reply.
-func (im *importer) clear(s *Entry) importResult {
+// projected. The participant's own entries are projected too when s does not
+// cover them, because the reset drops them from its context. The summary
+// rule keeps that load under SummaryPolicy.PeerRatio of the edge's window
+// (resetBudget), and within it the reset is one Sync that goes with the
+// activation; the activation then has no budget, neither for this Sync nor
+// for what Pending delivers during it: a context that outgrows the window is
+// the agent's own compression's job, as in any reply. A load past it means
+// the refresh did not come (its fork failed, the cloud was lost, or the wait
+// ran out): the reset is applied with what fits, and the rest follows in
+// chunks with a compaction after each, as an incremental import that does
+// not fit.
+func (im *importer) reset(st ParticipantState, s *Entry) (importResult, error) {
 	sum := cloneEntry(s)
-	proj := Project(im.entries, &ProjectionSpec{
-		Participant: im.ps.name,
-		Covered:     cloneCoverage(s.Coverage),
-		IncludeOwn:  true,
-	})
-	return importResult{
-		sync:   &Sync{Reset: true, PeerSummary: &sum, Messages: proj.Messages, Cursor: proj.Through},
-		tokens: countTokens(proj.Messages),
-		clear:  &clearCommit{seq: s.Seq, coverage: cloneCoverage(s.Coverage)},
+	cc := &clearCommit{seq: s.Seq, coverage: cloneCoverage(s.Coverage)}
+	spec := ProjectionSpec{Participant: im.ps.name, Covered: cloneCoverage(s.Coverage), IncludeOwn: true}
+	limit := im.resetBudget(st, &sum)
+	proj := Project(im.entries, &spec)
+	tokens := countTokens(proj.Messages)
+	if limit == 0 || tokens <= limit {
+		return importResult{
+			sync:   &Sync{Reset: true, PeerSummary: &sum, Messages: proj.Messages, Cursor: proj.Through},
+			tokens: tokens,
+			clear:  cc,
+		}, nil
 	}
+	spec.MaxTokens = limit
+	first := Project(im.entries, &spec)
+	sync := Sync{Reset: true, PeerSummary: &sum, Messages: first.Messages, Cursor: keepBehind(first.Through, st.Cursor)}
+	if !first.Remaining {
+		// One entry alone past the limit, cut to it: nothing is left.
+		return importResult{sync: &sync, tokens: countTokens(sync.Messages), clear: cc}, nil
+	}
+	if err := im.ps.p.Sync(im.ctx, sync); err != nil {
+		return importResult{}, fmt.Errorf("thread: import into %s: %w", im.ps.name, err)
+	}
+	im.c.mu.Lock()
+	im.c.commitClearLocked(im.ps, cc)
+	im.c.mu.Unlock()
+	return im.chunked(im.ps.p.State(), first.Through, spec, true)
+}
+
+// resetBudget is what a handover's reset may bring besides summary s: the
+// share of the edge's window that the summary rule keeps a handover under
+// (SummaryPolicy.PeerRatio, else ImportPolicy.EdgeShare when that rule is
+// off), less the summary, at least 1; 0 (no limit) when the window is
+// unknown.
+func (im *importer) resetBudget(st ParticipantState, s *Entry) int {
+	w := st.Window
+	if w <= 0 {
+		w = im.ps.desc.Window
+	}
+	if w <= 0 {
+		return 0
+	}
+	share := im.c.cfg.Summaries.PeerRatio
+	if share <= 0 {
+		share = im.c.cfg.Import.EdgeShare
+	}
+	return max(int(share*float64(w))-estimateText(s.Text()), 1)
 }
 
 // incremental imports the entries between the cursor and the trigger. Only
 // an edge import is budgeted; one that does not fit is applied in chunks
-// with a strict compaction after each, the local fallback for when no new
-// summary covers the entries. The participant's own entries are not
-// projected: it already holds them.
+// with a strict compaction after each (chunked), the local fallback for when
+// no summary exists. The participant's own entries are not projected: it
+// already holds them.
 func (im *importer) incremental(st ParticipantState, held *Coverage) (importResult, error) {
 	after := st.Cursor
 	// After a restart the checkpoint may predate what the participant wrote
@@ -139,18 +216,41 @@ func (im *importer) incremental(st ParticipantState, held *Coverage) (importResu
 	if after+1 >= im.trigger {
 		return importResult{budget: im.budgetFor(st)}, nil
 	}
+	return im.chunked(st, after, ProjectionSpec{Participant: im.ps.name, Covered: held, OwnBasedAfter: ownAfter}, false)
+}
+
+// chunked imports the entries after `after` that spec selects within the
+// activation's budget. A chunk that leaves entries behind is applied with
+// Sync and followed by a strict compaction; the last chunk goes with the
+// activation. applied says a first chunk was already applied, so the loop
+// starts with its compaction. When compaction fails, stops helping or the
+// rounds run out, the rest is skipped (skip).
+func (im *importer) chunked(st ParticipantState, after uint64, spec ProjectionSpec, applied bool) (importResult, error) {
 	pol := im.c.cfg.Import
-	falses := 0
-	for round := 0; ; round++ {
+	falses, round := 0, 0
+	if applied {
+		round = 1
+	}
+	for {
+		if applied {
+			ok, err := im.ps.p.Compact(im.ctx, "")
+			switch {
+			case err != nil:
+				return im.skip(im.ps.p.State(), after), nil
+			case !ok:
+				falses++
+				if falses >= 2 {
+					return im.skip(im.ps.p.State(), after), nil
+				}
+			default:
+				falses = 0
+			}
+			st = im.ps.p.State()
+		}
 		budget := im.budgetFor(st)
-		proj := Project(im.entries[min(int(after), len(im.entries)):], &ProjectionSpec{
-			Participant:   im.ps.name,
-			After:         after,
-			Covered:       held,
-			MaxTokens:     budget,
-			OwnBasedAfter: ownAfter,
-		})
-		s := &Sync{Messages: proj.Messages, Cursor: proj.Through}
+		spec.After, spec.MaxTokens = after, budget
+		proj := Project(im.entries[min(int(after), len(im.entries)):], &spec)
+		s := &Sync{Messages: proj.Messages, Cursor: keepBehind(proj.Through, st.Cursor)}
 		if !proj.Remaining {
 			// The last chunk goes with the activation.
 			res := importResult{budget: budget, tokens: countTokens(s.Messages)}
@@ -166,20 +266,23 @@ func (im *importer) incremental(st ParticipantState, held *Coverage) (importResu
 			return importResult{}, fmt.Errorf("thread: import into %s: %w", im.ps.name, err)
 		}
 		after = proj.Through
-		ok, err := im.ps.p.Compact(im.ctx, "")
-		switch {
-		case err != nil:
-			return im.skip(im.ps.p.State(), after), nil
-		case !ok:
-			falses++
-			if falses >= 2 {
-				return im.skip(im.ps.p.State(), after), nil
-			}
-		default:
-			falses = 0
-		}
-		st = im.ps.p.State()
+		applied = true
+		round++
 	}
+}
+
+// keepBehind is the Sync cursor for a chunk through seq: 0 (keep) while the
+// chunk is still behind the participant's cursor cur, since a cursor never
+// moves back. A reset's chunks re-import entries the participant held
+// before it, its own included, so they can be. If a later chunk fails, the
+// participant holds only the reset's start under its old cursor; that is
+// safe because the edge has written nothing since, so its next activation
+// is still a handover and resets again.
+func keepBehind(through, cur uint64) uint64 {
+	if through < cur {
+		return 0
+	}
+	return through
 }
 
 // skip moves the cursor past the rest of the import with one message that
