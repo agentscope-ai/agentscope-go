@@ -406,6 +406,71 @@ func TestSystemPromptSection(t *testing.T) {
 	}
 }
 
+// TestPrepareOptionsSystemPromptSection checks that the section invites a
+// transfer exactly when the options install the transfer tool, and is
+// otherwise the package section.
+func TestPrepareOptionsSystemPromptSection(t *testing.T) {
+	all := []thread.Descriptor{cloudDesc, edgeDesc}
+	const invite = "Hand the conversation over with transfer"
+	cases := []struct {
+		name   string
+		self   thread.Descriptor
+		opts   PrepareOptions
+		invite bool
+	}{
+		{"cloud defaults", cloudDesc, PrepareOptions{}, true},
+		{"edge defaults", edgeDesc, PrepareOptions{}, true},
+		{"transfer listed", edgeDesc, PrepareOptions{Tools: []string{ToolThreadRead, ToolTransfer}}, true},
+		{"transfer left out", cloudDesc, PrepareOptions{Tools: []string{ToolPublishArtifact, ToolThreadRead}}, false},
+		{"no thread tools", edgeDesc, PrepareOptions{Tools: []string{}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.opts.SystemPromptSection(tc.self, all)
+			if strings.Contains(got, invite) != tc.invite {
+				t.Fatalf("invites a transfer = %v, want %v:\n%s", !tc.invite, tc.invite, got)
+			}
+			p, err := Prepare(tc.self, tc.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			installed := false
+			for _, tl := range p.Tools() {
+				installed = installed || tl.Name() == ToolTransfer
+			}
+			if installed != tc.invite {
+				t.Fatalf("Prepare installs transfer = %v, but the section invites a transfer = %v", installed, tc.invite)
+			}
+			if tc.invite && got != SystemPromptSection(tc.self, all) {
+				t.Fatalf("with transfer the section must equal the package section:\n%s", got)
+			}
+			if tc.self.Zone == thread.ZoneCloud {
+				want := cloudSection
+				if tc.invite {
+					want += transferInvite
+				}
+				if want += "\n" + thread.RenderPeers("cloud", all); got != want {
+					t.Fatalf("section = %q, want %q", got, want)
+				}
+			}
+		})
+	}
+	if s := (PrepareOptions{Tools: []string{}}).SystemPromptSection(cloudDesc, []thread.Descriptor{cloudDesc}); s != "" {
+		t.Fatalf("no peers: %q", s)
+	}
+	// The package section sits in cached prompt prefixes, so its bytes are
+	// pinned, not only its agreement with the method.
+	if got, want := SystemPromptSection(cloudDesc, all), cloudSection+transferInvite+"\n"+thread.RenderPeers("cloud", all); got != want {
+		t.Fatalf("package section = %q, want %q", got, want)
+	}
+}
+
+const (
+	cloudSection = "You are participant cloud (zone cloud) in a session shared through one thread log. " +
+		"Each participant has its own context and tools; only what it publishes reaches the others."
+	transferInvite = " Hand the conversation over with transfer when another participant is better placed to continue."
+)
+
 func TestArgumentHelpers(t *testing.T) {
 	in := map[string]any{"f": 7.0, "frac": 2.5, "neg": -2.0, "big": 1e12, "huge": 1e300, "nan": math.NaN(),
 		"pinf": math.Inf(1), "ninf": math.Inf(-1), "max": float64(math.MaxInt32), "over": float64(math.MaxInt32) + 1,

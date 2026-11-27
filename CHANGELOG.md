@@ -11,6 +11,17 @@ releases can be verified with `git log <prev-tag>..<tag> --oneline`.
 
 ## [Unreleased]
 
+### Fixed — Main Thread: a participant prompt that leaves out `transfer`
+
+- `participant.SystemPromptSection` always told the participant to hand the
+  conversation over with `transfer`, including when the host's
+  `PrepareOptions.Tools` left that tool out. The new
+  `PrepareOptions.SystemPromptSection` method renders the same section for a
+  participant prepared with those options (by `Prepare` or
+  `TeamConfig.Prepare`) and drops the line when `transfer` is not installed.
+  With the default tools it returns the package section unchanged, and the
+  package function keeps its output.
+
 ## [v2.0.12] - 2026-11-26
 
 ### Fixed — turn statistics data race

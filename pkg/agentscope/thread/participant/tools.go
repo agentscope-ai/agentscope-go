@@ -156,14 +156,36 @@ var toolSchemas = map[string]string{
 // system prompt: who the participant is and its peers (thread.RenderPeers).
 // It is byte-stable for the same input, whatever the order of all, because it
 // sits in a cached prompt prefix. It is empty when there are no peers.
+//
+// It invites the participant to hand the conversation over with transfer, as
+// the default thread tools include it. For a participant whose
+// PrepareOptions.Tools leave transfer out, use PrepareOptions.SystemPromptSection;
+// for one built with NewAgentParticipant, which has no thread tools, use
+// PrepareOptions{Tools: []string{}}.SystemPromptSection.
 func SystemPromptSection(self thread.Descriptor, all []thread.Descriptor) string { //nolint:gocritic // the value parameter keeps the documented API
+	return systemPromptSection(self, all, true)
+}
+
+// SystemPromptSection is the package SystemPromptSection for a participant
+// prepared with these options (by Prepare or TeamConfig.Prepare): it leaves
+// out the line inviting a transfer when the options do not install the
+// transfer tool, so the prompt never names a tool the agent lacks. With the
+// default tools it returns the package section unchanged.
+func (o PrepareOptions) SystemPromptSection(self thread.Descriptor, all []thread.Descriptor) string { //nolint:gocritic // the value parameters keep the documented API
+	return systemPromptSection(self, all, slices.Contains(o.toolNames(self.Zone), ToolTransfer))
+}
+
+func systemPromptSection(self thread.Descriptor, all []thread.Descriptor, transfer bool) string { //nolint:gocritic // the descriptor is copied on purpose
 	peers := thread.RenderPeers(self.Name, all)
 	if peers == "" {
 		return ""
 	}
-	return "You are participant " + self.Name + " (zone " + string(self.Zone) + ") in a session shared through one " +
-		"thread log. Each participant has its own context and tools; only what it publishes reaches the others. " +
-		"Hand the conversation over with transfer when another participant is better placed to continue.\n" + peers
+	s := "You are participant " + self.Name + " (zone " + string(self.Zone) + ") in a session shared through one " +
+		"thread log. Each participant has its own context and tools; only what it publishes reaches the others."
+	if transfer {
+		s += " Hand the conversation over with transfer when another participant is better placed to continue."
+	}
+	return s + "\n" + peers
 }
 
 // ---------------------------------------------------------------- arguments
