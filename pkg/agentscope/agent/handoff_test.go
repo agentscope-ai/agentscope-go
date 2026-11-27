@@ -127,18 +127,18 @@ func TestHandoffOnRepromptedConfirmation(t *testing.T) {
 	m := &seamModel{respond: func(int, []*message.Msg, *model.CallOptions) (*model.ChatResponse, error) {
 		return seamText("must not be called"), nil
 	}}
-	state := &AgentState{
+	state := resumableState(&AgentState{
 		SessionID: "s",
 		Context: []*message.Msg{message.AssistantMsg("master", []message.ContentBlock{
 			message.ToolCallBlock{Type: "tool_call", ID: "t1", Name: "transfer", Input: `{}`, State: message.ToolCallAsking},
 		})},
-	}
-	a = NewUnifiedAgent("master", "sys", m, WithState(state),
+	})
+	a = NewUnifiedAgent("master", "sys", m, WithState(state), WithStateSaver(newFakeStateSaver()), WithReplyRecovery(),
 		WithPermissionContext(permission.NewContext(permission.ModeDefault)),
 		WithToolkit(tool.NewToolkit(transferTool(&a, &runs))))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	ch, err := a.ReplyStream(ctx, "go on")
+	ch, err := a.ResumeReplyStream(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -248,11 +248,11 @@ func seqArg(v any) (uint64, bool) {
 // (see tracker.notes). It runs on the forwarder, so the text, digest and
 // flags it uses cover exactly the events before the call.
 //
-// A call is answered under the activation that asks for it. A restored agent
-// can ask again for a call that was submitted but never answered (reply
-// recovery re-drives it in a later reply); that call is then answered under
-// the later activation, whose epoch, foreground, ownership and interruption
-// checks apply.
+// A call is answered under the activation that asks for it. An activation
+// always brings input and the participant joins its reply core before the
+// activation ends, so a call a restored agent left submitted is closed as
+// interrupted (agent.ToolCallsInterruptedEvent) and is never answered under
+// a later activation.
 func (t *tracker) runWrite(call *message.ToolCallBlock) message.ToolResultBlock {
 	w := &writeRecord{name: call.Name}
 	w.result = t.write(call, w)

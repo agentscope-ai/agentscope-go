@@ -39,10 +39,13 @@ func (a *UnifiedAgent) getLastAssistantMsg() *message.Msg {
 func (a *UnifiedAgent) checkNextAction() (protocol.LoopState, *message.Msg) {
 	lastMsg := a.getLastAssistantMsg()
 	if lastMsg == nil {
-		// Resume scenario (HARNESS_DESIGN F1): a fresh user input follows a
-		// restored assistant message that still has asking/submitted calls.
-		// Detect the pending handshake so the loop re-drives it instead of
-		// reasoning over an unfinished conversation.
+		// A message of the user or of another agent is last. A reply with
+		// new input has closed the calls left awaiting before it
+		// (interruptUnansweredCallsLocked) unless another reply core of
+		// this agent is still running. Calls that core still awaits are not
+		// reasoned over: a submitted call is requested again, and one
+		// awaiting approval ends this reply with the waiting message
+		// (repromptAwaitingCalls).
 		if askCount, subCount := a.countAwaitingInContext(); askCount+subCount > 0 {
 			return protocol.StateWait, waitExitMsg(a.name, askCount, subCount)
 		}
@@ -124,9 +127,9 @@ func (a *UnifiedAgent) updateToolCallState(callID string, newState message.ToolC
 	a.mu.Lock()
 	a.invalidateRetentionLocked()
 	defer a.mu.Unlock()
-	// Scan backwards: after a resume the call may live in an assistant
-	// message that is no longer the last context message (a fresh user
-	// input follows it). Call IDs are unique per reply.
+	// Scan backwards: the call may live in an assistant message that is no
+	// longer the last context message (a later reply's input follows it
+	// while this reply's core still runs). Call IDs are unique per reply.
 	for i := len(a.state.Context) - 1; i >= 0; i-- {
 		msg := a.state.Context[i]
 		if msg == nil {

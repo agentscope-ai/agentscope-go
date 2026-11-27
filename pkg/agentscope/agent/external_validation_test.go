@@ -62,13 +62,14 @@ func TestExternalValidationAndMetadata(t *testing.T) {
 				opts := []AgentOption{WithToolkit(tool.NewToolkit(v)), WithPermissionContext(pctx), WithReactConfig(ReactConfig{MaxIters: 3})}
 				if resumed {
 					tc.State = message.ToolCallSubmitted
-					opts = append(opts, WithState(&AgentState{Context: []*message.Msg{{Name: "bot", Role: message.RoleAssistant, Content: []message.ContentBlock{tc}}}}))
+					opts = append(opts, WithState(resumableState(&AgentState{Context: []*message.Msg{{Name: "bot", Role: message.RoleAssistant, Content: []message.ContentBlock{tc}}}})),
+						WithStateSaver(newFakeStateSaver()), WithReplyRecovery())
 					mock.responses = []model.ChatResponse{final}
 				}
 				a := NewUnifiedAgent("bot", "Help the user.", mock, opts...)
 				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 				defer cancel()
-				stream, err := a.ReplyStream(ctx, "continue")
+				stream, err := replyOrResume(ctx, a, resumed)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -157,12 +158,12 @@ func TestResumeExternalRequiresActiveExternalTool(t *testing.T) {
 			}
 			tc := message.ToolCallBlock{Type: "tool_call", ID: "restored", Name: "former_external", Input: `{}`, State: message.ToolCallSubmitted}
 			mock := &mockChatModel{responses: []model.ChatResponse{{Content: []message.ContentBlock{message.TextBlock{Type: "text", Text: "done"}}, IsLast: true}}}
-			a := NewUnifiedAgent("bot", "Help.", mock, WithToolkit(tk), WithPermissionContext(permission.NewContext(permission.ModeDefault)), WithState(&AgentState{
+			a := NewUnifiedAgent("bot", "Help.", mock, WithToolkit(tk), WithPermissionContext(permission.NewContext(permission.ModeDefault)), WithState(resumableState(&AgentState{
 				Context: []*message.Msg{{Name: "bot", Role: message.RoleAssistant, Content: []message.ContentBlock{tc}}},
-			}))
+			})), WithStateSaver(newFakeStateSaver()), WithReplyRecovery())
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			stream, err := a.ReplyStream(ctx, "continue")
+			stream, err := a.ResumeReplyStream(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -199,13 +200,14 @@ func TestExternalResultPreservesOrderedBlocks(t *testing.T) {
 			opts := []AgentOption{WithToolkit(tool.NewToolkit(v)), WithPermissionContext(permission.NewContext(permission.ModeDefault))}
 			if resumed {
 				tc.State = message.ToolCallSubmitted
-				opts = append(opts, WithState(&AgentState{Context: []*message.Msg{{Name: "bot", Role: message.RoleAssistant, Content: []message.ContentBlock{tc}}}}))
+				opts = append(opts, WithState(resumableState(&AgentState{Context: []*message.Msg{{Name: "bot", Role: message.RoleAssistant, Content: []message.ContentBlock{tc}}}})),
+					WithStateSaver(newFakeStateSaver()), WithReplyRecovery())
 				mock.responses = []model.ChatResponse{final}
 			}
 			a := NewUnifiedAgent("bot", "Help.", mock, opts...)
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			stream, err := a.ReplyStream(ctx, "continue")
+			stream, err := replyOrResume(ctx, a, resumed)
 			if err != nil {
 				t.Fatal(err)
 			}

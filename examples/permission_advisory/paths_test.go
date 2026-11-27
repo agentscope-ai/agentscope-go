@@ -55,7 +55,7 @@ func (pathSaver) ListSessions(context.Context) ([]agent.SessionInfo, error)    {
 func (pathSaver) DeleteSession(context.Context, string) error                  { return nil }
 
 func TestExcludedAgentPathsNeverClassify(t *testing.T) {
-	for _, kind := range []string{"no engine", "buffered", "resume new", "restored pending", "restored allowed", "restored asking", "reprompt asking", "restored submitted", "external", "parallel", "bounded", "width one", "loop", "orchestrator"} {
+	for _, kind := range []string{"no engine", "buffered", "resume new", "restored pending", "restored allowed", "restored asking", "interrupted asking", "restored submitted", "external", "parallel", "bounded", "width one", "loop", "orchestrator"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
@@ -91,7 +91,7 @@ func TestExcludedAgentPathsNeverClassify(t *testing.T) {
 			}
 			resume := false
 			switch kind {
-			case "resume new", "restored pending", "restored allowed", "restored asking", "reprompt asking", "restored submitted":
+			case "resume new", "restored pending", "restored allowed", "restored asking", "interrupted asking", "restored submitted":
 				state := &agent.AgentState{SessionID: "fixture", ReplyID: "old", ReplyRecovery: &agent.ReplyRecoveryState{Version: 1, ReplyID: "old", Active: true, Budgets: middleware.ReplyBudgetSnapshot{Version: 1}}}
 				if kind == "resume new" {
 					state.Context = []*message.Msg{message.UserMsg("user", demoIntent)}
@@ -99,7 +99,7 @@ func TestExcludedAgentPathsNeverClassify(t *testing.T) {
 					switch kind {
 					case "restored allowed":
 						call.State = message.ToolCallAllowed
-					case "restored asking", "reprompt asking":
+					case "restored asking", "interrupted asking":
 						call.State = message.ToolCallAsking
 					case "restored submitted":
 						call.State = message.ToolCallSubmitted
@@ -110,7 +110,7 @@ func TestExcludedAgentPathsNeverClassify(t *testing.T) {
 					calls = nil
 				}
 				opts = append(opts, agent.WithState(state))
-				if kind != "reprompt asking" {
+				if kind != "interrupted asking" {
 					opts = append(opts, agent.WithStateSaver(pathSaver{}), agent.WithReplyRecovery())
 					resume = true
 				}

@@ -519,8 +519,20 @@ and the inputs joined to it, the host's `Config.RecoveryNote` (why the
 process stopped, on one line), the failure before the restart if any, and
 the latest progress. The input also warns that work done before the restart
 may or may not have taken effect, so the owner checks the actual state
-before redoing anything. A request a Transfer handed to the owner is resumed
-there like any other, and the input quotes it. If the owner is gone, the
+before redoing anything. Tool calls the owner's agent left without a result
+(a confirmation it still awaited, or a call cut off mid-step) are closed as
+interrupted when that input arrives, before it: nothing runs or is asked
+again, each result says that a call awaiting approval did not run or that
+another call's outcome is unknown, and the activation does not count them
+as its tool calls. A confirmation request shown before the restart
+is void; if the owner still needs the call, it asks again in a new request.
+`SubmitUserConfirm` refuses an answer the host still submits for the void
+request when it names the reply before the restart, as it does when the host
+sets `ReplyID`, and the new request's own answer still gets through. An
+answer with an empty `ReplyID` matches by tool-call ID, so it answers a new
+request for a call with the same ID.
+A request a Transfer handed to the owner is resumed there like any other, and
+the input quotes it. If the owner is gone, the
 turn's routing never finished: its request is routed again behind a
 `restarted` marker whose dedup key starts with `requeue:` and counts the
 restart, the turn's other inputs that

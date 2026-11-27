@@ -100,12 +100,6 @@ type UnifiedAgent struct {
 	checkpointMu   sync.Mutex
 	confirmStash   map[string]stashed[event.ConfirmResult]
 	externalStash  map[string]stashed[message.ToolResultBlock]
-	// priorReplyID is the reply ID the state held when the running reply
-	// started, when that ID differs from the running reply's (empty
-	// otherwise). After a plain checkpoint resume, which gives the reply a
-	// new ID, answers to the calls it asks again may still name it (see
-	// resumedAnswerIDs). Guarded by mu.
-	priorReplyID   string
 	hookRunner     *loop.HookRunner
 	stateAwareness bool
 	responseFormat *model.ResponseFormat
@@ -452,6 +446,8 @@ func (a *UnifiedAgent) Name() string { return a.name }
 // Cancellation is checked after draining events and under the state lock before
 // returning success, including when a terminal event was already received.
 // On cancellation the return message is nil; recorded partial state is retained.
+// Calls an earlier reply left without a result are closed first, as
+// ReplyStream describes.
 func (a *UnifiedAgent) Reply(ctx context.Context, input string) (*message.Msg, error) {
 	ch, err := a.replyStream(ctx, input, false, false)
 	if err != nil {
@@ -505,6 +501,21 @@ func (a *UnifiedAgent) Reply(ctx context.Context, input string) (*message.Msg, e
 // Callers must drain the channel until it closes (or cancel ctx): an
 // abandoned stream wedges the forwarder and keeps the agent's in-flight
 // reply slot held, which also blocks NewConversation.
+//
+// Before recording the input, the reply closes this agent's tool calls that
+// an earlier reply left without a result, as a restored checkpoint can hold
+// them: nothing runs and nothing is asked again. Each gets an interrupted
+// result in its call's message, saying that a call awaiting approval did not
+// run or that another call's outcome is unknown (for a submitted external
+// call, also that a result the host returns now is not recorded), and
+// answers still queued for earlier requests are dropped. The reply reports them with a
+// ToolCallsInterruptedEvent. ResumeReplyStream continues such calls instead.
+// While another reply core of this agent is still running (a canceled reply
+// whose tool ignores cancellation), nothing is closed or dropped: that core
+// may record its results after this input, a submitted call it waits for is
+// requested again, and a call it awaits approval for ends this reply with a
+// waiting message. Wait for the earlier core before starting a reply. Reply
+// does the same.
 func (a *UnifiedAgent) ReplyStream(ctx context.Context, input string) (<-chan event.Event, error) {
 	return a.replyStream(ctx, input, false, true)
 }
@@ -717,10 +728,9 @@ func (a *UnifiedAgent) Observe(ctx context.Context, msgs []*message.Msg) error {
 // SubmitUserConfirm submits a user confirmation result for pending tool calls.
 // Call this after receiving a RequireUserConfirmEvent from the event stream.
 // Set ReplyID to that event's ReplyID: a waiting reply drops a result naming
-// another reply, because tool-call IDs may repeat across replies. A call
-// asked again after a plain checkpoint resume (WithState, then a new reply)
-// also accepts the reply ID the checkpoint held. An empty ReplyID matches the
-// waiting reply, by tool-call ID only.
+// another reply, because tool-call IDs may repeat across replies.
+// ResumeReplyStream asks again under the reply ID the checkpoint held. An
+// empty ReplyID matches the waiting reply, by tool-call ID only.
 func (a *UnifiedAgent) SubmitUserConfirm(result *event.UserConfirmResultEvent) {
 	if a.confirmCh != nil {
 		a.confirmCh <- *result
@@ -749,9 +759,10 @@ func (a *UnifiedAgent) SubmitExternalResult(result *event.ExternalExecutionResul
 // waiting for the value, so a value still in the channel (one a reply that
 // has since ended never read) is dropped and result takes its place, to be
 // read by the next reply, whose waiters match it as SubmitUserConfirm
-// describes. A value a running reply may still read is never dropped. It
-// returns ctx.Err() at once when ctx has already ended, and an error when
-// result or ctx is nil or the agent has no permission context
+// describes; a next reply with new input that closes unanswered calls drops
+// it instead (see ReplyStream). A value a running reply may still read is
+// never dropped. It returns ctx.Err() at once when ctx has already ended, and
+// an error when result or ctx is nil or the agent has no permission context
 // (WithPermissionContext), which is what creates the channel.
 func (a *UnifiedAgent) SubmitUserConfirmContext(ctx context.Context, result *event.UserConfirmResultEvent) error {
 	if result == nil {
@@ -870,10 +881,6 @@ func (a *UnifiedAgent) replyLoop(ctx context.Context, input string, ch chan<- ev
 	a.handedOff.Store(false) // a handoff mark never outlives the reply that made it
 
 	a.mu.Lock()
-	a.priorReplyID = ""
-	if prior := a.state.ReplyID; prior != replyID {
-		a.priorReplyID = prior
-	}
 	a.state.ReplyID = replyID
 	if run == nil || !run.resume {
 		a.state.CurIter = 0
@@ -894,8 +901,24 @@ func (a *UnifiedAgent) replyLoop(ctx context.Context, input string, ch chan<- ev
 	emit(ctx, ch, event.NewReplyStartEvent(a.state.SessionID, replyID, a.name, message.RoleAssistant))
 
 	userMsg := message.UserMsg(a.name, input)
+	var interrupted []interruptedCall
 	a.mu.Lock()
 	if run == nil || !run.resume {
+		// New input closes the calls an earlier reply left without a
+		// result; their results go before the input (see
+		// interruptUnansweredCallsLocked). The answers still queued for
+		// them go too. While another core of this agent has not returned
+		// (a canceled reply whose tool ignores cancellation), it may still
+		// record results or read answers, so its calls are left to it.
+		if a.runningCores == 1 {
+			interrupted = a.interruptUnansweredCallsLocked()
+			if len(interrupted) > 0 {
+				dropQueuedAnswers(a.confirmCh)
+				dropQueuedAnswers(a.externalCh)
+			}
+		} else {
+			logrus.WithField("agent", a.name).Debug("another reply core is still running; calls without a result are left to it")
+		}
 		// WithThreadInput: the input is a thread entry; tag it and raise the
 		// cursor in the same state update.
 		if seq, ok := threadInputFrom(ctx); ok {
@@ -904,6 +927,7 @@ func (a *UnifiedAgent) replyLoop(ctx context.Context, input string, ch chan<- ev
 		a.state.Context = append(a.state.Context, userMsg)
 	}
 	a.mu.Unlock()
+	emitInterruptedCalls(ctx, ch, replyID, interrupted)
 
 	if run != nil {
 		if err := a.checkpointBoundary(ctx); err != nil {
@@ -1027,9 +1051,12 @@ reactLoop:
 
 		switch nextState {
 		case protocol.StateWait:
-			// Crash-recovery re-prompt (HARNESS_DESIGN F1): after a resume
-			// via WithState, asking/submitted calls have no blocked waiter —
-			// re-drive their handshakes. When nothing is awaiting (e.g. an
+			// Crash-recovery re-prompt (HARNESS_DESIGN F1): under
+			// ResumeReplyStream, submitted calls have no blocked waiter, so
+			// their execution is requested again (a reply with new input has
+			// closed them instead). Of the calls another running core still
+			// awaits, a submitted one is requested again and one awaiting
+			// approval is left to it. When nothing is awaiting (e.g. an
 			// external system parked us), fall through to the wait exit.
 			if err := a.checkpointBoundary(ctx); err != nil {
 				return types.ReplyError, madeProgress, checkpointError(err)
@@ -1572,9 +1599,8 @@ func (a *UnifiedAgent) waitForConfirmation(ctx context.Context, ids answerIDs, t
 // answers for concurrent waiters of ONE reply, so the bound is generous.
 const stashLimit = 1024
 
-// stashed is a parked batch entry with the reply ID its event named. The
-// waiter that parked it may have accepted a checkpoint's reply ID that the
-// entry's own waiter does not (answerIDs.prior), so takers check it again.
+// stashed is a parked batch entry with the reply ID its event named. Takers
+// check it again, so an entry never answers a call of another reply.
 type stashed[T any] struct {
 	reply string
 	value T
@@ -1597,7 +1623,7 @@ func (a *UnifiedAgent) stashConfirm(reply string, cr *event.ConfirmResult) {
 
 // takeStashedConfirm retrieves and removes a parked confirmation for
 // toolCallID whose reply ID ids accepts. An entry naming another reply stays
-// parked for a waiter that accepts it.
+// parked; the stash is cleared when the next reply starts.
 func (a *UnifiedAgent) takeStashedConfirm(ids answerIDs, toolCallID string) (bool, message.ToolCallBlock, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -1665,26 +1691,16 @@ func (a *UnifiedAgent) waitForExternalResult(ctx context.Context, ids answerIDs,
 	}
 }
 
-// answerIDs are the reply IDs an answer to one of a reply's calls may name:
-// the reply's own and, for a call the reply asks again after a plain
-// checkpoint resume (which gives the reply a new ID), also prior, the ID the
-// checkpoint held, since the host may answer the request it saw before the
-// restart.
-type answerIDs struct{ reply, prior string }
+// answerIDs is the reply ID an answer to one of a reply's calls may name. A
+// reply asks again only on ResumeReplyStream, which keeps the checkpoint's
+// reply ID, so the request the host saw before a restart names it too.
+type answerIDs struct{ reply string }
 
 // other reports whether an answer naming reply got belongs to another reply.
 // An answer without a reply ID matches any reply, so hosts that leave it
 // empty keep tool-call-ID matching.
 func (m answerIDs) other(got string) bool {
-	return m.reply != "" && got != "" && got != m.reply && got != m.prior
-}
-
-// resumedAnswerIDs is answerIDs for a call the running reply asks again
-// because it was still awaiting an answer when the reply started.
-func (a *UnifiedAgent) resumedAnswerIDs(replyID string) answerIDs {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return answerIDs{reply: replyID, prior: a.priorReplyID}
+	return m.reply != "" && got != "" && got != m.reply
 }
 
 // stashExternalResult parks an external result meant for another call so its

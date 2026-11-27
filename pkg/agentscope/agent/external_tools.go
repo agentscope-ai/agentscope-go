@@ -29,11 +29,7 @@ func (a *UnifiedAgent) executeExternalTool(ctx context.Context, ch chan<- event.
 	a.updateToolCallState(tc.ID, message.ToolCallSubmitted)
 	emit(ctx, ch, event.NewToolResultStartEvent(replyID, tc.ID, tc.Name))
 	emit(ctx, ch, event.NewRequireExternalExecutionEvent(replyID, []message.ToolCallBlock{*tc}))
-	ids := answerIDs{reply: replyID}
-	if resumed {
-		ids = a.resumedAnswerIDs(replyID)
-	}
-	result := a.waitForExternalResult(ctx, ids, tc.ID)
+	result := a.waitForExternalResult(ctx, answerIDs{reply: replyID}, tc.ID)
 	if result == nil {
 		result = &message.ToolResultBlock{State: message.ToolResultError,
 			Output: "External execution timed out, canceled, or no matching result was submitted"}

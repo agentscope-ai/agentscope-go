@@ -191,9 +191,17 @@ Confirmation and external-result waiters match answers by reply ID as well as
 tool-call ID, since tool-call IDs can repeat across replies: an answer naming
 another reply is dropped before any batched entry is stashed, stashed entries
 keep their reply ID for the taker to check, an empty `ReplyID` matches by call
-ID, and a call re-asked after a plain checkpoint resume also accepts the
-checkpoint's reply ID (`priorReplyID`). A waiter checks its context before
-each read.
+ID, and `ResumeReplyStream` asks again under the checkpoint's reply ID. A waiter
+checks its context before each read. A reply with new input first closes this
+agent's calls that an earlier reply left without a result
+(`interruptUnansweredCallsLocked`; results in any message answer calls, and
+finished calls are left): nothing runs or is asked again, an interrupted
+result goes into the call's message, before the input, saying the call did
+not run (it awaited approval) or that its outcome is unknown (a submitted
+external call's later result is not recorded), queued answers are dropped,
+and one `ToolCallsInterruptedEvent` replaces tool events. It
+skips this while another reply core of the agent is running; a call that
+core awaits approval for then ends the new reply with the waiting message.
 
 `console.Launch` returns the caller's context error at prompts, confirmations and
 active replies. SIGINT during a reply cancels only that reply. The caller owns

@@ -294,77 +294,86 @@ func TestCompactKeepsResultWhoseCallIsEarlier(t *testing.T) {
 	}
 }
 
-const splitTailInput = "continue with the external result"
+const (
+	splitTailInput     = "continue with the external result"
+	splitTailNextInput = "and the next step"
+)
 
-// newResumedExternalAgent restores a reply parked on an external call, as a
-// host restores it after a restart: [user, assistant(text, call tc_x)]. A
-// reply with new input appends the input after the call's message, asks for
-// the call again (repromptAwaitingCalls) and records its result in a new
-// message after the input, because saveToContext merges only into a trailing
-// assistant message of this agent: [user, assistant(text, call tc_x),
-// user(input), assistant(result tc_x)]. The reply's later rounds join the
-// result's message. With the system prompt "helpful" the restored messages
-// cost 10+(13+firstBytes)/4 and 110 tokens; the input costs 18 and an
-// 800-byte result 210.
-func newResumedExternalAgent(m *splitTailModel, cfg *ContextConfig, firstBytes int, extra ...tool.Tool) *UnifiedAgent {
-	restored := &AgentState{
+// legacyShapeState is a checkpoint an earlier version saved after it asked a
+// parked external call again in a reply with new input: the result landed in
+// a message after that input, [user, assistant(text, call tc_x),
+// user(input), assistant(result tc_x)]. A reply with new input now
+// interrupts such a call instead (interruptUnansweredCallsLocked), but
+// checkpoints and host-built histories can still hold the shape. With the
+// system prompt "helpful" the messages cost 10+(13+firstBytes)/4, 110, 18
+// and 210 tokens.
+func legacyShapeState(firstBytes int) *AgentState {
+	return &AgentState{
 		SchemaVersion: StateSchemaVersion,
 		SessionID:     "sess-split-tail",
 		Context: []*message.Msg{
 			message.UserMsg("user", "start the job"+strings.Repeat("s", firstBytes)),
 			message.AssistantMsg("cp-agent", []message.ContentBlock{
 				message.TextBlock{Type: "text", Text: strings.Repeat("w", 400)},
-				message.ToolCallBlock{Type: "tool_call", ID: "tc_x", Name: "ext_tool", Input: `{}`, State: message.ToolCallSubmitted},
+				message.ToolCallBlock{Type: "tool_call", ID: "tc_x", Name: "ext_tool", Input: `{}`, State: message.ToolCallFinished},
+			}),
+			message.UserMsg("user", splitTailInput),
+			message.AssistantMsg("cp-agent", []message.ContentBlock{
+				message.ToolResultBlock{Type: "tool_result", ID: "tc_x", Name: "ext_tool", Output: strings.Repeat("r", 800), State: message.ToolResultSuccess},
 			}),
 		},
 	}
+}
+
+// newLegacyShapeAgent restores legacyShapeState. With resume set the
+// checkpoint is an active reply, which ResumeReplyStream continues with the
+// result's message last; otherwise a reply with new input follows it.
+func newLegacyShapeAgent(m *splitTailModel, cfg *ContextConfig, firstBytes int, resume bool, extra ...tool.Tool) *UnifiedAgent {
 	permCtx := permission.NewContext(permission.ModeDefault)
 	for _, name := range []string{"ext_tool", "echo_big"} {
 		permCtx.AllowRules[name] = []permission.Rule{{ToolName: name, Behavior: permission.BehaviorAllow}}
 	}
 	tools := append([]tool.Tool{newHITLMockTool("ext_tool", true)}, extra...)
-	return NewUnifiedAgent("cp-agent", "helpful", m,
+	opts := []AgentOption{
 		WithToolkit(tool.NewToolkit(tools...)),
 		WithPermissionContext(permCtx),
 		WithReactConfig(ReactConfig{MaxIters: 6}),
 		WithContextConfig(cfg),
-		WithState(restored),
-	)
+	}
+	if resume {
+		opts = append(opts, WithState(resumableState(legacyShapeState(firstBytes))), WithStateSaver(newFakeStateSaver()), WithReplyRecovery())
+	} else {
+		opts = append(opts, WithState(legacyShapeState(firstBytes)))
+	}
+	return NewUnifiedAgent("cp-agent", "helpful", m, opts...)
 }
 
-// runResumedReply runs a reply with splitTailInput, answers the external call
-// it asks for again with an 800-byte result, and drains the reply.
-func runResumedReply(t *testing.T, a *UnifiedAgent) {
+// runLegacyShapeReply continues the checkpoint with ResumeReplyStream, or
+// starts a reply with splitTailNextInput, and drains it. tc_x has its result,
+// so nothing is asked.
+func runLegacyShapeReply(t *testing.T, a *UnifiedAgent, resume bool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	ch, err := a.ReplyStream(ctx, splitTailInput)
+	var ch <-chan event.Event
+	var err error
+	if resume {
+		ch, err = a.ResumeReplyStream(ctx)
+	} else {
+		ch, err = a.ReplyStream(ctx, splitTailNextInput)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
-	asked := 0
 	for evt := range ch {
-		switch e := evt.(type) {
-		case event.RequireExternalExecutionEvent:
-			asked++
-			results := make([]message.ToolResultBlock, 0, len(e.ToolCalls))
-			for _, tc := range e.ToolCalls {
-				results = append(results, message.ToolResultBlock{
-					Type: "tool_result", ID: tc.ID, Name: tc.Name,
-					Output: strings.Repeat("r", 800), State: message.ToolResultSuccess,
-				})
-			}
-			a.SubmitExternalResult(&event.ExternalExecutionResultEvent{ReplyID: e.ReplyID, ExecutionResults: results})
-		case event.RequireUserConfirmEvent:
-			t.Errorf("the reply asked for a confirmation")
+		switch evt.(type) {
+		case event.RequireExternalExecutionEvent, event.RequireUserConfirmEvent:
+			t.Errorf("the reply asked for %T", evt)
 			cancel()
 		}
 	}
 	if ctx.Err() != nil {
 		t.Fatal("the reply did not finish")
-	}
-	if asked != 1 {
-		t.Fatalf("the external call was asked for %d times, want once", asked)
 	}
 }
 
@@ -376,7 +385,7 @@ func echoBigTool() tool.Tool {
 }
 
 // echoRounds scripts one model round per ID, each calling echo_big. Added
-// with its result to the message holding tc_x's result, a round adds 23 + 2 +
+// with its result to the reply's assistant message, a round adds 23 + 2 +
 // 1000 bytes to it, which makes that message 256 tokens larger here.
 func echoRounds(ids ...string) []model.ChatResponse {
 	rounds := make([]model.ChatResponse, 0, len(ids))
@@ -389,81 +398,88 @@ func echoRounds(ids ...string) []model.ChatResponse {
 	return rounds
 }
 
-// The automatic trigger on the step after tc_x's result: 11 + 463 + 110 + 18
-// + 210 = 812 tokens, at the 800-token trigger. The newest two messages fit
-// the 300-token reserve and the call's message is taken in with them, so only
-// the first message is summarized, also when summary generation fails (the
-// truncation fallback installs the same kept messages). The kept messages are
-// the stored ones, unchanged.
+// The automatic trigger on an earlier version's checkpoint, at the first
+// step. Continued by ResumeReplyStream, the result's message is last: 11 +
+// 463 + 110 + 18 + 210 = 812 tokens, at the 800-token trigger, and the newest
+// two messages fit the 300-token reserve. With new input (14 tokens more) the
+// newest three fit it. Either way the call's message is taken in with them,
+// so only the first message is summarized. The kept messages are the stored
+// ones, unchanged.
 func TestCompressionKeepsResultAfterInput(t *testing.T) {
-	for _, summaryFails := range []bool{false, true} {
-		t.Run(fmt.Sprintf("summaryFails=%v", summaryFails), func(t *testing.T) {
-			m := &splitTailModel{}
-			if summaryFails {
-				m.compressionErr = errors.New("summary model unavailable")
-			}
-			var a *UnifiedAgent
-			var stored, kept []*message.Msg
-			var storedContent, keptContent [][]message.ContentBlock
-			readContext := func() []*message.Msg {
-				a.mu.Lock()
-				defer a.mu.Unlock()
-				return append([]*message.Msg(nil), a.state.Context...)
-			}
-			m.beforeCompression = func() {
-				if stored == nil {
-					stored = readContext()
-					storedContent = contentSnapshot(stored)
+	for _, resume := range []bool{true, false} {
+		for _, summaryFails := range []bool{false, true} {
+			t.Run(fmt.Sprintf("resume=%v/summaryFails=%v", resume, summaryFails), func(t *testing.T) {
+				m := &splitTailModel{}
+				if summaryFails {
+					// The truncation fallback installs the same kept messages.
+					m.compressionErr = errors.New("summary model unavailable")
 				}
-			}
-			m.beforeMain = func() {
-				if kept == nil {
-					kept = readContext()
-					keptContent = contentSnapshot(kept)
+				var a *UnifiedAgent
+				var stored, kept []*message.Msg
+				var storedContent, keptContent [][]message.ContentBlock
+				readContext := func() []*message.Msg {
+					a.mu.Lock()
+					defer a.mu.Unlock()
+					return append([]*message.Msg(nil), a.state.Context...)
 				}
-			}
-			a = newResumedExternalAgent(m, &ContextConfig{ContextSize: 1000, TriggerRatio: 0.8, ReserveRatio: 0.3}, 1800)
-			runResumedReply(t, a)
+				m.beforeCompression = func() {
+					if stored == nil {
+						stored = readContext()
+						storedContent = contentSnapshot(stored)
+					}
+				}
+				m.beforeMain = func() {
+					if kept == nil {
+						kept = readContext()
+						keptContent = contentSnapshot(kept)
+					}
+				}
+				a = newLegacyShapeAgent(m, &ContextConfig{ContextSize: 1000, TriggerRatio: 0.8, ReserveRatio: 0.3}, 1800, resume)
+				runLegacyShapeReply(t, a, resume)
 
-			// What the next model call is sent from: the stored messages
-			// from the call's on, unchanged (the reply adds its answer to the
-			// last one afterwards).
-			if len(stored) != 4 || len(kept) != 3 {
-				t.Fatalf("context has %d messages before compression and %d after, want 4 and 3", len(stored), len(kept))
-			}
-			for i := range kept {
-				if kept[i] != stored[i+1] || !reflect.DeepEqual(keptContent[i], storedContent[i+1]) {
-					t.Fatalf("kept message %d is not the stored message, unchanged", i)
+				// What the next model call is sent from: the stored messages
+				// from the call's on, unchanged.
+				if len(stored) < 4 || len(kept) != len(stored)-1 {
+					t.Fatalf("context has %d messages before compression and %d after, want all but the first kept", len(stored), len(kept))
 				}
-			}
+				for i := range kept {
+					if kept[i] != stored[i+1] || !reflect.DeepEqual(keptContent[i], storedContent[i+1]) {
+						t.Fatalf("kept message %d is not the stored message, unchanged", i)
+					}
+				}
 
-			m.mu.Lock()
-			defer m.mu.Unlock()
-			if m.compressionCalls < 1 {
-				t.Fatal("compression did not run")
-			}
-			if got := strings.Join(m.compressInputs[0], "\n"); strings.Contains(got, "call(tc_x)") || strings.Contains(got, splitTailInput) {
-				t.Fatalf("compression request should hold only the first message:\n%s", got)
-			}
-			if len(m.mainInputs) != 1 {
-				t.Fatalf("main calls = %d, want 1", len(m.mainInputs))
-			}
-			next := strings.Join(m.mainInputs[0], "\n")
-			for _, want := range []string{"call(tc_x)", splitTailInput, "result(tc_x)"} {
-				if !strings.Contains(next, want) {
-					t.Errorf("next model request lacks %s:\n%s", want, next)
+				m.mu.Lock()
+				defer m.mu.Unlock()
+				if m.compressionCalls < 1 {
+					t.Fatal("compression did not run")
 				}
-			}
-			if id := orphanToolResult(a.state.Context); id != "" {
-				t.Fatalf("context holds result %q without its call", id)
-			}
-		})
+				if got := strings.Join(m.compressInputs[0], "\n"); strings.Contains(got, "call(tc_x)") || strings.Contains(got, splitTailInput) {
+					t.Fatalf("compression request should hold only the first message:\n%s", got)
+				}
+				if len(m.mainInputs) != 1 {
+					t.Fatalf("main calls = %d, want 1", len(m.mainInputs))
+				}
+				next := strings.Join(m.mainInputs[0], "\n")
+				want := []string{"call(tc_x)", splitTailInput, "result(tc_x)"}
+				if !resume {
+					want = append(want, splitTailNextInput)
+				}
+				for _, w := range want {
+					if !strings.Contains(next, w) {
+						t.Errorf("next model request lacks %s:\n%s", w, next)
+					}
+				}
+				if id := orphanToolResult(a.state.Context); id != "" {
+					t.Fatalf("context holds result %q without its call", id)
+				}
+			})
+		}
 	}
 }
 
-// Background precompression in the same reply. The snapshot is taken at the
-// step after tc_x's result (562 tokens, past the 500-token arm point), with
-// the result's message last; the call's
+// Background precompression on an earlier version's checkpoint continued by
+// ResumeReplyStream. The snapshot is taken at the first step (562 tokens,
+// past the 500-token arm point), with the result's message last; the call's
 // message is taken in with the newest two, so the result keeps three
 // messages. The next round, tc_y and its result, joins the result's message
 // (818 tokens, at the trigger). The trigger installs the kept messages' live
@@ -486,10 +502,10 @@ func TestBackgroundPrecompressKeepsResultAfterInput(t *testing.T) {
 			kept, keptContent = ctx, contentSnapshot(ctx)
 		}
 	}
-	a = newResumedExternalAgent(m, &ContextConfig{
+	a = newLegacyShapeAgent(m, &ContextConfig{
 		ContextSize: 1000, TriggerRatio: 0.8, ReserveRatio: 0.3, PrecompressRatio: 0.5,
-	}, 800, echoBigTool())
-	runResumedReply(t, a)
+	}, 800, true, echoBigTool())
+	runLegacyShapeReply(t, a, true)
 
 	// The trigger installs the stored messages from the call's on: the
 	// call's message and the input unchanged, the result's message grown only
@@ -541,7 +557,7 @@ func TestBackgroundPrecompressKeepsResultAfterInput(t *testing.T) {
 	}
 }
 
-// With a fresh window the background split in the same reply keeps no
+// With a fresh window the background split of the same checkpoint keeps no
 // message: the forward repair pushes the result's message into the summary
 // with its call. Such a result would be installed as the messages after the
 // snapshot, so the next round, which joins the result's message, would be
@@ -552,11 +568,11 @@ func TestBackgroundPrecompressFreshWindowKeepsRoundJoiningResult(t *testing.T) {
 	var a *UnifiedAgent
 	var ready *precompressResult
 	m.beforeMain = waitForBackground(t, &a, &ready)
-	a = newResumedExternalAgent(m, &ContextConfig{
+	a = newLegacyShapeAgent(m, &ContextConfig{
 		ContextSize: 1000, TriggerRatio: 0.8, ReserveRatio: 0.3, PrecompressRatio: 0.5,
 		CompactStrategy: CompactStrategyFreshWindow,
-	}, 800, echoBigTool())
-	runResumedReply(t, a)
+	}, 800, true, echoBigTool())
+	runLegacyShapeReply(t, a, true)
 
 	if ready != nil {
 		t.Fatalf("background result made with reservedLen=%d", ready.reservedLen)
@@ -600,8 +616,8 @@ func waitForBackground(t *testing.T, a **UnifiedAgent, ready **precompressResult
 	}
 }
 
-// One round after tc_x's result: the round joins the result's message (466
-// tokens). The
+// One round after the result on an earlier version's checkpoint continued by
+// ResumeReplyStream: the round joins the result's message (466 tokens). The
 // messages after the call fit the reserve and the call's message does not:
 // 11 + 18 + 466 = 495 tokens, 605 with it, against a 550-token reserve (the
 // step is at 905, the trigger at 800). The call's message is taken in, so the
@@ -613,8 +629,8 @@ func TestCompressionAfterRoundKeepsInputBeforeResult(t *testing.T) {
 			if summaryFails {
 				m.compressionErr = errors.New("summary model unavailable")
 			}
-			a := newResumedExternalAgent(m, &ContextConfig{ContextSize: 1000, TriggerRatio: 0.8, ReserveRatio: 0.55}, 1147, echoBigTool())
-			runResumedReply(t, a)
+			a := newLegacyShapeAgent(m, &ContextConfig{ContextSize: 1000, TriggerRatio: 0.8, ReserveRatio: 0.55}, 1147, true, echoBigTool())
+			runLegacyShapeReply(t, a, true)
 
 			m.mu.Lock()
 			defer m.mu.Unlock()

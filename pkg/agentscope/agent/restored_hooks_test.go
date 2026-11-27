@@ -126,7 +126,7 @@ type askingEntry string
 
 const (
 	askedFresh    askingEntry = "fresh"    // the model emits the call in this reply
-	askedRestored askingEntry = "restored" // parked asking, restored with WithState, picked up by a new ReplyStream
+	askedRestored askingEntry = "restored" // parked asking, restored with WithState, interrupted by a new ReplyStream with input
 	askedResumed  askingEntry = "resumed"  // parked asking, restored with WithState, continued by ResumeReplyStream
 )
 
@@ -177,16 +177,16 @@ func runAskingCall(t *testing.T, entry askingEntry, confirm bool) (log []string,
 }
 
 // A resumed call confirmed again gets the loop hooks once, around the
-// re-prompted confirmation and its execution. They see StateAct with the
-// parked iteration although no transition to StateAct is reported.
+// confirmation and its execution: ResumeReplyStream re-enters approval for
+// it on the act path, with the parked iteration.
 func TestResumedConfirmedCallRunsTheLoopHooks(t *testing.T) {
-	log, executions, result := runAskingCall(t, askedRestored, true)
+	log, executions, result := runAskingCall(t, askedResumed, true)
 	want := []string{
-		"transition:reason->wait#0",
+		"transition:reason->act#0",
 		"before:sensor@act#0",
 		"confirm_requested:sensor confirmed=true",
 		"after:sensor@act#0",
-		"transition:wait->reason#1",
+		"transition:act->reason#0",
 		"transition:reason->inspect#1",
 		"transition:inspect->exit#1",
 	}
@@ -201,13 +201,13 @@ func TestResumedConfirmedCallRunsTheLoopHooks(t *testing.T) {
 // A resumed call the user denies again runs nothing, but its handling is
 // bracketed by the loop hooks, as a denied call is on the ordinary path.
 func TestResumedDeniedCallRunsTheLoopHooks(t *testing.T) {
-	log, executions, result := runAskingCall(t, askedRestored, false)
+	log, executions, result := runAskingCall(t, askedResumed, false)
 	want := []string{
-		"transition:reason->wait#0",
+		"transition:reason->act#0",
 		"before:sensor@act#0",
 		"confirm_requested:sensor confirmed=false",
 		"after:sensor@act#0",
-		"transition:wait->reason#1",
+		"transition:act->reason#0",
 		"transition:reason->inspect#1",
 		"transition:inspect->exit#1",
 	}
@@ -219,10 +219,9 @@ func TestResumedDeniedCallRunsTheLoopHooks(t *testing.T) {
 	}
 }
 
-// However a call that needs confirmation reaches a reply (emitted by the
-// model, parked and picked up by a new reply, or parked and continued by
-// ResumeReplyStream), the tool hooks bracket the confirmation and the
-// outcome in the same way.
+// Whether a call that needs confirmation is emitted by the model or parked
+// and continued by ResumeReplyStream, the tool hooks bracket the
+// confirmation and the outcome in the same way.
 func TestLoopHooksBracketAnAskingCallOnEveryEntry(t *testing.T) {
 	iteration := regexp.MustCompile(`#\d+$`)
 	for _, confirm := range []bool{true, false} {
@@ -231,7 +230,7 @@ func TestLoopHooksBracketAnAskingCallOnEveryEntry(t *testing.T) {
 			fmt.Sprintf("confirm_requested:sensor confirmed=%v", confirm),
 			"after:sensor@act",
 		}
-		for _, entry := range []askingEntry{askedFresh, askedRestored, askedResumed} {
+		for _, entry := range []askingEntry{askedFresh, askedResumed} {
 			log, _, _ := runAskingCall(t, entry, confirm)
 			var got []string
 			for _, e := range log {
@@ -243,6 +242,20 @@ func TestLoopHooksBracketAnAskingCallOnEveryEntry(t *testing.T) {
 				t.Errorf("%s, confirmed=%v: tool hooks and prompts:\n got  %q\n want %q", entry, confirm, got, want)
 			}
 		}
+	}
+}
+
+// A parked call that a new reply with input interrupts is neither asked
+// again nor run, so it gets no tool hooks; its result says it did not run.
+func TestInterruptedCallRunsNoToolHooks(t *testing.T) {
+	log, executions, result := runAskingCall(t, askedRestored, true)
+	for _, e := range log {
+		if !strings.HasPrefix(e, "transition:") {
+			t.Fatalf("hook log has %q, want only transitions: %q", e, log)
+		}
+	}
+	if executions != 0 || result.State != message.ToolResultInterrupted || result.GetOutputText() != interruptedApprovalResult {
+		t.Fatalf("interrupted call: executions=%d result=%+v", executions, result)
 	}
 }
 
@@ -280,9 +293,10 @@ func TestResumedExternalCallRunsTheLoopHooks(t *testing.T) {
 	}
 }
 
-// Several parked calls each get one pair of hooks: an asking local call, an
-// asking external call (confirmed, then handed to the host) and a submitted
-// external call the current policy asks about again.
+// Several parked calls each get one pair of hooks: an asking local call and
+// an asking external call (confirmed, then handed to the host), which
+// ResumeReplyStream re-enters on the act path, and a submitted external call
+// the current policy asks about again when the reply re-drives it.
 func TestResumedCallsGetOnePairOfHooksEach(t *testing.T) {
 	var ran atomic.Int32
 	sensor := tool.NewFunctionTool("sensor", "reads the heart rate", nil,
@@ -293,20 +307,20 @@ func TestResumedCallsGetOnePairOfHooksEach(t *testing.T) {
 	hook := &orderHook{}
 	a := hookedAgent(hook, permission.NewContext(permission.ModeDefault), []model.ChatResponse{textResponse("done")},
 		WithToolkit(tool.NewToolkit(sensor, newHITLMockTool("ext_ask", true), newHITLMockTool("ext_sub", true))),
-		WithState(parkedState(false,
+		WithState(parkedState(true,
 			message.ToolCallBlock{Type: "tool_call", ID: "tc_1", Name: "sensor", Input: `{}`, State: message.ToolCallAsking},
 			message.ToolCallBlock{Type: "tool_call", ID: "tc_2", Name: "ext_ask", Input: `{}`, State: message.ToolCallAsking},
 			message.ToolCallBlock{Type: "tool_call", ID: "tc_3", Name: "ext_sub", Input: `{}`, State: message.ToolCallSubmitted},
-		)))
+		)), WithReplyRecovery())
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	ch, err := a.ReplyStream(ctx, "continue")
+	ch, err := a.ResumeReplyStream(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	answerReply(a, ch, hook, true)
 	want := []string{
-		"transition:reason->wait#0",
+		"transition:reason->act#0",
 		"before:sensor@act#0",
 		"confirm_requested:sensor confirmed=true",
 		"after:sensor@act#0",
@@ -314,13 +328,15 @@ func TestResumedCallsGetOnePairOfHooksEach(t *testing.T) {
 		"confirm_requested:ext_ask confirmed=true",
 		"external_requested:ext_ask",
 		"after:ext_ask@act#0",
-		"before:ext_sub@act#0",
+		"transition:act->reason#0",
+		"transition:reason->wait#1",
+		"before:ext_sub@act#1",
 		"confirm_requested:ext_sub confirmed=true",
 		"external_requested:ext_sub",
-		"after:ext_sub@act#0",
-		"transition:wait->reason#1",
-		"transition:reason->inspect#1",
-		"transition:inspect->exit#1",
+		"after:ext_sub@act#1",
+		"transition:wait->reason#2",
+		"transition:reason->inspect#2",
+		"transition:inspect->exit#2",
 	}
 	if got := hook.entries(); !slices.Equal(got, want) {
 		t.Fatalf("hook log:\n got  %q\n want %q", got, want)

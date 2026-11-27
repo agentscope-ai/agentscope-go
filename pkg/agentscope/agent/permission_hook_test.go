@@ -180,7 +180,7 @@ func TestPermissionHookFailures(t *testing.T) {
 }
 
 func TestPermissionHookExcludedPaths(t *testing.T) {
-	for _, kind := range []string{"no engine", "parallel", "bounded parallel", "bounded width-one batch", "external", "restored pending", "restored allowed", "restored asking", "reprompt asking", "restored submitted", "loop", "orchestrator", "buffered reply", "resume new call"} {
+	for _, kind := range []string{"no engine", "parallel", "bounded parallel", "bounded width-one batch", "external", "restored pending", "restored allowed", "restored asking", "interrupted asking", "restored submitted", "loop", "orchestrator", "buffered reply", "resume new call"} {
 		t.Run(kind, func(t *testing.T) {
 			target := hookTool()
 			var hooks atomic.Int32
@@ -206,12 +206,12 @@ func TestPermissionHookExcludedPaths(t *testing.T) {
 				target.external = true
 			}
 			var state *AgentState
-			if kind == "restored pending" || kind == "restored allowed" || kind == "restored asking" || kind == "reprompt asking" || kind == "restored submitted" {
+			if kind == "restored pending" || kind == "restored allowed" || kind == "restored asking" || kind == "interrupted asking" || kind == "restored submitted" {
 				tc := hookCall("old")
 				if kind == "restored allowed" {
 					tc.State = message.ToolCallAllowed
 				}
-				if kind == "restored asking" || kind == "reprompt asking" {
+				if kind == "restored asking" || kind == "interrupted asking" {
 					tc.State = message.ToolCallAsking
 				}
 				state = &AgentState{SessionID: "session", ReplyID: "logical", Context: []*message.Msg{message.NewMsg("bot", message.RoleAssistant, []message.ContentBlock{tc})}, ReplyRecovery: &ReplyRecoveryState{Version: 1, ReplyID: "logical", Active: true, Budgets: middleware.ReplyBudgetSnapshot{Version: 1}}}
@@ -221,7 +221,7 @@ func TestPermissionHookExcludedPaths(t *testing.T) {
 					state.Context[0].Content = []message.ContentBlock{tc}
 				}
 				state.Context[0].ID = "logical"
-				if kind == "reprompt asking" {
+				if kind == "interrupted asking" {
 					opts = append(opts, WithState(state))
 				} else {
 					opts = append(opts, WithState(state), WithStateSaver(newFakeStateSaver()), WithReplyRecovery())
@@ -260,7 +260,7 @@ func TestPermissionHookExcludedPaths(t *testing.T) {
 			if kind == "parallel" || kind == "bounded parallel" || kind == "bounded width-one batch" {
 				expected = 2
 			}
-			if kind == "external" || kind == "reprompt asking" || kind == "restored submitted" {
+			if kind == "external" || kind == "interrupted asking" || kind == "restored submitted" {
 				expected = 0
 			}
 			if target.executions.Load() != expected {

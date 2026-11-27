@@ -253,8 +253,8 @@ ports and deferred work, including realtime/TUI, SOP and model-context wiring.
   `SubmitExternalResult` still return no error. Set `ReplyID` to the request
   event's `ReplyID`. An empty `ReplyID` matches by tool-call ID only, without
   protection against IDs repeated across replies (the `app` and legacy
-  `service` confirm endpoints send none). A call asked again after a plain
-  checkpoint resume also accepts the checkpoint's reply ID. Calls within one
+  `service` confirm endpoints send none). `ResumeReplyStream` asks again
+  under the checkpoint's reply ID. Calls within one
   reply are still told apart by tool-call ID alone. A waiter whose reply
   context ended before it reads takes no queued answer.
 - Synchronous `Reply` checks caller cancellation after draining events and again
@@ -314,6 +314,22 @@ limits. Shared governance across ordinary Agent/helper paths remains proposed.
   remove counters to bypass resume validation. `SaveCheckpoint` returns errors;
   legacy `Checkpoint` still logs them. Recovery does not provide exactly-once
   tool execution or a reservation against concurrent physical spending.
+- **Behavior change (#207):** a reply with new input no longer asks again
+  about calls a restored checkpoint left awaiting approval or an external
+  result, as a plain restore (`WithState`, then `Reply` or `ReplyStream`) did
+  in v2.0.12 and earlier. It closes the agent's calls that have no result and
+  are not marked finished, with an `interrupted` result before the input: a
+  call awaiting approval did not run, and any other call's outcome is unknown
+  (a result the host returns now for a submitted external call is not
+  recorded). The texts follow the restored state: a call restored as awaiting
+  approval from a state the host saved during the wait may have been approved
+  and run before the process stopped.
+  Answers queued between replies are then dropped. Nothing is closed while
+  another reply core of the agent is still running. To continue such calls, use
+  `WithReplyRecovery` and `ResumeReplyStream` before sending new input;
+  checkpoints written without recovery cannot be resumed, so the next reply
+  with input closes their calls. Recorded as `BREAKING (behavior)` in
+  `CHANGELOG.md`.
 
 ## Error handling
 
