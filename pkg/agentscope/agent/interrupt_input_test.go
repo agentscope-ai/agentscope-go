@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -644,4 +645,116 @@ func TestInterruptDropsAnswersQueuedForClosedCalls(t *testing.T) {
 			t.Fatalf("the new call got %q (ctx %v), want its own answer", output, ctx.Err())
 		}
 	})
+}
+
+// precompressRaceModel blocks the background summary until released, answers
+// main calls with text, and counts a fixed number of tokens per message.
+type precompressRaceModel struct {
+	release   chan struct{}
+	summaries atomic.Int32
+}
+
+func (m *precompressRaceModel) Chat(_ context.Context, msgs []*message.Msg, _ ...model.CallOption) (*model.ChatResponse, error) {
+	if isSplitTailCompression(msgs) {
+		m.summaries.Add(1)
+		<-m.release
+		return summaryToolCallResponse(nil), nil
+	}
+	r := textResponse("done")
+	return &r, nil
+}
+
+func (m *precompressRaceModel) ChatStream(context.Context, []*message.Msg, ...model.CallOption) (<-chan model.ChatResponse, error) {
+	return nil, model.ErrStreamNotSupported
+}
+
+func (m *precompressRaceModel) CountTokens(msgs []*message.Msg, _ []model.ToolSchema) int {
+	return 40 * len(msgs)
+}
+
+// TestInterruptDoesNotMutateMessagesOfABackgroundPrecompress: a background
+// pre-compression holds the context's *Msg pointers and reads them without
+// a.mu while it summarizes. A reply with new input that closes an unanswered
+// call must leave those messages as they were and publish clones, or its
+// write races with the background read (run with -race).
+func TestInterruptDoesNotMutateMessagesOfABackgroundPrecompress(t *testing.T) {
+	m := &precompressRaceModel{release: make(chan struct{})}
+	cfg := &ContextConfig{ContextSize: 1000, TriggerRatio: 0.8, ReserveRatio: 0.3, PrecompressRatio: 0.5}
+	call := message.ToolCallBlock{Type: "tool_call", ID: "tc_1", Name: "lookup", Input: `{"q":1}`, State: message.ToolCallAsking}
+	// Twelve older messages give the background split something to
+	// summarize; the reserved tail keeps the unanswered call. At 40 tokens
+	// a message the reply stays under the hard trigger, so only the
+	// background generation calls the summary model.
+	history := make([]*message.Msg, 0, 14)
+	for i := range 12 {
+		history = append(history, message.UserMsg("user", fmt.Sprintf("older message %d", i)))
+	}
+	history = append(history, message.UserMsg("user", "do the thing"), message.AssistantMsg("bot", []message.ContentBlock{call}))
+	lookup := tool.NewFunctionTool("lookup", "lookup", nil, func(context.Context, map[string]any) (any, error) { return "looked up", nil })
+	a := NewUnifiedAgent("bot", "helpful", m,
+		WithToolkit(tool.NewToolkit(lookup)),
+		WithPermissionContext(permission.NewContext(permission.ModeDefault)),
+		WithReactConfig(ReactConfig{MaxIters: 3}),
+		WithContextConfig(cfg),
+		WithState(&AgentState{SchemaVersion: StateSchemaVersion, SessionID: "sess-precompress-race", Context: history}),
+	)
+	var release sync.Once
+	t.Cleanup(func() {
+		// Also after an early failure: unblock the generation and let it
+		// settle before the test ends.
+		release.Do(func() { close(m.release) })
+		waitPrecompress(t, a)
+	})
+
+	// The background generation takes its snapshot of the context's
+	// pointers, as a reply crossing the precompress ratio (500 of 1000
+	// tokens) would.
+	armed := cfg.withDefaults()
+	a.maybeArmPrecompress(context.Background(), &armed, cfg.ContextSize, 600)
+	a.mu.Lock()
+	running := a.precompressRunning
+	held := append([]*message.Msg(nil), a.state.Context...)
+	a.mu.Unlock()
+	if !running {
+		t.Fatal("no background pre-compression started")
+	}
+	callMsg := held[len(held)-1]
+
+	replyCollecting(t, a) // new input closes tc_1 while the generation is in flight
+
+	if n := len(callMsg.Content); n != 1 {
+		t.Fatalf("the message the background generation holds was changed: %d blocks, want only the call", n)
+	}
+	if tc, ok := callMsg.Content[0].(message.ToolCallBlock); !ok || tc.State != message.ToolCallAsking {
+		t.Fatalf("the held call block changed: %#v", callMsg.Content[0])
+	}
+	a.mu.Lock()
+	live := a.state.Context[len(held)-1]
+	a.mu.Unlock()
+	if live == callMsg {
+		t.Fatal("the context still holds the shared message; the clone was not published")
+	}
+	var results []message.ToolResultBlock
+	for _, b := range live.Content {
+		if r, ok := b.(message.ToolResultBlock); ok {
+			results = append(results, r)
+		}
+	}
+	if len(results) != 1 || results[0].ID != "tc_1" || results[0].State != message.ToolResultInterrupted {
+		t.Fatalf("the published message must hold the interrupted result: %+v", live.Content)
+	}
+
+	release.Do(func() { close(m.release) })
+	p := waitPrecompress(t, a)
+	if m.summaries.Load() != 1 {
+		t.Fatalf("the background generation made %d summary calls, want 1", m.summaries.Load())
+	}
+	// The clone keeps the boundary message's ID, so the result still
+	// matches the context and can be applied at the hard trigger.
+	a.mu.Lock()
+	valid := p != nil && p.validLocked(a.state)
+	a.mu.Unlock()
+	if !valid {
+		t.Fatal("the background result no longer matches the context after the clone")
+	}
 }

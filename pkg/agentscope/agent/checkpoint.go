@@ -268,13 +268,13 @@ type interruptedCall struct {
 // checked that no other reply core of this agent is running.
 func (a *UnifiedAgent) interruptUnansweredCallsLocked() []interruptedCall {
 	type callPos struct {
-		msg *message.Msg
-		idx int
+		ctx int // the message's index in a.state.Context
+		idx int // the call's index in the message's content
 	}
 	var calls []callPos
 	var answered []bool
 	open := map[string][]int{} // tool-call ID -> unanswered entries of calls, oldest first
-	for _, msg := range a.state.Context {
+	for ci, msg := range a.state.Context {
 		if msg == nil {
 			continue
 		}
@@ -282,7 +282,7 @@ func (a *UnifiedAgent) interruptUnansweredCallsLocked() []interruptedCall {
 			switch blk := b.(type) {
 			case message.ToolCallBlock:
 				open[blk.ID] = append(open[blk.ID], len(calls))
-				calls = append(calls, callPos{msg: msg, idx: i})
+				calls = append(calls, callPos{ctx: ci, idx: i})
 				answered = append(answered, false)
 			case message.ToolResultBlock:
 				if q := open[blk.ID]; len(q) > 0 {
@@ -294,22 +294,22 @@ func (a *UnifiedAgent) interruptUnansweredCallsLocked() []interruptedCall {
 	}
 
 	var closed []interruptedCall
-	updated := map[*message.Msg][]message.ContentBlock{}
+	updated := map[int][]message.ContentBlock{} // context index -> the message's new content
 	for k, pos := range calls {
-		if answered[k] || pos.msg.Role != message.RoleAssistant || pos.msg.Name != a.name {
+		msg := a.state.Context[pos.ctx]
+		if answered[k] || msg.Role != message.RoleAssistant || msg.Name != a.name {
 			continue
 		}
-		content, ok := updated[pos.msg]
+		content, ok := updated[pos.ctx]
 		if !ok {
-			content = pos.msg.Content
+			content = msg.Content
 		}
 		tc := content[pos.idx].(message.ToolCallBlock)
 		if tc.State == message.ToolCallFinished {
 			continue
 		}
 		if !ok {
-			// Copy before writing: a snapshot taken for background
-			// precompression may still read the stored slice.
+			// Copy before writing; the message itself is cloned below.
 			content = append([]message.ContentBlock(nil), content...)
 		}
 		prior := tc.State
@@ -325,11 +325,19 @@ func (a *UnifiedAgent) interruptUnansweredCallsLocked() []interruptedCall {
 		content = append(content, message.ToolResultBlock{
 			Type: "tool_result", ID: tc.ID, Name: tc.Name, Output: text, State: message.ToolResultInterrupted,
 		})
-		updated[pos.msg] = content
+		updated[pos.ctx] = content
 		closed = append(closed, interruptedCall{call: tc, prior: prior, text: text})
 	}
-	for msg, content := range updated {
-		msg.Content = content
+	// Copy-on-write, as limitContextImages does: a.state.Context shares its
+	// *Msg pointers with snapshots read without a.mu, such as a background
+	// pre-compression's split and summary, so this function writes no
+	// message in place. Each touched message is cloned with its new content
+	// and the clone is published into the context; holders of the old
+	// pointer keep an unchanged value.
+	for ci, content := range updated {
+		cp := *a.state.Context[ci]
+		cp.Content = content
+		a.state.Context[ci] = &cp
 	}
 	if len(closed) > 0 {
 		a.invalidateRetentionLocked()
