@@ -62,6 +62,22 @@ type core struct {
 	act   *activation
 }
 
+// toolNames returns the thread tools the options install for a participant in
+// zone z: Tools, or the defaults when Tools is nil.
+func (o PrepareOptions) toolNames(z thread.Zone) []string {
+	if o.Tools != nil {
+		return o.Tools
+	}
+	var names []string
+	for _, n := range allToolNames {
+		if (n == ToolPublishArtifact && z == thread.ZoneEdge) || n == ToolEventRead {
+			continue
+		}
+		names = append(names, n)
+	}
+	return names
+}
+
 func newCore(d thread.Descriptor, opts PrepareOptions, prepared bool) (*core, error) { //nolint:gocritic // the descriptor is copied on purpose
 	if err := d.Validate(); err != nil {
 		return nil, err
@@ -70,16 +86,7 @@ func newCore(d thread.Descriptor, opts PrepareOptions, prepared bool) (*core, er
 	if !prepared {
 		return c, nil
 	}
-	names := opts.Tools
-	if names == nil {
-		for _, n := range allToolNames {
-			if (n == ToolPublishArtifact && d.Zone == thread.ZoneEdge) || n == ToolEventRead {
-				continue
-			}
-			names = append(names, n)
-		}
-	}
-	for _, n := range names {
+	for _, n := range opts.toolNames(d.Zone) {
 		if !slices.Contains(allToolNames, n) {
 			return nil, fmt.Errorf("participant: unknown thread tool %q", n)
 		}

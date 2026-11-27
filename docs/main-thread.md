@@ -54,7 +54,10 @@ routing classifier is the offline fake, and nothing leaves the process.
 `thread.Descriptor` gives its name, zone (`edge` or `cloud`), context window,
 the budget of a summary written for it, the longest brief it accepts, its
 tool groups and a description. `participant.SystemPromptSection` renders the
-peers' descriptors for an agent's system prompt.
+peers' descriptors for an agent's system prompt, with a line inviting a
+handover through `transfer`. For a participant whose `PrepareOptions.Tools`
+leave `transfer` out, render it with the same options' `SystemPromptSection`
+method, which drops that line.
 
 **One owner at a time.** Exactly one participant owns the foreground. Only the
 owner's foreground activation reaches the user. Every owner change increments
