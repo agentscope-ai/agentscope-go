@@ -53,7 +53,8 @@ type fakePart struct {
 	script      fakeScript // used when scripts is empty
 	confirms    []string
 	started     chan Activation
-	buf         int // buffer of the activation channel
+	buf         int    // buffer of the activation channel
+	stateHook   func() // runs at the start of State, without the lock
 }
 
 func newFakePart(name string, zone Zone) *fakePart {
@@ -73,6 +74,12 @@ func (f *fakePart) Bind(h Host) error {
 }
 
 func (f *fakePart) State() ParticipantState {
+	f.mu.Lock()
+	hook := f.stateHook
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.state

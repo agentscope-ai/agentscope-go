@@ -182,6 +182,9 @@ func (h *coordHost) Transfer(ctx context.Context, req TransferRequest) (uint64, 
 	h.ps.lastSealed = oc.Seq
 	// The handoff calls for a peer summary once this reply ends, and the
 	// target may start before that: a handover to the edge waits for it.
+	// The caller counts as undecided from here, so a fork job that settles
+	// before the reply ends cannot resolve the mark.
+	c.markUndecidedLocked(a)
 	c.markPeerPendingLocked(h.ps)
 	c.startForegroundLocked(na)
 	return oc.Seq, nil

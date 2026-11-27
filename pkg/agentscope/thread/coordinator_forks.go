@@ -37,22 +37,23 @@ type forkJob struct {
 }
 
 // afterEnd decides whether the participant's sealed activation calls for a
-// peer summary or own notes and starts the job. Unless the job it started
-// writes a peer summary, or a job already running may still write one, no
-// summary for the edge is pending anymore. It runs without the mutex.
+// peer summary or own notes and starts the job. Unless a peer fork is still
+// unsettled (the job it started, or a job already running) or another
+// activation has not decided yet, no summary for the edge is pending anymore:
+// a running job that writes only own notes, or whose peer fork settled,
+// writes none. It runs without the mutex.
 func (c *Coordinator) afterEnd(a *activation, reason types.ReplyFinishedReason, started bool) {
 	ps := a.part
 	if ps.forker == nil {
 		return
 	}
-	job := c.startForks(a, reason, started)
-	if job != nil && job.peer {
-		return
-	}
+	c.startForks(a, reason, started)
 	c.mu.Lock()
-	if job != nil || !ps.forking {
-		ps.resolvePeerPendingLocked()
+	if a.peerUndecided {
+		a.peerUndecided = false
+		ps.peerUndecided--
 	}
+	ps.resolvePeerPendingIfSettledLocked()
 	c.mu.Unlock()
 }
 
@@ -74,6 +75,7 @@ func (c *Coordinator) startForks(a *activation, reason types.ReplyFinishedReason
 	}
 	ps.forking = true
 	if job.peer {
+		ps.peerForking = true
 		// A job that ended after this activation's stream may have resolved
 		// the mark it set: the summary this job writes is on its way.
 		c.markPeerPendingLocked(ps)
@@ -86,23 +88,41 @@ func (c *Coordinator) startForks(a *activation, reason types.ReplyFinishedReason
 	return job
 }
 
+// peerWriterLocked reports whether ps writes peer summaries for the edge.
+// Caller holds c.mu.
+func (c *Coordinator) peerWriterLocked(ps *partState) bool {
+	if ps.forker == nil || c.cfg.Summaries.Disabled || c.closed {
+		return false
+	}
+	t := c.parts[c.edge]
+	return t != nil && t != ps
+}
+
+// markUndecidedLocked counts a, once, among its participant's activations
+// that may still start a peer fork: from its Transfer or the end of its
+// stream until afterEnd decides. Caller holds c.mu.
+func (c *Coordinator) markUndecidedLocked(a *activation) {
+	if !a.peerUndecided && c.peerWriterLocked(a.part) {
+		a.peerUndecided = true
+		a.part.peerUndecided++
+	}
+}
+
 // markPeerPendingLocked opens ps's pending peer summary when ps writes peer
 // summaries for the edge: its activation's stream just ended, and afterEnd
 // may start a peer fork. Caller holds c.mu.
 func (c *Coordinator) markPeerPendingLocked(ps *partState) {
-	if ps.forker == nil || c.cfg.Summaries.Disabled || c.closed || ps.peerPending != nil {
-		return
+	if ps.peerPending == nil && c.peerWriterLocked(ps) {
+		ps.peerPending = make(chan struct{})
 	}
-	if t := c.parts[c.edge]; t == nil || t == ps {
-		return
-	}
-	ps.peerPending = make(chan struct{})
 }
 
-// resolvePeerPendingLocked closes ps's pending peer summary, if any: no
-// summary for the edge is on its way from ps. Caller holds c.mu.
-func (ps *partState) resolvePeerPendingLocked() {
-	if ps.peerPending != nil {
+// resolvePeerPendingIfSettledLocked closes ps's pending peer summary, if any,
+// once no summary for the edge can still come from ps: no peer fork is
+// unsettled and no activation is still deciding on its fork. Caller holds
+// c.mu.
+func (ps *partState) resolvePeerPendingIfSettledLocked() {
+	if ps.peerPending != nil && !ps.peerForking && ps.peerUndecided == 0 {
 		close(ps.peerPending)
 		ps.peerPending = nil
 	}
@@ -386,7 +406,8 @@ func (c *Coordinator) runForkJob(job *forkJob) {
 			// The summary is in the log (or failed): a handover waiting for
 			// it goes on while the own notes are still being written.
 			c.mu.Lock()
-			ps.resolvePeerPendingLocked()
+			ps.peerForking = false
+			ps.resolvePeerPendingIfSettledLocked()
 			c.mu.Unlock()
 		})
 	}
@@ -399,10 +420,10 @@ func (c *Coordinator) runForkJob(job *forkJob) {
 		c.finishOwn(job, &ownOut, ownErr)
 	}
 	c.mu.Lock()
+	// The pending peer summary is not resolved here: its peer fork settled
+	// above, and an activation that ended meanwhile resolves it in afterEnd
+	// once it has decided, which may be after this.
 	ps.forking = false
-	// An activation that ended while this job ran started no job of its own,
-	// so nothing more is on its way.
-	ps.resolvePeerPendingLocked()
 	c.doneWorkLocked()
 	c.mu.Unlock()
 }

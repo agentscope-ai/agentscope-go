@@ -3,6 +3,7 @@ package thread
 import (
 	"context"
 	"errors"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -203,6 +204,176 @@ func TestCoordinatorHandoverDoesNotWaitForOwnNotes(t *testing.T) {
 	if len(cloud.offeredOwn()) != 1 {
 		t.Fatalf("the own notes must still be offered: %v", cloud.offeredOwn())
 	}
+}
+
+// TestCoordinatorHandoverDoesNotWaitForARunningOwnJob: a cloud reply that ends
+// while the cloud's earlier job still writes only its own notes starts no job
+// of its own, and no peer summary is on its way, so the edge handover after it
+// does not wait for that job.
+func TestCoordinatorHandoverDoesNotWaitForARunningOwnJob(t *testing.T) {
+	env, edge, cloud := forkEnv(t, nil, func(cfg *Config) {
+		cfg.Summaries.PeerEvery = 1 << 30
+		cfg.Summaries.PeerRatio = -1
+		cfg.Summaries.OwnInit = 100
+		cfg.Summaries.OwnEvery = 1 << 20
+		cfg.Import.SummaryWait = time.Hour
+	})
+	cloud.setState(func(s *ParticipantState) { s.CompactAt = 1 << 30 })
+	ownGate := make(chan struct{})
+	cloud.fmu.Lock()
+	cloud.ownGate, cloud.forked = ownGate, make(chan ForkSpec, 4)
+	cloud.fmu.Unlock()
+	edge.started = make(chan Activation, 4)
+	cloud.push(grow(500, "first"), grow(600, "second"))
+	edge.push(replyWith("lamp on"))
+	env.say("one")
+	select {
+	case spec := <-cloud.forked:
+		if spec.Prompt != DefaultOwnPrompt {
+			t.Fatalf("the first reply must fork only the cloud's own notes, got %q", spec.Prompt)
+		}
+	case <-time.After(testTimeout):
+		t.Fatal("the first reply did not fork the cloud's own notes")
+	}
+	env.say("two") // ends while the own-notes job still runs
+	env.submit(Query{Text: "lamp", Explicit: "edge"})
+	select {
+	case <-edge.started:
+	case <-time.After(testTimeout):
+		t.Fatal("the edge handover waited for a job that writes only the cloud's own notes")
+	}
+	close(ownGate)
+	env.idle()
+	if s := findEntries(env.log(), KindSummary, ""); len(s) != 0 {
+		t.Fatalf("no peer summary was due, got %d", len(s))
+	}
+}
+
+// TestCoordinatorHandoverWaitsWhileAReplyDecides: the cloud's earlier job ends
+// after a later cloud reply's stream ended but before that reply decided on
+// its fork. The reply then starts a peer fork, so an edge handover in between
+// waits for that decision and resets to the summary the fork writes.
+func TestCoordinatorHandoverWaitsWhileAReplyDecides(t *testing.T) {
+	env, edge, cloud := forkEnv(t, nil, func(cfg *Config) {
+		cfg.Summaries.PeerEvery = 550
+		cfg.Summaries.PeerRatio = -1
+		cfg.Summaries.OwnInit = 100
+		cfg.Summaries.OwnEvery = 1 << 20
+		cfg.Import.SummaryWait = time.Hour
+	})
+	cloud.setState(func(s *ParticipantState) { s.CompactAt = 1 << 30 })
+	ownGate := make(chan struct{})
+	cloud.fmu.Lock()
+	cloud.ownGate, cloud.forked = ownGate, make(chan ForkSpec, 4)
+	cloud.fmu.Unlock()
+	edge.started = make(chan Activation, 4)
+	cloud.push(grow(500, "first"), grow(600, "second")) // replies #3 and #5
+	edge.push(replyWith("lamp on"))
+	env.say("one")
+	select {
+	case spec := <-cloud.forked:
+		if spec.Prompt != DefaultOwnPrompt {
+			t.Fatalf("the first reply must fork only the cloud's own notes, got %q", spec.Prompt)
+		}
+	case <-time.After(testTimeout):
+		t.Fatal("the first reply did not fork the cloud's own notes")
+	}
+	// In the second reply's fork planning, end the first job and hand over to
+	// the edge before the reply decides.
+	var fired, early atomic.Bool
+	cloud.mu.Lock()
+	cloud.stateHook = func() {
+		if !strings.Contains(string(debug.Stack()), ".planForks(") || !fired.CompareAndSwap(false, true) {
+			return
+		}
+		close(ownGate)
+		deadline := time.Now().Add(testTimeout)
+		for {
+			env.c.mu.Lock()
+			busy := env.c.parts["cloud"].forking
+			env.c.mu.Unlock()
+			if !busy || time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+		go func() {
+			if _, err := env.c.Submit(context.Background(), Query{Text: "lamp", Explicit: "edge"}); err != nil {
+				t.Errorf("Submit: %v", err)
+			}
+		}()
+		select {
+		case a := <-edge.started:
+			early.Store(true)
+			t.Errorf("the edge started before the cloud's reply decided on its fork: %+v", a.Sync)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	cloud.mu.Unlock()
+	env.say("two")
+	if !early.Load() {
+		a := waitStarted(t, edge)
+		if a.Sync == nil || !a.Sync.Reset || a.Sync.PeerSummary == nil || a.Sync.PeerSummary.Coverage.Through != 5 {
+			t.Fatalf("the edge must reset to the summary through the second reply #5: %+v", a.Sync)
+		}
+	}
+	env.idle()
+	if !fired.Load() {
+		t.Fatal("the second reply planned no fork")
+	}
+}
+
+// TestCoordinatorTransferWaitsPastAnEarlierPeerFork: the cloud's earlier peer
+// fork settles after the cloud transferred to the edge but before its reply
+// ended. The transfer still calls for a newer summary, so the edge waits for
+// it instead of resetting to the earlier one.
+func TestCoordinatorTransferWaitsPastAnEarlierPeerFork(t *testing.T) {
+	env, edge, cloud := forkEnv(t, nil, func(cfg *Config) {
+		cfg.Summaries.PeerEvery = 100
+		cfg.Summaries.PeerRatio = -1
+		cfg.Summaries.OwnInit = 1 << 30
+		cfg.Import.SummaryWait = time.Hour
+	})
+	gate := make(chan struct{})
+	cloud.fmu.Lock()
+	cloud.gate, cloud.forked = gate, make(chan ForkSpec, 4)
+	cloud.fmu.Unlock()
+	edge.started = make(chan Activation, 4)
+	var oc atomic.Uint64
+	cloud.push(grow(500, "first"), func(r *fakeRun) *ActivationEnd {
+		seq, err := r.transfer("edge")
+		if err != nil {
+			t.Errorf("transfer: %v", err)
+		}
+		oc.Store(seq)
+		close(gate) // the first reply's peer fork settles now
+		deadline := time.Now().Add(testTimeout)
+		for len(findEntries(env.log(), KindSummary, "")) == 0 && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		select {
+		case a := <-edge.started:
+			t.Errorf("the edge started from the earlier summary before the transfer's reply ended: %+v", a.Sync)
+		case <-time.After(100 * time.Millisecond):
+		}
+		return &ActivationEnd{Reason: types.ReplyHandedOff}
+	})
+	edge.push(replyWith("hello"))
+	env.say("one") // #1, owner_change #2, reply #3
+	select {
+	case spec := <-cloud.forked:
+		if spec.Prompt == DefaultOwnPrompt {
+			t.Fatal("the first reply must fork a peer summary")
+		}
+	case <-time.After(testTimeout):
+		t.Fatal("the first reply did not fork a peer summary")
+	}
+	env.say("two")
+	a := waitStarted(t, edge)
+	if a.Sync == nil || !a.Sync.Reset || a.Sync.PeerSummary == nil || a.Sync.PeerSummary.Coverage.Through != oc.Load() {
+		t.Fatalf("the edge must reset to the summary covering the transfer #%d: %+v", oc.Load(), a.Sync)
+	}
+	env.idle()
 }
 
 // bigEdgeEraStore is a log where the edge wrote eight long replies after the

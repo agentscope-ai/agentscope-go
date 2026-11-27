@@ -83,6 +83,9 @@ type activation struct {
 	held         []Entry
 	flushed      bool
 	streamDone   bool // its stream ended; nothing more will be forwarded
+	// peerUndecided: its stream end counted it in part.peerUndecided, and
+	// afterEnd has not yet decided on its fork.
+	peerUndecided bool
 }
 
 // newActivationLocked creates an activation at the current epoch.
@@ -268,6 +271,7 @@ func (c *Coordinator) execute(a *activation) (*ActivationEnd, bool) {
 	// on waits for it; it is marked first, before a Transfer's target can
 	// start.
 	a.streamDone = true
+	c.markUndecidedLocked(a)
 	c.markPeerPendingLocked(ps)
 	c.flushBacklogLocked(a, true)
 	c.mu.Unlock()

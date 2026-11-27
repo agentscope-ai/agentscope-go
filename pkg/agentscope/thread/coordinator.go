@@ -325,10 +325,16 @@ type partState struct {
 	restored bool
 
 	forking bool
+	// peerForking is set while the running fork job's peer fork has not
+	// settled; a job that writes only own notes never sets it.
+	peerForking bool
+	// peerUndecided counts the activations whose stream ended and whose
+	// afterEnd has not yet decided on a fork.
+	peerUndecided int
 	// peerPending, for a writer of peer summaries, is open while a summary
 	// for the edge may still come from it: from the end of an activation's
-	// stream until afterEnd starts no peer fork, or until the peer fork it
-	// started settles. An edge handover waits for it (awaitPeerSummary).
+	// stream while an activation is undecided or a peer fork is unsettled.
+	// An edge handover waits for it (awaitPeerSummary).
 	peerPending chan struct{}
 	growth      int
 	lastInput   int
