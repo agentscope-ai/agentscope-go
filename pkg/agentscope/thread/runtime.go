@@ -167,7 +167,8 @@ type Participant interface {
 	// When act.Sync is not applied, or its outcome is unknown, Activate
 	// returns an error and runs nothing; a channel means the Sync was
 	// applied, even when its End is an error. The Coordinator records a
-	// clear's reset only then.
+	// clear's reset only then, or once Sync applied a reset that did not fit
+	// one update.
 	Activate(ctx context.Context, act Activation) (<-chan ActivationEvent, error)
 	// SubmitUserConfirm answers a confirmation request the activation emitted.
 	SubmitUserConfirm(path string, result *event.UserConfirmResultEvent) error

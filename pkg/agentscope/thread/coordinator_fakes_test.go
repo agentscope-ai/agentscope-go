@@ -53,7 +53,8 @@ type fakePart struct {
 	script      fakeScript // used when scripts is empty
 	confirms    []string
 	started     chan Activation
-	buf         int // buffer of the activation channel
+	buf         int    // buffer of the activation channel
+	stateHook   func() // runs at the start of State, without the lock
 }
 
 func newFakePart(name string, zone Zone) *fakePart {
@@ -73,6 +74,12 @@ func (f *fakePart) Bind(h Host) error {
 }
 
 func (f *fakePart) State() ParticipantState {
+	f.mu.Lock()
+	hook := f.stateHook
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.state
@@ -390,7 +397,9 @@ type fakeForker struct {
 	offered     []string
 	offerErr    error
 	beforeOffer func()
+	beforeSnap  func() // runs in Snapshot, on the fork planning path
 	gate        chan struct{}
+	ownGate     chan struct{} // gates the own forks only
 	forked      chan ForkSpec
 }
 
@@ -404,6 +413,11 @@ func newFakeForker(name string) *fakeForker {
 
 func (f *fakeForker) Snapshot() (Snapshot, error) {
 	f.fmu.Lock()
+	if hook := f.beforeSnap; hook != nil {
+		f.fmu.Unlock()
+		hook()
+		f.fmu.Lock()
+	}
 	if len(f.snapErrs) > 0 {
 		err := f.snapErrs[0]
 		f.snapErrs = f.snapErrs[1:]
@@ -424,6 +438,9 @@ func (f *fakeForker) Fork(ctx context.Context, _ Snapshot, spec ForkSpec) (ForkO
 	out := f.peerOut
 	if spec.Prompt == DefaultOwnPrompt || spec.Prompt == DefaultOwnUpdatePrompt {
 		out = f.ownOut
+		if f.ownGate != nil {
+			g = f.ownGate
+		}
 	}
 	err := f.forkErr
 	f.fmu.Unlock()

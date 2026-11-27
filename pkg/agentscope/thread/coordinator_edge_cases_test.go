@@ -44,8 +44,8 @@ func edgeEraStore(t *testing.T) Store {
 	return s
 }
 
-// TestCoordinatorClearIsOneSync: a clear is one Sync with the activation,
-// however large: the reset, the summary, the index and every entry the
+// TestCoordinatorClearIsOneSync: a clear within the reset budget is one Sync
+// with the activation: the reset, the summary, the index and every entry the
 // summary does not cover (the edge's own excluded replies included, since
 // the reset drops them). It is not chunked or compacted on the way in, and
 // its cursor never moves back.
@@ -246,7 +246,8 @@ func readAll(t *testing.T, s Store) []Entry {
 
 // TestCoordinatorFailedClearIsRepeated: a clear whose activation fails is
 // not recorded, and the next takeover clears again with everything the
-// first one carried.
+// first one carried. The log has grown past the reset budget by then, so the
+// reset goes first and the rest follows in chunks.
 func TestCoordinatorFailedClearIsRepeated(t *testing.T) {
 	edge := smallEdge()
 	edge.state.Cursor = 10
@@ -271,10 +272,13 @@ func TestCoordinatorFailedClearIsRepeated(t *testing.T) {
 	env.submit(Query{Text: "edge again", Explicit: "edge"})
 	env.idle()
 	again := edge.appliedSyncs()
-	if len(again) != 1 || !again[0].Reset {
-		t.Fatalf("the next takeover must clear again in one Sync: %+v", again)
+	if len(again) < 2 || !again[0].Reset || slices.ContainsFunc(again[1:], func(s Sync) bool { return s.Reset }) {
+		t.Fatalf("the next takeover must clear again, the reset first and the rest in chunks: %+v", again)
 	}
-	joined := strings.Join(syncTexts(&again[0]), "\n")
+	if n := edge.compactCount(); n == 0 {
+		t.Fatal("a chunked reset compacts between its chunks")
+	}
+	joined := strings.Join(allImported(edge), "\n")
 	for n := 3; n <= 10; n++ {
 		if !strings.Contains(joined, "[#"+strconv.Itoa(n)+" reply from edge]") {
 			t.Fatalf("the edge's own reply #%d is missing from the repeated clear:\n%s", n, joined)
@@ -283,13 +287,19 @@ func TestCoordinatorFailedClearIsRepeated(t *testing.T) {
 	if n := len(edge.activations()); n != 1 {
 		t.Fatalf("the edge must answer after the second clear: %d activations", n)
 	}
+	env.c.mu.Lock()
+	from = env.c.parts["edge"].resetFrom
+	env.c.mu.Unlock()
+	if from != 14 {
+		t.Fatalf("the applied reset was not recorded: resetFrom = %d", from)
+	}
 }
 
 // TestCoordinatorFailedBackgroundClearKeepsTheContext: a clear inside a
 // background task that the edge cannot apply leaves its context whole. The
-// failed task's report, written in the edge's name, moves its activity past
-// the summary, so the next takeover imports incrementally: nothing the edge
-// held was dropped.
+// next handover resets the edge to the summary again, and the reset carries
+// what the edge wrote after it, the failed task's report included: nothing
+// in the log is dropped.
 func TestCoordinatorFailedBackgroundClearKeepsTheContext(t *testing.T) {
 	edge := smallEdge()
 	edge.state.Cursor = 10
@@ -307,13 +317,13 @@ func TestCoordinatorFailedBackgroundClearKeepsTheContext(t *testing.T) {
 	if n := len(edge.activations()); n != 0 || len(edge.appliedSyncs()) != 0 {
 		t.Fatalf("want the task's clear to fail unapplied: %d activations, syncs %+v", n, edge.appliedSyncs())
 	}
-	var failed bool
+	var report uint64
 	for _, e := range env.log() {
 		if e.Kind == KindReport && e.Origin.Participant == "edge" {
-			failed = true
+			report = e.Seq
 		}
 	}
-	if !failed {
+	if report == 0 {
 		t.Fatal("the failed task must be reported in the edge's name")
 	}
 
@@ -322,10 +332,13 @@ func TestCoordinatorFailedBackgroundClearKeepsTheContext(t *testing.T) {
 	edge.mu.Unlock()
 	env.submit(Query{Text: "edge again", Explicit: "edge"})
 	env.idle()
-	for _, s := range edge.appliedSyncs() {
-		if s.Reset {
-			t.Fatalf("the edge was reset after its activity passed the summary: %+v", s)
-		}
+	syncs := edge.appliedSyncs()
+	if len(syncs) == 0 || !syncs[0].Reset || syncs[0].PeerSummary == nil || syncs[0].PeerSummary.Seq != 14 {
+		t.Fatalf("the next handover must reset to summary #14: %+v", syncs)
+	}
+	joined := strings.Join(allImported(edge), "\n")
+	if !strings.Contains(joined, "[#"+strconv.FormatUint(report, 10)+" report from edge") {
+		t.Fatalf("the reset dropped the edge's own report #%d:\n%s", report, joined)
 	}
 	if n := len(edge.activations()); n != 1 {
 		t.Fatalf("the edge must answer: %d activations", n)
@@ -392,10 +405,15 @@ func TestCoordinatorUnsavedClearIsRepeated(t *testing.T) {
 	env.submit(Query{Text: "edge again", Explicit: "edge"})
 	env.idle()
 	syncs := edge.appliedSyncs()
-	if len(syncs) != 2 || !syncs[1].Reset || syncs[1].Cursor < syncs[0].Cursor {
+	if len(syncs) < 2 || !syncs[1].Reset || syncs[1].Cursor < syncs[0].Cursor {
 		t.Fatalf("want a second clear applied over the first: %+v", syncs)
 	}
-	joined := strings.Join(syncTexts(&syncs[1]), "\n")
+	// The log grew past the reset budget, so the rest follows in chunks.
+	var texts []string
+	for i := range syncs[1:] {
+		texts = append(texts, syncTexts(&syncs[1+i])...)
+	}
+	joined := strings.Join(texts, "\n")
 	for n := 3; n <= 10; n++ {
 		if !strings.Contains(joined, "[#"+strconv.Itoa(n)+" reply from edge]") {
 			t.Fatalf("the repeated clear lost the edge's reply #%d:\n%s", n, joined)

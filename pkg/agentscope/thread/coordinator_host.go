@@ -105,7 +105,8 @@ func (h *coordHost) checkTransferLocked(epoch uint64) (*activation, error) {
 // Transfer hands the foreground to another participant. The caller's
 // visible text is sealed as its reply in the same append as the owner
 // change, under the owner and epoch guard. The target's foreground
-// activation is queued; summary forks are not waited for.
+// activation is queued; an edge target's import waits for the peer summary
+// the handoff calls for (ImportPolicy.SummaryWait).
 func (h *coordHost) Transfer(ctx context.Context, req TransferRequest) (uint64, error) { //nolint:gocritic // the Host interface takes requests by value
 	c := h.c
 	ctx = orBackground(ctx)
@@ -179,6 +180,12 @@ func (h *coordHost) Transfer(ctx context.Context, req TransferRequest) (uint64, 
 		c.emitEntriesLocked(stored)
 	}
 	h.ps.lastSealed = oc.Seq
+	// The handoff calls for a peer summary once this reply ends, and the
+	// target may start before that: a handover to the edge waits for it.
+	// The caller counts as undecided from here, so a fork job that settles
+	// before the reply ends cannot resolve the mark.
+	c.markUndecidedLocked(a)
+	c.markPeerPendingLocked(h.ps)
 	c.startForegroundLocked(na)
 	return oc.Seq, nil
 }

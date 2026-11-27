@@ -212,7 +212,8 @@ Coordinator appends the caller's visible text and the owner change in one
 guarded write and starts the target with the brief; the caller then ends
 its reply after the tool step (a `UnifiedAgent` does so with
 `agent.MarkHandedOff`, ending it with `types.ReplyHandedOff`). The
-Coordinator never waits for a summary fork.
+Transfer call never waits for a summary fork; an edge target's import waits
+for the summary the transfer calls for (see the clear rule).
 Unlike a sub-agent call, nothing returns to the caller: the other side
 continues with the user.
 
@@ -360,25 +361,37 @@ it writes.
   next activation still holds it, and notes that finish after the next
   activation built its master are offered to that master, which matches them
   by message ID.
-* **Clear rule (edge handover).** When the edge is about to run after another
-  participant held the foreground since the edge last acted, and the newest
-  peer summary covers entries past the edge's last activity (and is not the
-  one its last clear applied), the edge's context is
-  replaced in one update that goes with the activation: the peer summary and
-  the entries the summary does not cover, including the edge's own when the
-  summary excludes them. A clear whose activation fails is not recorded, and
-  the next handover clears again. An edge that kept the foreground (for
-  example while the cloud ran a background task for it) is not cleared; it
-  imports incrementally.
+* **Clear rule (edge handover).** Whenever the edge is about to run after
+  another participant held the foreground since the edge last acted, and a
+  peer summary written for it exists, the edge's context is reset to the
+  newest one: the peer summary and every entry the summary does not cover,
+  the edge's own included (the reset drops them from its context). A summary
+  still being written for the edge (the one a Transfer to the edge calls for,
+  or one a cloud reply that just ended started) is waited for first, at most
+  `ImportPolicy.SummaryWait` (default 2 minutes; a failover does not wait),
+  so the handover resets to it; after the wait it resets to the newest one
+  written. A summary covering entries past the handover's trigger (an input
+  written before the cloud's last reply) is not used; the handover resets to
+  the newest one before it. Background tasks and wakes of the edge after a
+  takeover reset and wait the same way. The summary rule keeps that load
+  under `SummaryPolicy.PeerRatio` of the edge's window, and within it the
+  reset is one update that goes with the activation; a clear whose
+  activation fails is not recorded, and the next handover clears again. An
+  edge that kept the foreground (for example while the cloud ran a
+  background task for it) is not cleared; it imports incrementally.
 * **Incremental import.** Otherwise the participant imports the entries past
   its cursor. A cloud participant imports them in full; an edge import stays
   within a share of its window (`ImportPolicy.EdgeShare`).
 * **Chunked import (edge fallback).** When an edge import does not fit (no
-  newer peer summary exists, for example because the cloud is unavailable),
-  the Coordinator imports in chunks and compacts between them with
-  `Participant.Compact` (a `UnifiedAgent` uses `CompactStrict`, which leaves
-  the state unchanged on any failure). After `ImportPolicy.MaxRounds` it moves
-  on and tells the participant which entries to read with `thread_read`.
+  peer summary exists yet, or a handover's reset outgrows the
+  `PeerRatio` share because no refreshed summary arrived, for example
+  because the cloud is unavailable), the Coordinator imports in chunks and
+  compacts between them with `Participant.Compact` (a `UnifiedAgent` uses
+  `CompactStrict`, which leaves the state unchanged on any failure). A reset
+  goes first, with what fits, and is recorded once that update is applied;
+  chunks that re-import entries behind the edge's cursor keep the cursor.
+  After `ImportPolicy.MaxRounds` it moves on and tells the participant which
+  entries to read with `thread_read`.
 
 * **Local summary budget.** The edge's own summary comes from its agent's
   synchronous compression in the reply loop; nothing forks on the edge.

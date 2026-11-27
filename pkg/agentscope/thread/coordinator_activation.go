@@ -83,6 +83,9 @@ type activation struct {
 	held         []Entry
 	flushed      bool
 	streamDone   bool // its stream ended; nothing more will be forwarded
+	// peerUndecided: its stream end counted it in part.peerUndecided, and
+	// afterEnd has not yet decided on its fork.
+	peerUndecided bool
 }
 
 // newActivationLocked creates an activation at the current epoch.
@@ -263,8 +266,13 @@ func (c *Coordinator) execute(a *activation) (*ActivationEnd, bool) {
 	}
 	c.mu.Lock()
 	// The stream is over: whatever of a backlog was not forwarded never will
-	// be, so the Transfer's entries and the new owner may go on.
+	// be, so the Transfer's entries and the new owner may go on. A summary
+	// for the edge may follow this activation, so an edge handover from here
+	// on waits for it; it is marked first, before a Transfer's target can
+	// start.
 	a.streamDone = true
+	c.markUndecidedLocked(a)
+	c.markPeerPendingLocked(ps)
 	c.flushBacklogLocked(a, true)
 	c.mu.Unlock()
 	if end == nil {
@@ -326,8 +334,7 @@ func (c *Coordinator) flushBacklogLocked(a *activation, force bool) {
 }
 
 // commitClearLocked records a clear whose reset the participant applied:
-// the summary it now holds and the summary's seq (so the same summary does
-// not clear it again).
+// the coverage of the summary it now holds and the summary's seq.
 func (c *Coordinator) commitClearLocked(ps *partState, cc *clearCommit) {
 	ps.heldCoverage = cloneCoverage(cc.coverage)
 	ps.resetFrom = cc.seq

@@ -52,6 +52,7 @@ const (
 	defaultMaxRewrites      = 1
 	defaultEdgeShare        = 0.5
 	defaultMaxRounds        = 8
+	defaultSummaryWait      = 2 * time.Minute
 	defaultStaleAfter       = 40
 	defaultMaxWakes         = 4
 	defaultMaxAssignDepth   = 2
@@ -131,9 +132,16 @@ type ImportPolicy struct {
 	// it lacks in full, and what outgrows its window is compacted there.
 	EdgeShare float64
 	// MaxRounds bounds the chunk and compact rounds of an edge import that
-	// does not fit (the local fallback when no new summary covers the
-	// entries); default 8.
+	// does not fit (the local fallback: no peer summary exists yet, or a
+	// handover's reset does not fit because no refreshed summary arrived);
+	// default 8.
 	MaxRounds int
+	// SummaryWait bounds how long an edge handover waits for a peer summary
+	// that is still being written for it, so that the handover resets to the
+	// newest summary instead of an older one; default 2 minutes, a negative
+	// value does not wait. After the wait the handover goes on with the
+	// newest summary written. A failover does not wait.
+	SummaryWait time.Duration
 	// StaleAfter marks a peer summary stale for routing when more than this
 	// many readable entries follow it; default 40.
 	StaleAfter int
@@ -301,7 +309,9 @@ type partState struct {
 	// task report: the newest of its own outputs that a summary fork covers.
 	lastSealed   uint64
 	heldCoverage *Coverage // coverage of the peer summary it holds
-	resetFrom    uint64    // seq of the summary its last clear applied
+	// resetFrom is the seq of the summary its last applied clear installed.
+	// No decision reads it; it records that a clear was committed.
+	resetFrom uint64
 	// notify holds, by seq, the Notify reports addressed to it that no
 	// foreground activation of it has received yet. They wake it while it is
 	// the idle owner.
@@ -314,9 +324,20 @@ type partState struct {
 	// lose them when that first activation never applied its Sync.
 	restored bool
 
-	forking   bool
-	growth    int
-	lastInput int
+	forking bool
+	// peerForking is set while the running fork job's peer fork has not
+	// settled; a job that writes only own notes never sets it.
+	peerForking bool
+	// peerUndecided counts the activations whose stream ended and whose
+	// afterEnd has not yet decided on a fork.
+	peerUndecided int
+	// peerPending, for a writer of peer summaries, is open while a summary
+	// for the edge may still come from it: from the end of an activation's
+	// stream while an activation is undecided or a peer fork is unsettled.
+	// An edge handover waits for it (awaitPeerSummary).
+	peerPending chan struct{}
+	growth      int
+	lastInput   int
 	// ownNotes are the participant's newest own notes; ownAt is its input
 	// when the last own fork started.
 	ownNotes string
@@ -494,6 +515,9 @@ func (cfg *Config) normalize() error {
 		return errors.New("thread: the edge import share and the peer summary ratio must be at most 1")
 	}
 	im.MaxRounds = intOrDefault(im.MaxRounds, defaultMaxRounds)
+	if im.SummaryWait == 0 {
+		im.SummaryWait = defaultSummaryWait
+	}
 	im.StaleAfter = intOrDefault(im.StaleAfter, defaultStaleAfter)
 	l := &cfg.Limits
 	l.MaxWakesPerQuery = intOrDefault(l.MaxWakesPerQuery, defaultMaxWakes)
